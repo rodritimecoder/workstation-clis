@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-navidc-ocr - local OCR for PDFs and images via a llama-server vision model.
+ocr-cli - local OCR for PDFs, slides, and images via local vision models (LightOnOCR-3-1B).
 
 Talks to any OpenAI-compatible /v1/chat/completions endpoint. The default
-endpoint is a llama-server running NaviDC-OCR-GGUF on port 8082.
+endpoint is a llama-server running LightOnOCR-3-1B on port 8085.
 
 The server is NOT started by this script: `--doctor` and `--server-cmd` report
 whether it is reachable and print the exact llama-server invocation to run.
@@ -329,7 +329,7 @@ def cmd_server_cmd(ns) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="ocr.py",
-        description="OCR PDFs and images with a local llama-server vision model (NaviDC-OCR).",
+        description="OCR PDFs, slides, and images with local vision models (LightOnOCR-3-1B / SmolDocling / CrispEmbed).",
     )
     p.add_argument("file", nargs="?", help="PDF or image to OCR")
     p.add_argument("-p", "--prompt", default=DEFAULT_PROMPT, help="extraction prompt")
@@ -337,15 +337,14 @@ def main() -> int:
     p.add_argument("--dpi", type=int, default=200, help="rasterisation DPI (default: 200)")
     p.add_argument("--workers", type=int, default=2, help="parallel page requests (default: 2)")
     p.add_argument("--max-tokens", type=int, default=2048)
-    p.add_argument("--model", default=os.environ.get("NAVIDC_OCR_MODEL"),
+    p.add_argument("--model", default=os.environ.get("OCR_MODEL") or os.environ.get("NAVIDC_OCR_MODEL"),
                    help="model name to send (llama-server usually ignores this)")
     p.add_argument("--endpoint", default=ENDPOINT, help=f"default: {ENDPOINT}")
     p.add_argument("-o", "--output", help="write here instead of stdout")
     p.add_argument("--tree", action="store_true",
                    help="post-process the transcription into a Markdown nested "
                         "list (for directory-tree / ASCII-art listings). "
-                        "NaviDC transcribes but does not reformat, so this is "
-                        "done client-side; see scripts/tree_to_md.py.")
+                        "Done client-side; see scripts/tree_to_md.py.")
     p.add_argument("--tree-prompt", default=DEFAULT_PROMPT,
                    help="prompt to use with --tree (default: plain extraction)")
     p.add_argument("--doctor", action="store_true", help="check the server and model files")

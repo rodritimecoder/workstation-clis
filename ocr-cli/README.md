@@ -39,7 +39,7 @@ python3 scripts/ocr.py slide_frame.png -o slide_frame.md
 
 # Explicitly choose an engine
 python3 scripts/ocr.py document.pdf --engine lighton
-python3 scripts/ocr.py dense_paper.pdf --engine navidc --pages 1-3
+python3 scripts/ocr.py dense_paper.pdf --engine lighton --pages 1-3
 python3 scripts/ocr.py storefront.png --engine crispembed
 
 # Check server health and local models

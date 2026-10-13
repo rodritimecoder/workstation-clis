@@ -15,7 +15,7 @@
 - Threshold: Drop candidate frames where probability of containing readable text/code is < 0.5.
 
 ## OCR Defaults
-- OCR Endpoint: `http://127.0.0.1:8082` (`navidc-ocr`).
+- OCR Endpoint: `http://127.0.0.1:8085` (`ocr-cli` / `LightOnOCR-3-1B`).
 - Output format: Markdown formatted text/code blocks per frame timestamp.
 
 ## Synthesis Defaults

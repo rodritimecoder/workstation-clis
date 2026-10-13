@@ -17,10 +17,9 @@ This suite is engineered for a local **dual AMD Radeon RX 9060 XT** setup runnin
 |---|---|---|
 | `:8080` | **Qwen3.6-35B-A3B Uncensored Genesis** | Primary Workstation LLM (22 GB ROCMFP4, dual-GPU `-ts 45/55`) |
 | `:8081` | **audio.cpp (Nemotron 3.5 + Kokoro)** | Streaming speech-to-text (40 languages) & fast text-to-speech |
-| `:8082` | **NaviDC-OCR (Q8_0 / Q5_K_M)** | Coordinate-free academic PDF and scanned book transcription |
+| `:8085` | **LightOnOCR-3-1B** | **#1 Flagship Video & Slide OCR** (~16k t/s prefill, ~330 t/s gen) |
 | `:8083` | **Imajev-4B ($T=1.305$)** | Calibrated multimodal decision gating (vision + text) |
 | `:8084` | **CrispEmbed Suite** | Ultra-compact scene-text detection & line recognition (DBNet + PARSeq) |
-| `:8085` | **LightOnOCR-3-1B** | **#1 Flagship Video & Slide OCR** (~16k t/s prefill, ~330 t/s gen) |
 | `:8086` | **Jina-Reranker-v2 Base** | Cross-encoder semantic search & RAG reranking |
 | `:8087` | **EmbeddingGemma-2** | Text + Vision multimodal embeddings |
 | `:8088` | **DeskForge-Qwen3.5-4B** | Visual GUI grounding & computer-use coordinate extraction |
@@ -32,7 +31,7 @@ This suite is engineered for a local **dual AMD Radeon RX 9060 XT** setup runnin
 
 | Tool Directory | Identifier | Core Capabilities |
 | :--- | :--- | :--- |
-| [`ocr-cli`](ocr-cli/) | `ocr-cli` | Multi-model local OCR engine uniting LightOnOCR-3-1B, SmolDocling, NaviDC-OCR, and CrispEmbed. |
+| [`ocr-cli`](ocr-cli/) | `ocr-cli` | Multi-model local OCR engine uniting LightOnOCR-3-1B (#1 flagship), SmolDocling, and CrispEmbed. |
 | [`hybrid-browser`](hybrid-browser/) | `hybrid-browser` | Tiered browser automation agent using Podman Chromium, CDP, and DeskForge-Qwen3.5-4B visual grounding. |
 | [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, Imajev visual gating, and LightOnOCR code extraction. |
 | [`audiocpp-asr`](audiocpp-asr/) | `audiocpp-asr` | Local speech-to-text with Nemotron-3.5 streaming RNNT, hotword prompting, and live mic dictation. |
@@ -53,7 +52,7 @@ python3 ocr-cli/scripts/ocr.py slide_frame.png -o slide_frame.md
 
 # Target specific backend
 python3 ocr-cli/scripts/ocr.py document.pdf --engine lighton
-python3 ocr-cli/scripts/ocr.py dense_paper.pdf --engine navidc --pages 1-3
+python3 ocr-cli/scripts/ocr.py dense_paper.pdf --engine lighton --pages 1-3
 python3 ocr-cli/scripts/ocr.py storefront.png --engine crispembed
 ```
 

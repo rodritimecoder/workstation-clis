@@ -9,10 +9,10 @@ Collection of launcher shell scripts for workstation inference servers, benchmar
 | Script | Server / Backend | Port | Description |
 |---|---|---|---|
 | **`luffy_nothink.sh`** / **`luffy_thinking.sh`** | `llama-server` (Vulkan) | `8080` | **Primary Workstation LLM**: Qwen3.6-35B-A3B Uncensored Genesis Final (Q4_0_ROCMFP4, dual-GPU `-ts 45/55`) |
-| **`navidc-ocr.sh`** | `llama-server` (Vulkan) | `8082` | Launches NaviDC-OCR with patched `llama-server` for document OCR |
+| **`lighton-ocr.sh`** | `llama-server` (Vulkan) | `8085` | **#1 Flagship OCR (Video, Slide & Document)**: LightOnOCR-3-1B (~16k t/s prefill, ~330 t/s gen) |
 | **`imajev-4b.sh`** | `llama-server` (Vulkan) | `8083` | Launches Imajev-4B with vision mmproj for calibrated multimodal decisions |
 | **`crispembed-ocr.sh`** | `crispembed-server` (Vulkan/CPU) | `8084` | Launches CrispEmbed Scene Text OCR (DBNet + PARSeq / TrOCR) |
-| **`lighton-ocr.sh`** | `llama-server` (Vulkan) | `8085` | **#1 Flagship Video & Slide OCR**: LightOnOCR-3-1B (~16k t/s prefill, ~330 t/s gen) |
+| **`navidc-ocr.sh`** | `llama-server` (Vulkan) | `8082` | Legacy document OCR with patched `llama-server` |
 | **`jina-reranker.sh`** | `llama-server` (Vulkan) | `8086` | Launches Jina-Reranker-v2 Base Multilingual for RAG cross-encoder reranking |
 | **`embeddinggemma-2.sh`** | `llama-server` (Unsloth Vulkan) | `8087` | Launches EmbeddingGemma-2 (text + vision mmproj) for multimodal embeddings |
 | **`deskforge-qwen.sh`** | `llama-server` (Vulkan) | `8088` | Launches DeskForge-Qwen3.5-4B for computer-use GUI grounding |
