@@ -1,0 +1,712 @@
+#!/usr/bin/env python3
+"""
+videomine - ICM Pipeline Orchestrator for Video Mining (Audio ASR + Visual OCR).
+
+Interpretable Context Methodology (ICM) compliant:
+- Every stage folder has a CONTEXT.md contract.
+- Every stage output folder is an edit surface and human checkpoint.
+- State is derived directly from the filesystem (PENDING, COMPLETE, STALE).
+
+Stages:
+  01_acquire       - Ingests video (URL or local), extracts audio & metadata
+  02_audio_asr     - Speech-to-text with timestamps via audiocpp-asr (Nemotron 3.5)
+  03_visual_sample - Smart frame sampling with ffmpeg & perceptual deduplication
+  04_visual_gate   - Gating frames with readable text (Imajev-4B / visual heuristics)
+  05_visual_ocr    - Visual OCR via LightOnOCR-3-1B (Qwen3-VL on llama.cpp Vulkan)
+  06_synthesize    - Merges transcript & OCR into chronological mined_video.md
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import datetime
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+TEMPLATES_DIR = SKILL_DIR / "_templates" / "workspace"
+
+STAGES = [
+    "01_acquire",
+    "02_audio_asr",
+    "03_visual_sample",
+    "04_visual_gate",
+    "05_visual_ocr",
+    "06_synthesize",
+]
+
+# Service Endpoints
+AUDIOCPP_SCRIPT = Path.home() / ".gemini" / "config" / "skills" / "audiocpp-asr" / "scripts" / "asr.py"
+IMAJEV_URL = os.environ.get("IMAJEV_URL", "http://127.0.0.1:8083/v1/chat/completions")
+
+LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
+LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf"))
+LLAMA_SERVER_BIN = Path(os.environ.get("LLAMA_SERVER_BIN", "/run/media/rodri/AI/llama.cpp/build/bin/llama-server"))
+LLAMA_MTMD_CLI = Path(os.environ.get("LLAMA_MTMD_CLI", "/run/media/rodri/AI/llama.cpp/build/bin/llama-mtmd-cli"))
+LIGHTON_PORT = int(os.environ.get("LIGHTON_PORT", "8085"))
+LIGHTON_URL = os.environ.get("LIGHTON_URL", f"http://127.0.0.1:{LIGHTON_PORT}/v1/chat/completions")
+
+
+
+def format_timestamp(seconds: float) -> str:
+    """Format seconds into HH:MM:SS or MM:SS."""
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def get_latest_mtime(folder: Path) -> float:
+    """Get the latest modification time of files in a directory."""
+    if not folder.exists():
+        return 0.0
+    latest = 0.0
+    for p in folder.rglob("*"):
+        if p.is_file() and p.name != ".gitkeep":
+            mtime = p.stat().st_mtime
+            if mtime > latest:
+                latest = mtime
+    return latest
+
+
+def stage_status(workspace: Path, stage_idx: int) -> str:
+    """Compute ICM status: PENDING, COMPLETE, or STALE."""
+    stage_name = STAGES[stage_idx]
+    out_dir = workspace / "stages" / stage_name / "output"
+    files = [f for f in out_dir.glob("*") if f.is_file() and f.name != ".gitkeep"]
+    dirs = [d for d in out_dir.glob("*") if d.is_dir()]
+    
+    if not files and not dirs:
+        return "PENDING"
+    
+    current_mtime = get_latest_mtime(out_dir)
+    if current_mtime == 0.0:
+        return "PENDING"
+        
+    if stage_idx > 0:
+        prev_stage = STAGES[stage_idx - 1]
+        prev_out = workspace / "stages" / prev_stage / "output"
+        prev_mtime = get_latest_mtime(prev_out)
+        if prev_mtime > current_mtime:
+            return "STALE"
+            
+    return "COMPLETE"
+
+
+def print_status(workspace: Path) -> None:
+    """Print the ICM pipeline status diagram."""
+    print(f"\nPipeline Status: {workspace.name}")
+    print("=" * 60)
+    statuses = [stage_status(workspace, i) for i in range(len(STAGES))]
+    
+    header = "  " + " -> ".join(f"[{s}]" for s in STAGES)
+    # Align labels
+    cols = []
+    for s, st in zip(STAGES, statuses):
+        bracket_len = len(s) + 2
+        cols.append(st.center(bracket_len))
+    status_line = "  " + "    ".join(cols)
+    
+    print(header)
+    print(status_line)
+    print("-" * 60)
+    for s, st in zip(STAGES, statuses):
+        print(f"  {s:18} : {st}")
+    print()
+
+
+# ── Stage Implementations ───────────────────────────────────────────────────
+
+def run_stage_01_acquire(workspace: Path, video_source: str) -> None:
+    stage_dir = workspace / "stages" / "01_acquire"
+    out_dir = stage_dir / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"[01_acquire] Ingesting video source: {video_source}")
+    target_mp4 = out_dir / "source_video.mp4"
+    audio_wav = out_dir / "audio.wav"
+    meta_json = out_dir / "video_meta.json"
+    
+    if video_source.startswith("http://") or video_source.startswith("https://"):
+        print("[01_acquire] Downloading with yt-dlp...")
+        # Download video stream
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-o", str(target_mp4),
+            video_source
+        ]
+        subprocess.run(cmd, check=True)
+
+        # Attempt to grab subtitles if available, but don't fail if rate-limited
+        try:
+            cmd_sub = [
+                "yt-dlp", "--no-playlist", "--skip-download",
+                "--write-auto-sub", "--write-sub", "--sub-lang", "en", "--sub-format", "vtt",
+                "-o", str(out_dir / "source_video.%(ext)s"),
+                video_source
+            ]
+            subprocess.run(cmd_sub, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    else:
+        src_path = Path(video_source).expanduser().resolve()
+        if not src_path.exists():
+            raise FileNotFoundError(f"Source video not found: {src_path}")
+        if target_mp4.exists() or target_mp4.is_symlink():
+            target_mp4.unlink()
+        target_mp4.symlink_to(src_path)
+        print(f"[01_acquire] Linked local video: {src_path} -> {target_mp4}")
+
+    # Extract 16 kHz mono WAV audio for ASR
+    print("[01_acquire] Extracting 16 kHz mono audio WAV...")
+    cmd_audio = [
+        "ffmpeg", "-y", "-i", str(target_mp4),
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+        str(audio_wav)
+    ]
+    subprocess.run(cmd_audio, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+    # Probe duration and format
+    probe_cmd = [
+        "ffprobe", "-v", "error", "-show_entries",
+        "format=duration,size,bit_rate:stream=width,height,r_frame_rate,codec_name",
+        "-of", "json", str(target_mp4)
+    ]
+    res = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+    meta = json.loads(res.stdout)
+    meta["source"] = video_source
+    meta["ingest_time"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    meta_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    print(f"[01_acquire] Done. Outputs in {out_dir}")
+
+
+def run_stage_02_audio_asr(workspace: Path) -> None:
+    stage_dir = workspace / "stages" / "02_audio_asr"
+    out_dir = stage_dir / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    audio_wav = workspace / "stages" / "01_acquire" / "output" / "audio.wav"
+    if not audio_wav.exists():
+        raise FileNotFoundError(f"Missing upstream audio: {audio_wav}")
+
+    print("[02_audio_asr] Transcribing speech with audiocpp-asr...")
+    # Check if native subtitles exist first in 01_acquire
+    sub_files = list((workspace / "stages" / "01_acquire" / "output").glob("*.vtt"))
+    has_native_subs = False
+    
+    # We call local ASR CLI
+    cmd = ["python3", str(AUDIOCPP_SCRIPT), "transcribe", str(audio_wav), "--details"]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    
+    segments = []
+    if res.returncode == 0:
+        try:
+            raw = json.loads(res.stdout)
+            # Adapt audiocpp details JSON format
+            if isinstance(raw, dict) and "segments" in raw:
+                segments = raw["segments"]
+            elif isinstance(raw, list):
+                segments = raw
+            elif isinstance(raw, dict) and "text" in raw:
+                segments = [{"start": 0.0, "end": 0.0, "text": raw["text"]}]
+        except Exception:
+            segments = [{"start": 0.0, "end": 0.0, "text": res.stdout.strip()}]
+    else:
+        # Fallback to direct CLI engine
+        cmd_cli = ["python3", str(AUDIOCPP_SCRIPT), "transcribe", str(audio_wav), "--engine", "cli"]
+        res_cli = subprocess.run(cmd_cli, capture_output=True, text=True, check=True)
+        segments = [{"start": 0.0, "end": 0.0, "text": res_cli.stdout.strip()}]
+
+    transcript_json = out_dir / "transcript.json"
+    transcript_md = out_dir / "transcript.md"
+    
+    transcript_json.write_text(json.dumps(segments, indent=2), encoding="utf-8")
+    
+    # Render readable transcript.md (edit surface!)
+    md_lines = ["# Audio Transcript\n\n"]
+    for seg in segments:
+        ts = format_timestamp(seg.get("start", 0.0))
+        text = seg.get("text", "").strip()
+        if text:
+            md_lines.append(f"**[{ts}]** {text}\n\n")
+            
+    transcript_md.write_text("".join(md_lines), encoding="utf-8")
+    print(f"[02_audio_asr] Done. Generated {len(segments)} segments in {transcript_md}")
+
+
+def run_stage_03_visual_sample(workspace: Path) -> None:
+    stage_dir = workspace / "stages" / "03_visual_sample"
+    out_dir = stage_dir / "output"
+    frames_dir = out_dir / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    
+    video_mp4 = workspace / "stages" / "01_acquire" / "output" / "source_video.mp4"
+    if not video_mp4.exists():
+        raise FileNotFoundError(f"Missing upstream video: {video_mp4}")
+        
+    print("[03_visual_sample] Extracting candidate keyframes (motion accumulator + scene cuts + mpdecimate)...")
+    # Native FFmpeg filter:
+    # 1. First frame always captured: eq(n,0)
+    # 2. Cumulative motion accumulator st(0,...): sums inter-frame motion (scene delta). When >= 0.5 (~50% viewport shift), triggers a capture and resets.
+    # 3. Sudden slide/scene jump: gt(scene, 0.22) triggers immediately and resets.
+    # 4. Periodic safety fallback: not(mod(n, 120)) captures every ~4-5s even during perfectly still pauses.
+    # 5. Debounce: max 1 capture per 0.5s during hyper-fast scrolls (prevents blurred duplicate bursts).
+    # 6. mpdecimate: drops identical frames if the video was completely still.
+    # 7. showinfo: emits exact pts_time to eliminate PTS clock drift.
+    select_expr = (
+        "st(0, if(eq(n,0), 0, ld(0)) + scene);"
+        "if(gte(ld(0), 0.5) + gt(scene, 0.22) + eq(n,0) + not(mod(n, 120)),"
+        "  st(0, 0) + (isnan(prev_selected_t) + gte(t - prev_selected_t, 0.5)),"
+        "  0)"
+    )
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_mp4),
+        "-vf", f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,scale='min(1920,iw)':-1,showinfo",
+        "-vsync", "vfr",
+        "-q:v", "2",
+        str(frames_dir / "frame_%06d.jpg")
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=True)
+    
+    # Parse exact presentation timestamps (pts_time) directly from ffmpeg showinfo log
+    pts_times = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", res.stderr or "")]
+    
+    frame_files = sorted(list(frames_dir.glob("frame_*.jpg")) + list(frames_dir.glob("frame_*.png")))
+    manifest = []
+    
+    for i, f in enumerate(frame_files):
+        pts_sec = pts_times[i] if i < len(pts_times) else float(i * 3.0)
+        manifest.append({
+            "index": i,
+            "filename": f.name,
+            "path": str(f.relative_to(workspace)),
+            "timestamp": pts_sec,
+            "timestamp_str": format_timestamp(pts_sec)
+        })
+        
+    manifest_file = out_dir / "manifest.json"
+    manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print(f"[03_visual_sample] Sampled {len(manifest)} candidate frames into {frames_dir}")
+
+
+def run_stage_04_visual_gate(workspace: Path) -> None:
+    stage_dir = workspace / "stages" / "04_visual_gate"
+    out_dir = stage_dir / "output"
+    text_frames_dir = out_dir / "text_frames"
+    text_frames_dir.mkdir(parents=True, exist_ok=True)
+    
+    manifest_file = workspace / "stages" / "03_visual_sample" / "output" / "manifest.json"
+    if not manifest_file.exists():
+        raise FileNotFoundError(f"Missing upstream manifest: {manifest_file}")
+        
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    print(f"[04_visual_gate] Evaluating {len(manifest)} frames for visible text/code...")
+    
+    gated_results = []
+    for item in manifest:
+        frame_path = workspace / item["path"]
+        if not frame_path.exists():
+            continue
+            
+        # Fast local classifier:
+        # Check size & contrast, and query Imajev or fallback heuristic
+        has_text = True
+        confidence = 0.8
+        ext = frame_path.suffix.lower().lstrip(".")
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+        
+        # We can query local Imajev if available
+        try:
+            with open(frame_path, "rb") as img_file:
+                b64_data = base64.b64encode(img_file.read()).decode("utf-8")
+            
+            payload = {
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Does this image show slides, code, UI text, or diagrams with readable text? Answer only YES or NO."},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}"}}
+                    ]
+                }],
+                "max_tokens": 5
+            }
+            req = urllib.request.Request(
+                IMAJEV_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                reply = data["choices"][0]["message"]["content"].strip().upper()
+                has_text = "YES" in reply or "TRUE" in reply
+                confidence = 0.9 if has_text else 0.1
+        except Exception:
+            # Fallback heuristic: frames above 15KB in JPEG usually carry UI/code/slide details
+            file_sz = frame_path.stat().st_size
+            has_text = file_sz > 15000
+            confidence = 0.65
+
+        record = dict(item)
+        record["has_text"] = has_text
+        record["confidence"] = confidence
+        record["keep"] = has_text
+        gated_results.append(record)
+        
+        if has_text:
+            dest = text_frames_dir / item["filename"]
+            if not dest.exists():
+                dest.symlink_to(frame_path)
+
+    gated_json = out_dir / "gated_frames.json"
+    gated_json.write_text(json.dumps(gated_results, indent=2), encoding="utf-8")
+    kept_count = sum(1 for r in gated_results if r["keep"])
+    print(f"[04_visual_gate] Retained {kept_count}/{len(gated_results)} text frames in {text_frames_dir}")
+
+
+def run_stage_05_visual_ocr(workspace: Path) -> None:
+    stage_dir = workspace / "stages" / "05_visual_ocr"
+    out_dir = stage_dir / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    gated_json = workspace / "stages" / "04_visual_gate" / "output" / "gated_frames.json"
+    if not gated_json.exists():
+        raise FileNotFoundError(f"Missing upstream gated frames: {gated_json}")
+        
+    records = json.loads(gated_json.read_text(encoding="utf-8"))
+    kept = [r for r in records if r.get("keep", False)]
+    print(f"[05_visual_ocr] Running OCR (LightOnOCR-3-1B) on {len(kept)} frames...")
+
+    ocr_json = out_dir / "ocr_timeline.json"
+    ocr_md = out_dir / "ocr_timeline.md"
+
+    if not kept:
+        ocr_json.write_text("[]", encoding="utf-8")
+        ocr_md.write_text("# Visual OCR Timeline (LightOnOCR-3-1B)\n\nNo text frames detected.\n", encoding="utf-8")
+        return
+
+    if not LIGHTON_MODEL.exists() or not LIGHTON_MMPROJ.exists():
+        raise FileNotFoundError(
+            f"Missing LightOnOCR weights:\n"
+            f"Model: {LIGHTON_MODEL}\n"
+            f"MMProj: {LIGHTON_MMPROJ}"
+        )
+
+    server_proc = None
+    started_server = False
+
+    def is_server_listening(url: str, timeout: float = 1.0) -> bool:
+        try:
+            health_url = url.replace("/v1/chat/completions", "/health")
+            req = urllib.request.Request(health_url)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status in (200, 404)
+        except Exception:
+            return False
+
+    # Check if a server is already listening, or spawn an ephemeral one for speed
+    if not is_server_listening(LIGHTON_URL):
+        if LLAMA_SERVER_BIN.exists():
+            print(f"[05_visual_ocr] Spawning ephemeral LightOnOCR server on port {LIGHTON_PORT}...")
+            cmd = [
+                str(LLAMA_SERVER_BIN),
+                "-m", str(LIGHTON_MODEL),
+                "--mmproj", str(LIGHTON_MMPROJ),
+                "--port", str(LIGHTON_PORT),
+                "-ngl", "99",
+                "-c", "4096",
+            ]
+            server_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            started_server = True
+            for _ in range(30):
+                time.sleep(0.5)
+                if is_server_listening(LIGHTON_URL):
+                    print(f"[05_visual_ocr] Server ready on http://127.0.0.1:{LIGHTON_PORT}")
+                    break
+            else:
+                print("[05_visual_ocr] Warning: Server start timed out, falling back to CLI if needed.")
+
+    def ocr_single_frame(frame_file: Path) -> str:
+        # 1. Try persistent / ephemeral HTTP server
+        if is_server_listening(LIGHTON_URL):
+            try:
+                with open(frame_file, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                payload = {
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Extract all text and code from this image in markdown."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+                        ]
+                    }],
+                    "max_tokens": 2048,
+                    "temperature": 0.0,
+                }
+                req = urllib.request.Request(
+                    LIGHTON_URL,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        text = data["choices"][0]["message"]["content"].strip()
+                        if text:
+                            return text
+            except Exception:
+                pass
+
+        # 2. Direct llama-mtmd-cli fallback
+        if LLAMA_MTMD_CLI.exists():
+            try:
+                cmd = [
+                    str(LLAMA_MTMD_CLI),
+                    "-m", str(LIGHTON_MODEL),
+                    "--mmproj", str(LIGHTON_MMPROJ),
+                    "--image", str(frame_file),
+                    "-p", "Extract all text and code from this image in markdown.",
+                    "-ngl", "99",
+                    "--temp", "0",
+                ]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+                if res.returncode == 0:
+                    lines = res.stdout.splitlines()
+                    clean_lines = []
+                    past_header = False
+                    for line in lines:
+                        if past_header:
+                            clean_lines.append(line)
+                        elif "mtmd batch encoding done" in line:
+                            past_header = True
+                    text = "\n".join(clean_lines).strip()
+                    if text:
+                        return text
+                    return res.stdout.strip()
+            except Exception:
+                pass
+
+        return ""
+
+    ocr_entries = []
+    last_text = ""
+    try:
+        for idx, r in enumerate(kept, 1):
+            frame_file = workspace / "stages" / "04_visual_gate" / "output" / "text_frames" / r["filename"]
+            if not frame_file.exists():
+                continue
+                
+            print(f"[05_visual_ocr] Processing frame {idx}/{len(kept)}: {r['filename']} ({r['timestamp_str']})...")
+            text_out = ocr_single_frame(frame_file)
+            
+            # Deduplicate consecutive identical text
+            if text_out and text_out != last_text:
+                ocr_entries.append({
+                    "timestamp": r["timestamp"],
+                    "timestamp_str": r["timestamp_str"],
+                    "frame": r["filename"],
+                    "text": text_out
+                })
+                last_text = text_out
+    finally:
+        if started_server and server_proc is not None:
+            print("[05_visual_ocr] Stopping ephemeral LightOnOCR server...")
+            server_proc.terminate()
+            try:
+                server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server_proc.kill()
+
+    ocr_json.write_text(json.dumps(ocr_entries, indent=2), encoding="utf-8")
+    
+    md_lines = ["# Visual OCR Timeline (LightOnOCR-3-1B)\n\n"]
+    for entry in ocr_entries:
+        ts = entry["timestamp_str"]
+        frame = entry["frame"]
+        content = entry["text"]
+        md_lines.append(f"### [{ts}] Frame `{frame}`\n\n{content}\n\n---\n\n")
+        
+    ocr_md.write_text("".join(md_lines), encoding="utf-8")
+    print(f"[05_visual_ocr] Done. Extracted {len(ocr_entries)} visual segments in {ocr_md}")
+
+
+
+def run_stage_06_synthesize(workspace: Path) -> None:
+    stage_dir = workspace / "stages" / "06_synthesize"
+    out_dir = stage_dir / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    asr_json = workspace / "stages" / "02_audio_asr" / "output" / "transcript.json"
+    ocr_json = workspace / "stages" / "05_visual_ocr" / "output" / "ocr_timeline.json"
+    meta_json = workspace / "stages" / "01_acquire" / "output" / "video_meta.json"
+    
+    transcript = json.loads(asr_json.read_text(encoding="utf-8")) if asr_json.exists() else []
+    ocr_timeline = json.loads(ocr_json.read_text(encoding="utf-8")) if ocr_json.exists() else []
+    meta = json.loads(meta_json.read_text(encoding="utf-8")) if meta_json.exists() else {}
+    
+    print("[06_synthesize] Merging audio transcript and visual OCR into mined_video.md...")
+    
+    # Merge items chronologically
+    events = []
+    for t in transcript:
+        events.append({
+            "type": "spoken",
+            "timestamp": t.get("start", 0.0),
+            "end": t.get("end", 0.0),
+            "text": t.get("text", "")
+        })
+    for o in ocr_timeline:
+        events.append({
+            "type": "visual",
+            "timestamp": o.get("timestamp", 0.0),
+            "frame": o.get("frame", ""),
+            "text": o.get("text", "")
+        })
+        
+    events.sort(key=lambda x: x["timestamp"])
+    
+    # Render final markdown artifact
+    doc = [
+        f"# Mined Video Notes: {workspace.name}\n\n",
+        f"- **Source:** {meta.get('source', 'Unknown')}\n",
+        f"- **Processed on:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n",
+        "---\n\n",
+        "## Chronological Content\n\n"
+    ]
+    
+    current_time_str = ""
+    for ev in events:
+        ts_str = format_timestamp(ev["timestamp"])
+        if ev["type"] == "visual":
+            doc.append(f"\n#### 🖥️ Visual Slide / Code [{ts_str}]\n\n")
+            doc.append(f"{ev['text']}\n\n")
+        else:
+            text = ev["text"].strip()
+            if text:
+                doc.append(f"> **[{ts_str}]** {text}\n\n")
+
+    final_md = out_dir / "mined_video.md"
+    final_json = out_dir / "mined_video.json"
+    
+    final_md.write_text("".join(doc), encoding="utf-8")
+    final_json.write_text(json.dumps(events, indent=2), encoding="utf-8")
+    print(f"\n[06_synthesize] Successfully synthesized deliverable: {final_md}")
+
+
+# ── Pipeline Runner ──────────────────────────────────────────────────────────
+
+def init_workspace(target_path: Path, video_source: str) -> Path:
+    """Scaffold a fresh ICM workspace from template."""
+    target_path = target_path.resolve()
+    if target_path.exists() and any(target_path.iterdir()):
+        print(f"Directory {target_path} already exists. Using existing workspace.")
+        return target_path
+        
+    shutil.copytree(TEMPLATES_DIR, target_path, dirs_exist_ok=True)
+    # Store source in _shared/source.json
+    shared_dir = target_path / "_shared"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    (shared_dir / "source.json").write_text(
+        json.dumps({"video_source": video_source, "created_at": datetime.datetime.now().isoformat()}, indent=2),
+        encoding="utf-8"
+    )
+    print(f"Created ICM workspace at: {target_path}")
+    return target_path
+
+
+def run_pipeline(workspace: Path, video_source: str | None = None, until_stage: str | None = None, step_only: bool = False) -> None:
+    source_file = workspace / "_shared" / "source.json"
+    if source_file.exists():
+        src_data = json.loads(source_file.read_text(encoding="utf-8"))
+        video_source = video_source or src_data.get("video_source")
+        
+    if not video_source and stage_status(workspace, 0) == "PENDING":
+        raise ValueError("Video source (URL or file) must be provided for initial stage.")
+
+    for i, stage in enumerate(STAGES):
+        st = stage_status(workspace, i)
+        
+        # If complete and not stale, skip
+        if st == "COMPLETE":
+            continue
+            
+        print(f"\n▶ Executing Stage: {stage} (Status: {st})")
+        if stage == "01_acquire":
+            run_stage_01_acquire(workspace, video_source)
+        elif stage == "02_audio_asr":
+            run_stage_02_audio_asr(workspace)
+        elif stage == "03_visual_sample":
+            run_stage_03_visual_sample(workspace)
+        elif stage == "04_visual_gate":
+            run_stage_04_visual_gate(workspace)
+        elif stage == "05_visual_ocr":
+            run_stage_05_visual_ocr(workspace)
+        elif stage == "06_synthesize":
+            run_stage_06_synthesize(workspace)
+            
+        if step_only:
+            print(f"\n[Human Checkpoint] Pausing after stage {stage}.")
+            print(f"Review and edit files in: stages/{stage}/output/")
+            break
+            
+        if until_stage and stage == until_stage:
+            print(f"\nReached requested stage: {until_stage}. Stopping.")
+            break
+
+    print_status(workspace)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="videomine - ICM Video Mining Pipeline")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    
+    # init
+    p_init = subparsers.add_parser("init", help="Initialize a new ICM workspace")
+    p_init.add_argument("workspace", type=Path, help="Workspace directory")
+    p_init.add_argument("source", type=str, help="Video URL or local file path")
+    
+    # status
+    p_status = subparsers.add_parser("status", help="Show ICM status")
+    p_status.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
+    
+    # step
+    p_step = subparsers.add_parser("step", help="Run the next single stage and stop at human checkpoint")
+    p_step.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
+    p_step.add_argument("--source", type=str, help="Video source if running stage 01")
+    
+    # run
+    p_run = subparsers.add_parser("run", help="Run pipeline stages")
+    p_run.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
+    p_run.add_argument("--source", type=str, help="Video source")
+    p_run.add_argument("--until", type=str, help="Stop at this stage (e.g. 02_audio_asr)")
+    
+    args = parser.parse_args()
+    
+    if args.command == "init":
+        init_workspace(args.workspace, args.source)
+        print_status(args.workspace)
+    elif args.command == "status":
+        print_status(args.workspace.resolve())
+    elif args.command == "step":
+        run_pipeline(args.workspace.resolve(), video_source=args.source, step_only=True)
+    elif args.command == "run":
+        run_pipeline(args.workspace.resolve(), video_source=args.source, until_stage=args.until, step_only=False)
+
+
+if __name__ == "__main__":
+    main()

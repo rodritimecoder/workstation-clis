@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# jpt - typed decisions from JPT-4B (GGUF, stock llama.cpp + Vulkan)
+#
+# Shorthand (mirrors the jev wrapper):
+#   jpt "state text" "question text"                                  # binary noul -> P(true)
+#   jpt "state" "question" '{"billing":"invoices","tech":"outages"}'  # choice
+#   jpt "state" "question" '["calm","frustrated","angry"]'            # score (ordered)
+#
+# Anything else goes straight to the HTTP API on $JPT_PORT (default 8080):
+#   curl -s localhost:8080/v1/systemone -H 'Content-Type: application/json' -d @questions.json
+#
+# Engine: llama-server must be up (start-jpt.sh). Override with JEV_ENGINE_URL/JPT_ENGINE_URL.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+API="http://127.0.0.1:${JPT_PORT:-8080}"
+
+if [ $# -eq 0 ]; then exec "$HERE/jpt_chat.py"; fi
+
+if [ "${1#-}" = "$1" ]; then
+  STATE="$1"; QUESTION="$2"; OPTIONS="${3:-}"
+  shift $(( $# < 3 ? $# : 3 ))
+  PAYLOAD=$(python3 - "$STATE" "$QUESTION" "$OPTIONS" <<'PY'
+import json, sys
+state, question, options = sys.argv[1], sys.argv[2], sys.argv[3]
+if not options or options.lower() in ("none", "-", "null"):
+    q = {"type": "noul", "instructions": question}
+elif options.startswith("{"):
+    q = {"type": "choice", "instructions": question, "criteria": json.loads(options)}
+else:
+    crit = json.loads(options) if options.startswith("[") else [p.strip() for p in options.split(",")]
+    q = {"type": "score", "instructions": question, "criteria": crit}
+print(json.dumps({"state": state, "questions": {"answer": q}}))
+PY
+)
+else
+  PAYLOAD=$(cat)
+fi
+
+curl -sS "$API/v1/systemone" -H 'Content-Type: application/json' -d "$PAYLOAD" "$@"
+echo
