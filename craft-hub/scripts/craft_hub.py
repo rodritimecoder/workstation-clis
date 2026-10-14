@@ -38,8 +38,8 @@ KITCHENS = {
         "emoji": "🥗",
         "chef": "Foundational Architecture Discipline",
         "skill_dir": "poteto-mode",
-        "tags": ["domain modeling", "foundational thinking", "laziness protocol", "state machine", "type discipline", "verified execution"],
-        "description": "Encode the domain into state machines and types instead of scattered conditionals. Never block on the human; verify against real artifacts.",
+        "tags": ["domain modeling", "state matrix", "foundational thinking", "laziness protocol", "state machine", "type discipline", "verified execution"],
+        "description": "Encode the domain into state machines, pre-implementation transition matrices, and types instead of scattered conditionals. Never block on the human; verify against real artifacts.",
         "related": ["pstack"]
     },
     "thermonuclear": {
@@ -65,8 +65,8 @@ KITCHENS = {
         "emoji": "🔬",
         "chef": "The Grounded Verifier",
         "skill_dir": "pstack/skills/create-verification-skill",
-        "tags": ["verification", "test harness", "drive", "doctor", "launch", "evidence", "feature map", "prove it works"],
-        "description": "Generate a project-local verification skill (.cursor/skills/verify-<app>/) that drives the real app the way a user does with Launch, Doctor, Drive, Evidence, Cleanup, and Feature Map.",
+        "tags": ["verification", "test harness", "requirement traceability", "drive", "doctor", "launch", "evidence", "feature map", "prove it works"],
+        "description": "Generate a project-local verification skill (.cursor/skills/verify-<app>/) that drives the real app the way a user does with Launch, Doctor, Drive, Evidence, Cleanup, and [REQ-XX] Feature Map.",
         "related": ["maintain-verification", "poteto"]
     },
     "maintain-verification": {

@@ -66,6 +66,12 @@ Thumbs.db
 *~
 .Trash-*
 
+# Databases & Ephemeral Indexes
+*.db
+*.sqlite
+*.sqlite3
+rag.db
+
 # Private & Personal Data
 university-notes/
 University/
