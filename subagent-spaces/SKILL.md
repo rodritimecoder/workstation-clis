@@ -7,53 +7,56 @@ description: "Isolated CPU-pinned containerized sandbox environments for autonom
 
 Isolated, CPU-pinned containerized sandbox environments for autonomous subagents running locally via rootless Podman.
 
-Instead of running builds, tests, or untrusted code directly on the host or incurring cloud VM latency, `subagent-spaces` partitions your CPU threads into dedicated worker slots with strict memory quotas, disposable workspace mounts, and zero blast-radius.
+Instead of running builds, tests, or untrusted code directly on the host or incurring cloud VM latency, `subagent-spaces` partitions your CPU threads into dedicated worker spaces with strict memory quotas, disposable workspace mounts, and zero blast-radius.
 
 ---
 
 ## 🖥️ CPU Core Topology (16-Thread Ryzen Substrate)
 
-| Slot | CPU Threads | RAM Quota | Purpose |
-|---|---|---|---|
-| **`HOST`** | `0–3` (4 threads) | Unlimited | Reserved for Host OS, Desktop, Display Server, & GPU drivers |
-| **`Slot 1`** | `4–7` (4 threads) | `4 GB` | Dedicated worker space for Subagent 1 |
-| **`Slot 2`** | `8–11` (4 threads) | `4 GB` | Dedicated worker space for Subagent 2 |
-| **`Slot 3`** | `12–15` (4 threads) | `4 GB` | Dedicated worker space for Subagent 3 |
-| **`all`** | `4–15` (12 threads) | `12 GB` | Full-throttle single-task compilation / heavy batch run |
+* **Host Desktop Reserve (`0–3`)**: Cores 0, 1, 2, 3 (4 threads) reserved exclusively for Host OS, Desktop, Display Server, and GPU drivers.
+* **Worker Pool (`4–15`)**: 12 dedicated threads that can be allocated as:
+  * **1-Thread Micro-Spaces**: Up to **12 parallel subagents** running concurrently (`--cpus 1` or `--cores 4` through `15`).
+  * **Coarse Worker Slots**: 3 quad-core worker slots (`Slot 1: 4–7`, `Slot 2: 8–11`, `Slot 3: 12–15`).
+  * **Full Throttle (`all`)**: All 12 worker threads (`4–15`) and 12 GB RAM for heavy compiles.
 
 ---
 
 ## 🚀 Quick Usage
 
-### 1. Check System Health & Doctor
-Verifies Podman, cgroups, `taskset` CPU core pinning, and local images:
-```bash
-subagent-spaces doctor
-```
-
-### 2. View Active Slot Occupancy
-Displays an ASCII topology table showing which worker slots are IDLE or OCCUPIED:
+### 1. View Real-Time Thread Grid & Slots
+Displays real-time status of all 16 threads (HOST, IDLE, BUSY) and worker slot occupancy:
 ```bash
 subagent-spaces slots
 ```
 
-### 3. Run a Command in an Isolated Space
-Runs a command inside a pinned container. Automatically selects the first idle slot:
+### 2. Run 1-Thread Micro-Spaces
+Give a subagent exactly 1 core/thread and 1GB RAM:
 ```bash
-# Auto-assign slot and run tests in current directory
-subagent-spaces run -- pytest
+# Auto-allocate 1 idle core from worker pool (4-15)
+subagent-spaces run --cpus 1 -- pytest
 
-# Explicit slot, specific workspace, and read-only mount
-subagent-spaces run --slot 1 --workspace ~/projects/app --ro -- python3 test.py
+# Pinned to specific core (e.g. Core 4 only)
+subagent-spaces run --cores 4 -m 512m -- python3 script.py
 
-# Detached background subagent
-subagent-spaces run --slot 2 -d --name worker-task -- npm run build
+# Spawn multiple parallel 1-thread subagents concurrently
+subagent-spaces run --cores 4 -d -w ./ws1 -- npm test
+subagent-spaces run --cores 5 -d -w ./ws2 -- pytest
+subagent-spaces run --cores 6 -d -w ./ws3 -- make
+```
+
+### 3. Run Predefined Slots or High-Throttle Mode
+```bash
+# Quad-core Slot 1 (Cores 4-7, 4 GB RAM)
+subagent-spaces run --slot 1 -w ~/projects/app --ro -- cargo check
+
+# High-Throttle 12-thread compilation
+subagent-spaces run --slot all -- make -j12
 ```
 
 ### 4. Interactive Shell into a Space
 ```bash
-# Attach interactive bash to Slot 2 or container name
-subagent-spaces enter 2
+# Attach interactive bash to Core 4, Slot 1, or container name
+subagent-spaces enter 4
 ```
 
 ### 5. Inspect Running Spaces
@@ -63,17 +66,16 @@ subagent-spaces ps
 
 ### 6. Stop or Prune Spaces
 ```bash
-# Stop a specific space
-subagent-spaces stop 2
+# Stop a specific space by core or container ID
+subagent-spaces stop 4
 
 # Clean up all active spaces
 subagent-spaces prune
 ```
 
-### 7. Build Local Development Image
-Builds `subagent-space:latest` with Python 3, Git, curl, jq, and build tools:
+### 7. Diagnostics & Diagnostics
 ```bash
-subagent-spaces build
+subagent-spaces doctor
 ```
 
 ---
