@@ -59,6 +59,42 @@ KITCHENS = {
         "tags": ["ai tells", "unslop", "human writing", "no fluff", "active voice", "cut jargon", "anti-bot"],
         "description": "31-rule precision scanner that strips AI tell patterns: superficial -ing, fake ranges, sycophancy, fancy synonyms, and robotic hedging.",
         "related": []
+    },
+    "create-verification": {
+        "name": "Create Verification Skill",
+        "emoji": "🔬",
+        "chef": "The Grounded Verifier",
+        "skill_dir": "pstack/skills/create-verification-skill",
+        "tags": ["verification", "test harness", "drive", "doctor", "launch", "evidence", "feature map", "prove it works"],
+        "description": "Generate a project-local verification skill (.cursor/skills/verify-<app>/) that drives the real app the way a user does with Launch, Doctor, Drive, Evidence, Cleanup, and Feature Map.",
+        "related": ["maintain-verification", "poteto"]
+    },
+    "maintain-verification": {
+        "name": "Maintain Verification Skill",
+        "emoji": "🧪",
+        "chef": "The Drift Hunter",
+        "skill_dir": "pstack/skills/maintain-verification-skill",
+        "tags": ["verify audit", "drift check", "live pass", "feature map upkeep", "doctor check", "evidence"],
+        "description": "Periodic upkeep pass that checks source drift, drives every mapped feature live, verifies health with Doctor, and flags product regressions.",
+        "related": ["create-verification", "poteto"]
+    },
+    "no-comments": {
+        "name": "No Comments (Comment Sicko)",
+        "emoji": "✂️",
+        "chef": "Comment Sicko",
+        "skill_dir": "pstack/skills/no-comments",
+        "tags": ["clean code", "no comments", "comment sicko", "strip ai fluff", "encode constraints", "types over comments"],
+        "description": "Eliminate redundant code comments, strip AI commentary, and encode real constraints into types, runtime assertions, or linter rules.",
+        "related": ["ponytail", "typescript"]
+    },
+    "typescript": {
+        "name": "TypeScript Best Practices",
+        "emoji": "🛡️",
+        "chef": "Type Discipline Enforcer",
+        "skill_dir": "pstack/skills/typescript-best-practices",
+        "tags": ["typescript", "ts discipline", "discriminated unions", "branded types", "no as casts", "satisfies", "schemas"],
+        "description": "Discriminated unions, branded types, constructive modeling, schemas before guards, zero 'as' casts, and 'satisfies' over 'as'.",
+        "related": ["poteto", "no-comments"]
     }
 }
 
@@ -283,6 +319,56 @@ def cmd_order(kitchen_id: str, target: str = None):
         print("   1. Model the Domain: Are states modeled as explicit unions/state machines instead of boolean flags?")
         print("   2. Laziness Protocol: Is every line needed? Can dead code be deleted first?")
         print("   3. Verify Artifacts: Is there a concrete check (test, screenshot, command run)?")
+
+    elif "typescript" in k_id or k_id == "ts":
+        print("\n⚡ [TypeScript Best Practices Scan]:")
+        touched = get_git_touched_files() if is_git_diff else ([target] if target and Path(target).is_file() else [])
+        ts_files = [f for f in touched if f.endswith((".ts", ".tsx"))]
+        if ts_files:
+            any_count = 0
+            as_count = 0
+            for tf in ts_files:
+                try:
+                    content = Path(tf).read_text(encoding="utf-8", errors="replace")
+                    any_count += len(re.findall(r":\s*any\b", content))
+                    as_count += len(re.findall(r"\bas\s+[A-Z]", content))
+                except Exception:
+                    pass
+            print(f"   • Scanned {len(ts_files)} TypeScript file(s)")
+            if any_count > 0:
+                print(f"   ⚠️  Found {any_count} loose 'any' annotations! (Prefer 'unknown' or domain types)")
+            else:
+                print("   ✅ Zero unvalidated 'any' types detected.")
+            if as_count > 0:
+                print(f"   ⚠️  Found {as_count} 'as' type assertion(s)! (Prefer 'satisfies' or type guards)")
+            else:
+                print("   ✅ Zero risky 'as' type casts detected.")
+        else:
+            print("   • No modified .ts/.tsx files found to scan.")
+
+    elif "nocomments" in k_id:
+        print("\n⚡ [Comment Sicko Cleanliness Scan]:")
+        touched = get_git_touched_files() if is_git_diff else ([target] if target and Path(target).is_file() else [])
+        code_files = [f for f in touched if not f.endswith((".md", ".txt", ".json", ".yaml", ".yml"))]
+        if code_files:
+            for cf in code_files[:5]:
+                try:
+                    lines = Path(cf).read_text(encoding="utf-8", errors="replace").splitlines()
+                    comment_lines = sum(1 for l in lines if re.match(r"^\s*(//|#|/\*|\*)", l))
+                    ratio = (comment_lines / len(lines) * 100) if lines else 0
+                    print(f"   • {cf}: {comment_lines}/{len(lines)} lines are comments ({ratio:.1f}%)")
+                    if ratio > 25:
+                        print(f"     ⚠️  High comment ratio ({ratio:.1f}%). Strip obvious code comments; encode constraints into types.")
+                except Exception:
+                    pass
+        else:
+            print("   • No modified code files found to audit comments.")
+
+    elif "verification" in k_id or "verify" in k_id:
+        print("\n⚡ [Verification Stack Readiness]:")
+        has_local_verify = any(Path(p).is_dir() for p in [".cursor/skills", ".gemini/config/skills", "tests", "__tests__"])
+        print(f"   • Existing Verification Harness Detected: {'✅ Yes' if has_local_verify else '❌ No'}")
+        print("   • Mandatory 5 Invariants: Launch -> Doctor -> Drive -> Evidence -> Cleanup")
 
     # 3. Output the Authoritative Review Rubric
     skill_file = resolve_skill_file(info["skill_dir"])

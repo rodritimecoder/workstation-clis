@@ -16,7 +16,7 @@ description: >
 
 ---
 
-## 🍽️ The 5 Kitchens on the Menu
+## 🍽️ The Kitchens & Specialty Stations Menu
 
 | # | Kitchen ID | Specialty & Core Philosophy |
 |---|---|---|
@@ -25,6 +25,10 @@ description: >
 | 🥗 | **`poteto`** | **Foundational Discipline**: Model the domain in types/state machines, laziness protocol, verified artifacts. |
 | 🍕 | **`thermonuclear`** | **Harsh Architectural Audit**: Anti-spaghetti conditionals, 1,000-line ceiling, structural "code judo" deletions. |
 | 🍜 | **`unslop`** | **AI Tell Elimination**: 31-rule scanner cutting superficial -ing clauses, corporate hedging, and robotic tone. |
+| 🔬 | **`create-verification`** | **Verification Generator**: Generates project-local verification skill (`verify-<app>`) with Launch, Doctor, Drive, Evidence, Cleanup & Feature Map. |
+| 🧪 | **`maintain-verification`** | **Verification Upkeep**: Periodic drift audit driving every mapped feature live, checking health, and catching regressions. |
+| ✂️ | **`no-comments`** | **Comment Sicko**: Strips useless code comments and AI explanations; encodes real constraints into types or runtime assertions. |
+| 🛡️ | **`typescript`** | **TypeScript Best Practices**: Discriminated unions, branded types, constructive modeling, zero `as` casts, schemas before guards. |
 
 ---
 
