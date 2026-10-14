@@ -95,11 +95,12 @@ All models run 100% locally on dual AMD Radeon RX 9060 XT GPUs via ROCm and Vulk
 
 ## 📦 Curated CLI Catalog
 
-This suite contains 12 focused engineering, sandbox, and inference CLIs:
+This suite contains 13 focused engineering, sandbox, and inference CLIs:
 
 | Tool Directory | Identifier | Core Capabilities |
 | :--- | :--- | :--- |
 | [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Late-binding DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, and Grounded Verification. |
+| [`github-architect`](github-architect/) | `github-architect` | Autonomous fleet synchronizer (`sync-all`, `status-all`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
 | [`skills-hub`](skills-hub/) | `skills-hub` | Unified meta-tool discovery and execution layer for workstation skills with zero context bloat. |
 | [`graph-memory`](graph-memory/) | `graph-memory` | Local hybrid RAG (BM25 + BGE-small 384d) with exact-quote LLM distillation, prompt recall hooks, and session digests. |
