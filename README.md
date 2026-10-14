@@ -2,7 +2,7 @@
 
 [![Public Repository](https://img.shields.io/badge/Repository-Public-green.svg)](https://github.com/rodritimecoder/workstation-clis)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tools: 8 CLIs](https://img.shields.io/badge/Tools-8%20CLIs-blue.svg)](#-included-clis--tools)
+[![Tools: 12 CLIs](https://img.shields.io/badge/Tools-12%20CLIs-blue.svg)](#-included-clis--tools)
 [![Hardware: Dual RX 9060 XT](https://img.shields.io/badge/Hardware-Dual%20RX%209060%20XT-purple.svg)](#-workstation-architecture--ports)
 
 > High-performance local CLI utilities, automation agents, and multimodal inference pipelines designed for autonomous AI workstations.
@@ -15,6 +15,8 @@ This suite is engineered for a local **dual AMD Radeon RX 9060 XT** setup runnin
 
 | Port | Model / Backend | Primary Capabilities |
 |---|---|---|
+| `:8000` | **llama-swap** | Model hot-swapper with dynamic concurrency sets (`q & i & l` co-resident $\le$ 32GB) |
+| `:4000` | **LiteLLM Proxy** | OpenAI-compatible proxy with dynamic VRAM balancing and cloud failover |
 | `:8080` | **Qwen3.6-35B-A3B Uncensored Genesis** | Primary Workstation LLM (22 GB ROCMFP4, dual-GPU `-ts 45/55`) |
 | `:8081` | **audio.cpp (Nemotron 3.5 + Kokoro)** | Streaming speech-to-text (40 languages) & fast text-to-speech |
 | `:8085` | **LightOnOCR-3-1B** | **#1 Flagship Video & Slide OCR** (~16k t/s prefill, ~330 t/s gen) |
@@ -31,6 +33,10 @@ This suite is engineered for a local **dual AMD Radeon RX 9060 XT** setup runnin
 
 | Tool Directory | Identifier | Core Capabilities |
 | :--- | :--- | :--- |
+| [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Late-binding DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, and Unslop prose. |
+| [`skills-hub`](skills-hub/) | `skills-hub` | Unified meta-tool discovery and execution layer for 28+ agent skills with zero context bloat. |
+| [`litellm-vram-switcher`](litellm-vram-switcher/) | `vram-rig-ctl` | Multi-GPU VRAM switcher, llama-swap orchestrator (:8000), and LiteLLM failover manager (:4000). |
+| [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |
 | [`ocr-cli`](ocr-cli/) | `ocr-cli` | Multi-model local OCR engine uniting LightOnOCR-3-1B (#1 flagship), SmolDocling, and CrispEmbed. |
 | [`hybrid-browser`](hybrid-browser/) | `hybrid-browser` | Tiered browser automation agent using Podman Chromium, CDP, and DeskForge-Qwen3.5-4B visual grounding. |
 | [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, Imajev visual gating, and LightOnOCR code extraction. |
