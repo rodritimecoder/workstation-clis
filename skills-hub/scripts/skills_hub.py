@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 CANDIDATE_PATHS = [
+    Path("/run/media/rodri/AI/skills"),
     Path.home() / "my-agent-skills",
     Path.home() / ".gemini" / "config" / "skills",
     Path.cwd() / ".agents" / "skills",

@@ -1,34 +1,49 @@
+# LiteLLM Gateway Configuration (Port 4000)
+# Routes to local llama-swap on port 8000 with automatic cloud fallback
+# Upstream canonical: /run/media/rodri/AI/skills/litellm-vram-switcher/config/litellm_config.yaml
+
 model_list:
-  # --- PRIMARY LOCAL PORTS (8080 - 8090) ---
+  # ============================================================
+  # LOCAL WORKSTATION MODELS (via llama-swap on :8000)
+  # ============================================================
   - model_name: agent-coder
     litellm_params:
-      model: openai/local-coder-primary
-      api_base: http://127.0.0.1:8080/v1
+      model: openai/qwen3.6-35b
+      api_base: http://127.0.0.1:8000/v1
       api_key: "local-no-key"
-      timeout: 30
+      timeout: 60
 
   - model_name: agent-fast
     litellm_params:
-      model: openai/local-general-heavy
-      api_base: http://127.0.0.1:8081/v1
+      model: openai/gemma4-26b
+      api_base: http://127.0.0.1:8000/v1
       api_key: "local-no-key"
-      timeout: 30
+      timeout: 45
 
   - model_name: agent-classifier
     litellm_params:
-      model: openai/local-classifier-jev
-      api_base: http://127.0.0.1:8082/v1
+      model: openai/imajev-4b
+      api_base: http://127.0.0.1:8000/v1
       api_key: "local-no-key"
-      timeout: 10
+      timeout: 20
 
   - model_name: agent-ocr
     litellm_params:
-      model: openai/local-ocr-vision
-      api_base: http://127.0.0.1:8083/v1
+      model: openai/lighton-ocr
+      api_base: http://127.0.0.1:8000/v1
       api_key: "local-no-key"
-      timeout: 15
+      timeout: 30
 
-  # --- CLOUD FALLBACK MODELS (OPENROUTER FREE + GEMINI) ---
+  - model_name: agent-browser
+    litellm_params:
+      model: openai/deskforge-4b
+      api_base: http://127.0.0.1:8000/v1
+      api_key: "local-no-key"
+      timeout: 30
+
+  # ============================================================
+  # CLOUD FALLBACK MODELS (OpenRouter Free + Gemini 2.5 Flash)
+  # ============================================================
   - model_name: cloud-nemotron-free
     litellm_params:
       model: openrouter/nvidia/llama-3.1-nemotron-70b-instruct:free
@@ -55,3 +70,4 @@ router_settings:
     - {"agent-fast": ["cloud-openrouter-auto-free", "cloud-gemini-flash"]}
     - {"agent-classifier": ["cloud-gemini-flash"]}
     - {"agent-ocr": ["cloud-gemini-flash"]}
+    - {"agent-browser": ["cloud-gemini-flash"]}

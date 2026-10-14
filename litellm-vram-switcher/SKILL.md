@@ -1,49 +1,65 @@
 ---
 name: litellm-vram-switcher
 description: >
-  Manage local LLM/VLM/OCR/TTS servers across ports 8080-8090, inspect GPU VRAM usage,
-  maintain the resident 22GB primary coder model with 10GB dynamic headroom, kill or swap
-  models on demand, and operate the LiteLLM router gateway (port 4000) with automatic
-  failover to OpenRouter Free and Gemini.
+  Manage local LLM/VLM/OCR/TTS servers with llama-swap (port 8000) and LiteLLM (port 4000),
+  inspect dual GPU VRAM usage, maintain the 22GB primary coder model with dynamic auxiliary
+  headroom, and automatically failover to OpenRouter Free and Gemini.
 ---
 
-# LiteLLM & VRAM Port Switcher Skill (`litellm-vram-switcher`)
+# LiteLLM & llama-swap VRAM Controller (`litellm-vram-switcher`)
 
-Use this skill to inspect GPU VRAM, monitor local servers listening on ports `8080–8090`, reclaim VRAM for specific workloads, manage model weights lifecycle, and route requests through the unified LiteLLM gateway on port `4000`.
+Use this skill to inspect GPU VRAM, operate the automated model-swapping reverse proxy (**`llama-swap` on port `8000`**), manage direct ports `8080–8090`, and route requests through the unified **LiteLLM gateway on port `4000`**.
 
 ## Architecture: Resident King + 10 GB Dynamic Headroom
-Designed for 32 GB VRAM configurations (such as AMD dual RX 9060 XT or NVIDIA rigs):
-- **Port `8080` (Pinned King, ~22 GB)**: High-capability coder model (`qwen-coder-35b-q4_k_m`) remains resident in VRAM 24/7 for 0ms cold-start latency.
-- **Ports `8082–8083` (Dynamic Headroom, ~10 GB)**: Auxiliary models (`jev-4b` 3.5 GB classifier, `glm-ocr` 4.0 GB) run **simultaneously alongside the coder** without triggering evictions.
-- **Heavy Task Fallback**: If a batch of tasks demands >10 GB headroom, the controller gracefully pauses port 8080, runs the heavy workload, and reboots port 8080 when complete.
-- **Port `4000` (LiteLLM Proxy)**: Single unified OpenAI-compatible gateway (`http://localhost:4000/v1`).
-  - Routes to local ports `8080–8090` first.
-  - Automatically fails over to `openrouter/free` or `gemini-2.5-flash` if a local port is offline or busy.
+Engineered for Dual AMD Radeon RX 9060 XT (32 GB total VRAM):
+- **Port `8000` (`llama-swap`)**: Native Go model-swapping proxy with automated VRAM solver matrix:
+  - **`qwen3.6-35b` (Pinned King, ~22 GB)**: Q4_0 ROCMFP4 uncensored model split across both GPUs (`-ts 45/55`).
+  - **`imajev-4b` (Auxiliary Decision, ~3.5 GB)**: Calibrated decision model ($T=1.305$) with multimodal projector. Runs concurrently alongside Qwen3.6!
+  - **`lighton-ocr` (Auxiliary Vision OCR, ~1.5 GB)**: Flagship 16k t/s slide/doc OCR. Runs concurrently alongside Qwen3.6 and Imajev!
+  - **`deskforge-4b` (GUI Grounding, ~3.5 GB)**: Desktop computer-use coordinate extraction agent.
+  - **`gemma4-26b` (Heavy General Model, ~18 GB)**: Automatically evicts Qwen3.6 when called, and swaps Qwen3.6 back when needed.
+- **Port `4000` (`LiteLLM Gateway`)**: Unified OpenAI-compatible API (`http://localhost:4000/v1`):
+  - Routes local models to `llama-swap` on port `8000`.
+  - Automatically fails over to `openrouter/free` (Nemotron 70B Free) or `gemini/gemini-2.5-flash` if local inference is offline or busy.
 
-## Commands
+---
 
-### 1. Check GPU VRAM & Active Ports (`8080–8090`)
+## 🚀 Commands
+
+### 1. Check VRAM & All Model Servers
 ```bash
 vram-rig-ctl status
 ```
 
-### 2. Free VRAM by Killing Specific Port(s) or Evicting All
-Kill a specific port (e.g. `8081`):
+### 2. Start / Stop `llama-swap` (Port `8000`)
 ```bash
-vram-rig-ctl kill --port 8081
-```
-Evict all non-pinned servers across `8080–8090`:
-```bash
-vram-rig-ctl evict-all
+# Start llama-swap daemon on port 8000 with watch-config
+vram-rig-ctl llama-swap-up
+
+# Check running models and configured models
+vram-rig-ctl llama-swap-status
+
+# Stop llama-swap and unload active models
+vram-rig-ctl llama-swap-down
 ```
 
-### 3. Smart Swap: Start a Model on `8080–8090`
-Checks required VRAM from `port_registry.json`. If headroom permits, starts immediately without killing the primary coder. If headroom is exceeded, frees non-pinned ports first:
+### 3. Start / Stop `LiteLLM` Gateway (Port `4000`)
 ```bash
-vram-rig-ctl swap --port 8082
-```
-
-### 4. Start / Restart LiteLLM Gateway (Port `4000`)
-```bash
+# Start LiteLLM proxy on port 4000
 vram-rig-ctl gateway-up
+
+# Stop LiteLLM proxy
+vram-rig-ctl gateway-down
+```
+
+### 4. Direct Port Controls (`8080–8090`)
+```bash
+# Kill a specific port listener (e.g. 8081)
+vram-rig-ctl kill --port 8081
+
+# Evict all non-pinned auxiliary ports to free headroom
+vram-rig-ctl evict-all
+
+# Manual single-port swap
+vram-rig-ctl swap --port 8083
 ```
