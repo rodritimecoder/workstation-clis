@@ -1,0 +1,31 @@
+{
+  "total_vram_budget_mb": 32000,
+  "pinned_port": "8080",
+  "port_range": [8080, 8090],
+  "models": {
+    "8080": {
+      "alias": "local-coder-primary",
+      "vram_mb": 22000,
+      "pinned": true,
+      "cmd": "llama-server --host 0.0.0.0 --port 8080 -m ~/models/qwen-coder-35b-q4_k_m.gguf -ngl 99 -c 32768"
+    },
+    "8081": {
+      "alias": "local-general-heavy",
+      "vram_mb": 18000,
+      "pinned": false,
+      "cmd": "llama-server --host 0.0.0.0 --port 8081 -m ~/models/gemma-4-26b-q4_k_m.gguf -ngl 99 -c 16384"
+    },
+    "8082": {
+      "alias": "local-classifier-jev",
+      "vram_mb": 3500,
+      "pinned": false,
+      "cmd": "llama-server --host 0.0.0.0 --port 8082 -m ~/models/jpt-4b-q8_0.gguf -ngl 99 -c 8192"
+    },
+    "8083": {
+      "alias": "local-ocr-vision",
+      "vram_mb": 4000,
+      "pinned": false,
+      "cmd": "llama-server --host 0.0.0.0 --port 8083 -m ~/models/glm-ocr.gguf -ngl 99"
+    }
+  }
+}

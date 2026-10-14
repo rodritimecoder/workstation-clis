@@ -1,0 +1,57 @@
+model_list:
+  # --- PRIMARY LOCAL PORTS (8080 - 8090) ---
+  - model_name: agent-coder
+    litellm_params:
+      model: openai/local-coder-primary
+      api_base: http://127.0.0.1:8080/v1
+      api_key: "local-no-key"
+      timeout: 30
+
+  - model_name: agent-fast
+    litellm_params:
+      model: openai/local-general-heavy
+      api_base: http://127.0.0.1:8081/v1
+      api_key: "local-no-key"
+      timeout: 30
+
+  - model_name: agent-classifier
+    litellm_params:
+      model: openai/local-classifier-jev
+      api_base: http://127.0.0.1:8082/v1
+      api_key: "local-no-key"
+      timeout: 10
+
+  - model_name: agent-ocr
+    litellm_params:
+      model: openai/local-ocr-vision
+      api_base: http://127.0.0.1:8083/v1
+      api_key: "local-no-key"
+      timeout: 15
+
+  # --- CLOUD FALLBACK MODELS (OPENROUTER FREE + GEMINI) ---
+  - model_name: cloud-nemotron-free
+    litellm_params:
+      model: openrouter/nvidia/llama-3.1-nemotron-70b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: cloud-openrouter-auto-free
+    litellm_params:
+      model: openrouter/openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: cloud-gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 1
+  timeout: 60
+  allowed_fails: 1
+  cooldown_time: 15
+  fallbacks:
+    - {"agent-coder": ["cloud-nemotron-free", "cloud-openrouter-auto-free", "cloud-gemini-flash"]}
+    - {"agent-fast": ["cloud-openrouter-auto-free", "cloud-gemini-flash"]}
+    - {"agent-classifier": ["cloud-gemini-flash"]}
+    - {"agent-ocr": ["cloud-gemini-flash"]}
