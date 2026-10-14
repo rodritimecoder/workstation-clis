@@ -4,7 +4,10 @@ description: >
   The DoorDash API for Code Craft, Audits, and Rigorous Reviews. Late-binding dispatch
   hub for 5 elite engineering kitchens: Ponytail (minimal diff & YAGNI), pstack (23 playbooks),
   Poteto Mode (domain modeling & discipline), Thermo-Nuclear (harsh architectural audit),
-  and Unslop (31 AI tell elimination rules).
+  and Unslop (31 AI tell elimination rules). Use whenever asked to review code, audit
+  a repo or pull request, check git diffs, run "doordash", clean up AI writing slop,
+  apply ponytail/pstack/poteto, or when an agent needs high-leverage code quality enforcement
+  without bloating the context window. Provides CLI commands: `craft-hub` and `doordash`.
 ---
 
 # Code Craft & Review Hub (`craft-hub` / `doordash`)
