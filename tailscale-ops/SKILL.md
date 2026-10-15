@@ -25,11 +25,23 @@ Before routing heavy jobs to a remote GPU host, verify both the node and target 
 tailscale-ops check-port <hostname-or-ip> <port>
 ```
 
-### 3. Expose a Local Port Privately to the Tailnet (`serve`)
-Expose a local dev server or LiteLLM gateway (`localhost:3000` or `localhost:4000`) with automatic HTTPS strictly inside the tailnet:
+### 3. Expose Entire Workstation AI Inference Matrix (`serve-mesh`)
+Expose all 11 local models/servers (Genesis 35B, LiteLLM, audio.cpp, OCR, Imajev, etc.) over private Tailscale HTTPS simultaneously with 1 command:
+```bash
+tailscale-ops serve-mesh
+```
+
+View active tunnels and full URL registry:
+```bash
+tailscale-ops mesh-status
+```
+
+### 4. Expose a Single Local Port Privately (`serve-on`)
+Expose a single dev server or LiteLLM gateway (`localhost:3000` or `localhost:4000`) with automatic HTTPS strictly inside the tailnet:
 ```bash
 tailscale-ops serve-on 4000
 ```
+
 
 ### 4. Expose a Local Port Publicly for Webhooks (`funnel`)
 Open a temporary public HTTPS tunnel (ports 443, 8443, or 10000) so external services (GitHub Actions, PostHog, webhooks) can reach a local listener:

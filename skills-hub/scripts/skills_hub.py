@@ -292,6 +292,76 @@ def cmd_run(skill_name: str, extra_args: list, out_path: str = None, project_fie
         sys.exit(proc.returncode)
 
 
+def cmd_mesh(as_json: bool = False):
+    """Inspects status and reports local vs. Tailscale HTTPS routing endpoints for all workstation inference services."""
+    services = [
+        {"port": 4000, "name": "LiteLLM Dynamic Gateway", "env": "HOMELAB_LITELLM_URL"},
+        {"port": 8000, "name": "llama-swap Controller", "env": "HOMELAB_LLAMASWAP_URL"},
+        {"port": 8080, "name": "Genesis 35B Primary LLM", "env": "HOMELAB_GENESIS_URL"},
+        {"port": 8081, "name": "audio.cpp Nemotron ASR & TTS", "env": "HOMELAB_AUDIOCPP_URL"},
+        {"port": 8082, "name": "bge-small 384d Embeddings", "env": "HOMELAB_EMBEDDINGS_URL"},
+        {"port": 8083, "name": "Imajev-4B Decision Gating", "env": "HOMELAB_IMAJEV_URL"},
+        {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "env": "HOMELAB_CRISPEMBED_URL"},
+        {"port": 8085, "name": "LightOnOCR Flagship Document OCR", "env": "HOMELAB_LIGHTONOCR_URL"},
+        {"port": 8088, "name": "DeskForge Visual GUI Grounding", "env": "HOMELAB_DESKFORGE_URL"},
+        {"port": 8090, "name": "JPT-4B Decision Engine", "env": "HOMELAB_JPT_URL"},
+        {"port": 3010, "name": "KasmVNC Browser Web Desktop", "env": "HOMELAB_KASMVNC_URL"},
+    ]
+
+    ts_dns = None
+    ts_ip = None
+    try:
+        ts_out = subprocess.check_output(["tailscale", "status", "--json"], stderr=subprocess.DEVNULL)
+        ts_data = json.loads(ts_out.decode("utf-8"))
+        self_node = ts_data.get("Self", {})
+        ts_dns = self_node.get("DNSName", "").rstrip(".")
+        ts_ip = (self_node.get("TailscaleIPs") or [None])[0]
+    except Exception:
+        pass
+
+    results = []
+    import socket
+
+    for s in services:
+        port = s["port"]
+        online = False
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.3)
+        try:
+            sock.connect(("127.0.0.1", port))
+            sock.close()
+            online = True
+        except Exception:
+            pass
+
+        local_url = f"http://127.0.0.1:{port}"
+        ts_url = f"https://{ts_dns}:{port}" if ts_dns else f"http://{ts_ip}:{port}" if ts_ip else "Tailscale Offline"
+
+        results.append({
+            "service": s["name"],
+            "port": port,
+            "status": "ONLINE" if online else "OFFLINE",
+            "local_url": local_url,
+            "tailscale_url": ts_url,
+            "env_var": s["env"],
+        })
+
+    if as_json:
+        print(json.dumps({"tailscale_node": ts_dns, "tailscale_ip": ts_ip, "services": results}, indent=2))
+        return
+
+    print("\n🌐 [Workstation Inference & Tailscale Mesh]")
+    print(f"   Node DNS: {ts_dns or 'Offline'}")
+    print(f"   Node IP:  {ts_ip or 'Offline'}")
+    print("\n   " + f"{'SERVICE':<34} │ {'STATUS':<10} │ {'LOCAL ENDPOINT':<24} │ {'TAILSCALE HTTPS ENDPOINT'}")
+    print("   " + "─" * 35 + "┼" + "─" * 12 + "┼" + "─" * 26 + "┼" + "─" * 40)
+    for r in results:
+        status_icon = "🟢 ONLINE " if r["status"] == "ONLINE" else "⚪ OFFLINE"
+        print(f"   {r['service']:<34} │ {status_icon:<10} │ {r['local_url']:<24} │ {r['tailscale_url']}")
+
+    print("\n💡 Tip: Run `tailscale-ops serve-mesh` to expose all services over private Tailscale HTTPS.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="skills-hub",
@@ -324,6 +394,10 @@ if __name__ == "__main__":
     p_run.add_argument("--jq", default=None, help="JQ filter expression to project output")
     p_run.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to the skill")
 
+    # 6. Mesh (Tailscale & Local Inference Registry)
+    p_mesh = sub.add_parser("mesh", help="View status and Tailscale routing endpoints for all local inference services")
+    p_mesh.add_argument("--json", action="store_true", help="Output as JSON")
+
     args = parser.parse_args()
     if args.action == "list":
         cmd_list(as_json=args.json)
@@ -335,3 +409,6 @@ if __name__ == "__main__":
         cmd_inspect(args.skill)
     elif args.action == "run":
         cmd_run(args.skill, args.args, out_path=args.out, project_fields=args.project, jq_expr=args.jq)
+    elif args.action == "mesh":
+        cmd_mesh(as_json=args.json)
+

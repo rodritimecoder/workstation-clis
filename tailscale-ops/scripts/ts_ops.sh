@@ -97,6 +97,50 @@ except Exception as e:
     echo "✅ All Tailscale serve and funnel configurations cleared."
     ;;
 
+  serve-mesh)
+    check_tailscale
+    DNS_NAME=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("Self", {}).get("DNSName", "").rstrip("."))')
+    echo "⚡ Exposing Workstation AI Inference Matrix over Private Tailscale HTTPS (${DNS_NAME})..."
+    
+    SERVICES=(
+      "4000:LiteLLM Dynamic Gateway"
+      "8000:llama-swap Controller"
+      "8080:Genesis 35B Primary LLM"
+      "8081:audio.cpp Nemotron ASR & Kokoro TTS"
+      "8082:bge-small Embeddings"
+      "8083:Imajev-4B Decision Gating"
+      "8084:CrispEmbed Scene-Text OCR"
+      "8085:LightOnOCR Flagship Document OCR"
+      "8088:DeskForge Visual GUI Grounding"
+      "8090:JPT-4B Decision Engine"
+      "3010:KasmVNC Browser Web Desktop"
+    )
+
+    for item in "${SERVICES[@]}"; do
+      PORT="${item%%:*}"
+      NAME="${item##*:}"
+      echo "  • Serving $NAME on :$PORT..."
+      tailscale serve --bg --https "$PORT" "http://127.0.0.1:$PORT" >/dev/null 2>&1 || true
+    done
+
+    echo ""
+    echo "✅ Workstation Inference Mesh Online across Tailnet:"
+    printf "  %-38s %s\n" "SERVICE" "TAILSCALE HTTPS URL"
+    echo "  ────────────────────────────────────────────────────────────────────────────────"
+    for item in "${SERVICES[@]}"; do
+      PORT="${item%%:*}"
+      NAME="${item##*:}"
+      printf "  %-38s https://%s:%s\n" "$NAME" "$DNS_NAME" "$PORT"
+    done
+    ;;
+
+  mesh-status)
+    check_tailscale
+    DNS_NAME=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("Self", {}).get("DNSName", "").rstrip("."))')
+    echo "📊 Workstation Tailscale Mesh Status (${DNS_NAME}):"
+    tailscale serve status
+    ;;
+
   send-file)
     check_tailscale
     FILE_PATH="${1:?File path required}"
@@ -107,12 +151,14 @@ except Exception as e:
     ;;
 
   *)
-    echo "Usage: $0 {peers|check-port|serve-on|funnel-on|reset-tunnels|send-file}" >&2
+    echo "Usage: $0 {peers|check-port|serve-mesh|mesh-status|serve-on|funnel-on|reset-tunnels|send-file}" >&2
     echo "  peers"
     echo "  check-port <hostname-or-ip> <port>"
-    echo "  serve-on <port>"
-    echo "  funnel-on <port>"
-    echo "  reset-tunnels"
+    echo "  serve-mesh             # Expose all 11 workstation inference services over Tailscale HTTPS"
+    echo "  mesh-status            # View active Tailscale serve configurations"
+    echo "  serve-on <port>        # Expose single port privately on tailnet"
+    echo "  funnel-on <port>       # Expose single port publicly via funnel"
+    echo "  reset-tunnels          # Tear down all serve and funnel tunnels"
     echo "  send-file <file-path> <target-node:>"
     exit 1
     ;;
