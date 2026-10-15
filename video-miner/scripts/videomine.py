@@ -45,7 +45,6 @@ STAGES = [
 ]
 
 # Service Endpoints
-AUDIOCPP_SCRIPT = Path.home() / ".gemini" / "config" / "skills" / "audiocpp-asr" / "scripts" / "asr.py"
 IMAJEV_URL = os.environ.get("IMAJEV_URL", "http://127.0.0.1:8083/v1/chat/completions")
 
 LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
@@ -54,6 +53,32 @@ LLAMA_SERVER_BIN = Path(os.environ.get("LLAMA_SERVER_BIN", "/run/media/rodri/AI/
 LLAMA_MTMD_CLI = Path(os.environ.get("LLAMA_MTMD_CLI", "/run/media/rodri/AI/llama.cpp/build/bin/llama-mtmd-cli"))
 LIGHTON_PORT = int(os.environ.get("LIGHTON_PORT", "8085"))
 LIGHTON_URL = os.environ.get("LIGHTON_URL", f"http://127.0.0.1:{LIGHTON_PORT}/v1/chat/completions")
+
+
+def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False) -> list[str]:
+    local_hub = shutil.which("local-hub")
+    if local_hub:
+        cmd = [local_hub, "asr", "transcribe", str(audio_wav)]
+        if offline:
+            cmd.extend(["--engine", "cli"])
+        if details:
+            cmd.append("--details")
+        return cmd
+
+    candidates = [
+        Path("/run/media/rodri/AI/skills/local-hub/scripts/asr.py"),
+        Path.home() / ".gemini" / "config" / "skills" / "local-hub" / "scripts" / "asr.py",
+        Path.home() / ".gemini" / "config" / "skills" / "audiocpp-asr" / "scripts" / "asr.py",
+    ]
+    for c in candidates:
+        if c.is_file():
+            cmd = ["python3", str(c), "transcribe", str(audio_wav)]
+            if offline:
+                cmd.extend(["--engine", "cli"])
+            if details:
+                cmd.append("--details")
+            return cmd
+    raise FileNotFoundError("Could not locate local-hub or asr.py on the system.")
 
 
 
@@ -192,6 +217,44 @@ def run_stage_01_acquire(workspace: Path, video_source: str) -> None:
     print(f"[01_acquire] Done. Outputs in {out_dir}")
 
 
+def parse_asr_segments(raw: Any) -> list[dict]:
+    segments = []
+    if isinstance(raw, dict):
+        if "words" in raw and raw["words"]:
+            word_list = raw["words"]
+            cur_words = []
+            seg_start = word_list[0].get("start_sec", 0.0)
+            last_end = seg_start
+            for w in word_list:
+                w_text = w.get("word", "")
+                w_start = w.get("start_sec", last_end)
+                w_end = w.get("end_sec", w_start)
+                if cur_words and ((w_start - last_end > 1.2) or ("".join(cur_words).strip().endswith((".", "!", "?")))):
+                    segments.append({
+                        "start": seg_start,
+                        "end": last_end,
+                        "text": "".join(cur_words).strip()
+                    })
+                    cur_words = []
+                    seg_start = w_start
+                cur_words.append(w_text)
+                last_end = w_end
+            if cur_words:
+                segments.append({
+                    "start": seg_start,
+                    "end": last_end,
+                    "text": "".join(cur_words).strip()
+                })
+            return segments
+        elif "segments" in raw:
+            return raw["segments"]
+        elif "text" in raw:
+            return [{"start": 0.0, "end": 0.0, "text": raw["text"]}]
+    elif isinstance(raw, list):
+        return raw
+    return []
+
+
 def run_stage_02_audio_asr(workspace: Path) -> None:
     stage_dir = workspace / "stages" / "02_audio_asr"
     out_dir = stage_dir / "output"
@@ -201,33 +264,27 @@ def run_stage_02_audio_asr(workspace: Path) -> None:
     if not audio_wav.exists():
         raise FileNotFoundError(f"Missing upstream audio: {audio_wav}")
 
-    print("[02_audio_asr] Transcribing speech with audiocpp-asr...")
-    # Check if native subtitles exist first in 01_acquire
-    sub_files = list((workspace / "stages" / "01_acquire" / "output").glob("*.vtt"))
-    has_native_subs = False
+    print("[02_audio_asr] Transcribing speech with Nemotron ASR (local-hub asr)...")
     
-    # We call local ASR CLI
-    cmd = ["python3", str(AUDIOCPP_SCRIPT), "transcribe", str(audio_wav), "--details"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    
+    # Try server mode first, fall back to offline CLI
+    res = None
+    try:
+        cmd_srv = get_asr_cmd(audio_wav, details=True, offline=False)
+        res = subprocess.run(cmd_srv, capture_output=True, text=True)
+    except Exception:
+        res = None
+
+    if not res or res.returncode != 0:
+        print("  [02_audio_asr] Server not responsive. Using offline CLI engine...")
+        cmd_cli = get_asr_cmd(audio_wav, details=True, offline=True)
+        res = subprocess.run(cmd_cli, capture_output=True, text=True, check=True)
+
     segments = []
-    if res.returncode == 0:
-        try:
-            raw = json.loads(res.stdout)
-            # Adapt audiocpp details JSON format
-            if isinstance(raw, dict) and "segments" in raw:
-                segments = raw["segments"]
-            elif isinstance(raw, list):
-                segments = raw
-            elif isinstance(raw, dict) and "text" in raw:
-                segments = [{"start": 0.0, "end": 0.0, "text": raw["text"]}]
-        except Exception:
-            segments = [{"start": 0.0, "end": 0.0, "text": res.stdout.strip()}]
-    else:
-        # Fallback to direct CLI engine
-        cmd_cli = ["python3", str(AUDIOCPP_SCRIPT), "transcribe", str(audio_wav), "--engine", "cli"]
-        res_cli = subprocess.run(cmd_cli, capture_output=True, text=True, check=True)
-        segments = [{"start": 0.0, "end": 0.0, "text": res_cli.stdout.strip()}]
+    try:
+        raw = json.loads(res.stdout)
+        segments = parse_asr_segments(raw)
+    except Exception:
+        segments = [{"start": 0.0, "end": 0.0, "text": res.stdout.strip()}]
 
     transcript_json = out_dir / "transcript.json"
     transcript_md = out_dir / "transcript.md"
@@ -243,7 +300,7 @@ def run_stage_02_audio_asr(workspace: Path) -> None:
             md_lines.append(f"**[{ts}]** {text}\n\n")
             
     transcript_md.write_text("".join(md_lines), encoding="utf-8")
-    print(f"[02_audio_asr] Done. Generated {len(segments)} segments in {transcript_md}")
+    print(f"[02_audio_asr] Done. Generated {len(segments)} timestamped segments in {transcript_md}")
 
 
 def run_stage_03_visual_sample(workspace: Path) -> None:

@@ -12,6 +12,8 @@ description: >
 Use this skill to delegate self-contained coding loops, multi-command bash workflows, calibrated decisions, vector embeddings, and speech synthesis to verified zero-cost endpoints without exhausting primary frontier token quotas.
 
 ## Verified Free Endpoint Catalog
+- **Note-Taking & Synthesis**: `dots-studio/dots-3-note-preview:free` (Reasoning note synthesis)
+- **Agentic Reasoning & Chat**: `thinkingmachines/inkling:free` (Thinking Machines agentic free tier)
 - **Reasoning & Code (Heavy)**: `nvidia/nemotron-3-ultra-550b-a55b:free`
 - **Fast Subagent Coding**: `nvidia/nemotron-3.5-lightning:free`
 - **General Free Router**: `openrouter/free`
@@ -19,7 +21,7 @@ Use this skill to delegate self-contained coding loops, multi-command bash workf
 - **Vector Embeddings**: `liquid/lfm-2.5-embedding-350m:free` & `nvidia/llama-nemotron-embed-vl-1b-v2:free`
 - **Neural Reranking**: `nvidia/llama-nemotron-rerank-vl-1b-v2:free`
 - **TTS Speech Audio**: `fish-audio/s2.1-pro-free:free`
-- **Automatic Fallback**: Local Homelab -> Free High-Reasoning -> Dynamic Free -> Google AI Studio (`gemini-2.0-flash`)
+- **Automatic Fallback**: Local Homelab -> Free High-Reasoning -> Dynamic Free -> Google AI Studio (`gemini-3.5-flash-lite` / `gemini-2.0-flash`)
 
 ## Prerequisites
 - `OPENROUTER_API_KEY`: Required (`sk-or-v1-...`).

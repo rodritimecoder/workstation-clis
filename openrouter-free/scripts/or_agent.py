@@ -65,6 +65,18 @@ CHAT_CASCADE = [
     },
     {
         "provider": "openrouter",
+        "model": "dots-studio/dots-3-note-preview:free",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "env_key": "OPENROUTER_API_KEY",
+    },
+    {
+        "provider": "openrouter",
+        "model": "thinkingmachines/inkling:free",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "env_key": "OPENROUTER_API_KEY",
+    },
+    {
+        "provider": "openrouter",
         "model": "nvidia/nemotron-3.5-lightning:free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "env_key": "OPENROUTER_API_KEY",
@@ -156,8 +168,8 @@ def _http_post_json(url: str, payload: dict, api_key: str, timeout: int = 90) ->
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/local-agent-harness",
-            "X-Title": "openrouter-free-skill",
+            "HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
+            "X-Title": "Roo Code",
         },
         method="POST",
     )
@@ -213,6 +225,8 @@ def call_llm_with_cascade(messages: list, preferred_model: str = None, enable_to
             timeout_s = 5 if target["provider"] == "homelab" else 90
             data = _http_post_json(target["url"], payload, api_key, timeout=timeout_s)
             choice = data["choices"][0]["message"]
+            if not choice.get("content") and choice.get("reasoning"):
+                choice["content"] = choice["reasoning"]
             return choice, target["model"]
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
