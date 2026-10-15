@@ -14,6 +14,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+SCRIPT_PATH = Path(__file__).resolve()
+if SCRIPT_PATH.parent.name == "scripts":
+    CRAFT_HUB_DIR = SCRIPT_PATH.parent.parent
+else:
+    CRAFT_HUB_DIR = SCRIPT_PATH.parent
+
+KITCHENS_DIR = CRAFT_HUB_DIR / "kitchens"
 SKILLS_DIR = Path("/run/media/rodri/AI/skills")
 
 KITCHENS = {
@@ -21,34 +28,79 @@ KITCHENS = {
         "name": "Ponytail Suite",
         "emoji": "🍔",
         "chef": "The Lazy Senior Developer",
-        "skill_dir": "ponytail",
+        "rubric_path": "ponytail/rubric.md",
         "tags": ["minimal diff", "yagni", "lazy dev", "simplest solution", "delete bloat", "least code"],
         "description": "The best code is the code never written. Solves the whole problem with the least new code. Deletion beats addition.",
         "related": ["ponytail-review", "ponytail-audit", "ponytail-debt", "ponytail-gain", "ponytail-help"]
+    },
+    "ponytail-audit": {
+        "name": "Ponytail Whole-Repo Audit",
+        "emoji": "🔍",
+        "chef": "The Lazy Senior Developer",
+        "rubric_path": "ponytail/audit.md",
+        "tags": ["audit", "whole repo", "dead code", "bugs", "load breaks"],
+        "description": "Quality audit of a whole repo: bugs, security holes, load breaks, risky untested code, and what to delete.",
+        "related": ["ponytail", "ponytail-review"]
+    },
+    "ponytail-review": {
+        "name": "Ponytail Code Review",
+        "emoji": "🧐",
+        "chef": "The Lazy Senior Developer",
+        "rubric_path": "ponytail/review.md",
+        "tags": ["code review", "review diff", "safety", "tests", "minimal diff"],
+        "description": "Quality review of a change: correctness, safety, load resilience, test coverage, and lean diff.",
+        "related": ["ponytail", "ponytail-audit"]
+    },
+    "ponytail-debt": {
+        "name": "Ponytail Debt Ledger",
+        "emoji": "📝",
+        "chef": "The Lazy Senior Developer",
+        "rubric_path": "ponytail/debt.md",
+        "tags": ["debt", "shortcuts", "todo", "fixme", "deferred"],
+        "description": "Scans for shortcut/ponytail comments and deferred items across the repo as an actionable ledger.",
+        "related": ["ponytail"]
+    },
+    "ponytail-gain": {
+        "name": "Ponytail Benchmark & Gain",
+        "emoji": "📊",
+        "chef": "The Lazy Senior Developer",
+        "rubric_path": "ponytail/gain.md",
+        "tags": ["benchmark", "cost", "speed", "savings"],
+        "description": "Measured savings and benchmarks for ponytail mode.",
+        "related": ["ponytail"]
+    },
+    "ponytail-help": {
+        "name": "Ponytail Help & Quick Reference",
+        "emoji": "❓",
+        "chef": "The Lazy Senior Developer",
+        "rubric_path": "ponytail/help.md",
+        "tags": ["help", "reference", "cheatsheet"],
+        "description": "Quick reference card for ponytail levels, skills, and commands.",
+        "related": ["ponytail"]
     },
     "pstack": {
         "name": "pstack Playbooks",
         "emoji": "🍣",
         "chef": "Lauren Tan (Cursor / React Core)",
-        "skill_dir": "pstack",
+        "rubric_path": "pstack/rubric.md",
         "tags": ["playbooks", "investigation", "hillclimb", "runtime forensics", "shipping", "babysit", "prototype", "rigorous"],
         "description": "23 battle-tested engineering playbooks for deep agent autonomy, systematic triage, and rigorous verification.",
-        "related": ["architect", "swarm", "arena", "interrogate"]
+        "related": ["poteto", "create-verification"]
     },
     "poteto": {
         "name": "Poteto Mode",
         "emoji": "🥗",
         "chef": "Foundational Architecture Discipline",
-        "skill_dir": "poteto-mode",
+        "rubric_path": "poteto/rubric.md",
         "tags": ["domain modeling", "state matrix", "foundational thinking", "laziness protocol", "state machine", "type discipline", "verified execution"],
-        "description": "Encode the domain into state machines, pre-implementation transition matrices, and types instead of scattered conditionals. Never block on the human; verify against real artifacts.",
-        "related": ["pstack"]
+        "description": "Encode the domain into state machines, pre-implementation transition matrices, and types instead of scattered conditionals.",
+        "related": ["pstack", "typescript"]
     },
     "thermonuclear": {
         "name": "Thermo-Nuclear Review",
         "emoji": "🍕",
         "chef": "Harsh Architectural Auditor",
-        "skill_dir": "thermo-nuclear-code-quality-review",
+        "rubric_path": "thermonuclear/rubric.md",
         "tags": ["harsh review", "maintainability", "1000 line ceiling", "anti-spaghetti", "structural judo", "architecture audit"],
         "description": "Unusually strict maintainability review. Enforces 1,000-line ceiling, forbids spaghetti conditionals, and seeks structural deletion judo.",
         "related": []
@@ -57,7 +109,7 @@ KITCHENS = {
         "name": "Unslop Prose",
         "emoji": "🍜",
         "chef": "Human Voice Enforcer",
-        "skill_dir": "unslop",
+        "rubric_path": "unslop/rubric.md",
         "tags": ["ai tells", "unslop", "human writing", "no fluff", "active voice", "cut jargon", "anti-bot"],
         "description": "31-rule precision scanner that strips AI tell patterns: superficial -ing, fake ranges, sycophancy, fancy synonyms, and robotic hedging.",
         "related": []
@@ -66,7 +118,7 @@ KITCHENS = {
         "name": "Create Verification Skill",
         "emoji": "🔬",
         "chef": "The Grounded Verifier",
-        "skill_dir": "pstack/skills/create-verification-skill",
+        "rubric_path": "pstack/skills/create-verification-skill/rubric.md",
         "tags": ["verification", "test harness", "requirement traceability", "drive", "doctor", "launch", "evidence", "feature map", "prove it works"],
         "description": "Generate a project-local verification skill with Launch, Doctor, Drive, Evidence, Cleanup, and [REQ-XX] Feature Map.",
         "related": ["maintain-verification", "poteto"]
@@ -75,7 +127,7 @@ KITCHENS = {
         "name": "Maintain Verification Skill",
         "emoji": "🧪",
         "chef": "The Drift Hunter",
-        "skill_dir": "pstack/skills/maintain-verification-skill",
+        "rubric_path": "pstack/skills/maintain-verification-skill/rubric.md",
         "tags": ["verify audit", "drift check", "live pass", "feature map upkeep", "doctor check", "evidence"],
         "description": "Periodic upkeep pass that checks source drift, drives every mapped feature live, verifies health with Doctor, and flags product regressions.",
         "related": ["create-verification", "poteto"]
@@ -84,7 +136,7 @@ KITCHENS = {
         "name": "No Comments (Comment Sicko)",
         "emoji": "✂️",
         "chef": "Comment Sicko",
-        "skill_dir": "pstack/skills/no-comments",
+        "rubric_path": "pstack/skills/no-comments/rubric.md",
         "tags": ["clean code", "no comments", "comment sicko", "strip ai fluff", "encode constraints", "types over comments"],
         "description": "Eliminate redundant code comments, strip AI commentary, and encode real constraints into types, runtime assertions, or linter rules.",
         "related": ["ponytail", "typescript"]
@@ -93,7 +145,7 @@ KITCHENS = {
         "name": "TypeScript Best Practices",
         "emoji": "🛡️",
         "chef": "Type Discipline Enforcer",
-        "skill_dir": "pstack/skills/typescript-best-practices",
+        "rubric_path": "pstack/skills/typescript-best-practices/rubric.md",
         "tags": ["typescript", "ts discipline", "discriminated unions", "branded types", "no as casts", "satisfies", "schemas"],
         "description": "Discriminated unions, branded types, constructive modeling, schemas before guards, zero 'as' casts, and 'satisfies' over 'as'.",
         "related": ["poteto", "no-comments"]
@@ -112,11 +164,12 @@ UNSLOP_PATTERNS = [
 ]
 
 
-def resolve_skill_file(skill_dir: str) -> Path:
+def resolve_skill_file(rel_path: str) -> Path:
     candidates = [
-        SKILLS_DIR / skill_dir / "SKILL.md",
-        Path.home() / ".gemini" / "config" / "skills" / skill_dir / "SKILL.md",
-        Path.home() / "my-agent-skills" / skill_dir / "SKILL.md",
+        KITCHENS_DIR / rel_path,
+        KITCHENS_DIR / f"{rel_path}.md",
+        KITCHENS_DIR / rel_path / "rubric.md",
+        SKILLS_DIR / rel_path / "SKILL.md",
     ]
     for c in candidates:
         if c.is_file():
@@ -191,7 +244,7 @@ def cmd_inspect(kitchen_id: str):
         print(f"❌ Unknown kitchen '{kitchen_id}'. Available: {', '.join(KITCHENS.keys())}")
         sys.exit(1)
 
-    skill_file = resolve_skill_file(info["skill_dir"])
+    skill_file = resolve_skill_file(info.get("rubric_path", info.get("skill_dir", "")))
     if not skill_file.is_file():
         print(f"❌ Skill file not found: {skill_file}")
         sys.exit(1)
@@ -338,7 +391,7 @@ def evaluate_kitchen(kitchen_id: str, target: str = None) -> dict:
         else:
             checks.append("• Clean working tree or no diff for file size audit.")
 
-    elif k_id == "ponytail":
+    elif k_id in ["ponytail", "ponytailreview"]:
         if target_text and is_git_diff:
             added = sum(1 for line in target_text.splitlines() if line.startswith("+") and not line.startswith("+++"))
             deleted = sum(1 for line in target_text.splitlines() if line.startswith("-") and not line.startswith("---"))
@@ -350,6 +403,28 @@ def evaluate_kitchen(kitchen_id: str, target: str = None) -> dict:
                 checks.append("✅ Diff volume is compact and minimal.")
         else:
             checks.append("• Clean working tree or no diff to calculate delta.")
+
+    elif k_id in ["ponytaildebt", "debt"]:
+        debt_items = []
+        try:
+            res = subprocess.run(["git", "grep", "-En", r"(//|#)\s*(shortcut|ponytail|TODO|FIXME):"], capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout.strip():
+                debt_items = res.stdout.strip().splitlines()
+        except Exception:
+            pass
+        if debt_items:
+            checks.append(f"📝 Found {len(debt_items)} recorded shortcut/debt item(s):")
+            for item in debt_items[:8]:
+                checks.append(f"   {item.strip()}")
+            if len(debt_items) > 8:
+                checks.append(f"   ... and {len(debt_items) - 8} more.")
+        else:
+            checks.append("✅ Zero unresolved shortcut: or ponytail: comments found in repository.")
+
+    elif k_id in ["ponytailaudit", "audit"]:
+        checks.append("1. Bug & Vulnerability Scan: Search for unchecked inputs, loose type casts, and state leaks.")
+        checks.append("2. Dead Code Removal: Identify orphaned files, uncalled functions, and dead dependencies.")
+        checks.append("3. Real Load Resilience: Verify timeouts, failure handling, and retry bounds.")
 
     elif k_id == "unslop":
         findings = scan_unslop(target_text) if target_text else []
@@ -410,7 +485,7 @@ def evaluate_kitchen(kitchen_id: str, target: str = None) -> dict:
         else:
             checks.append("• No modified code files found to audit comments.")
 
-    skill_file = resolve_skill_file(info["skill_dir"])
+    skill_file = resolve_skill_file(info.get("rubric_path", info.get("skill_dir", "")))
     return {
         "kitchen_id": k_id,
         "name": info["name"],

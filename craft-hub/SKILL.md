@@ -18,7 +18,7 @@ description: >
 
 | # | Kitchen ID | Specialty & Core Philosophy |
 |---|---|---|
-| 🍔 | **`ponytail`** | **Lazy Senior Dev & YAGNI**: Deletion beats addition, smallest complete change, no unasked-for wrappers or boilerplate. |
+| 🍔 | **`ponytail`** | **Lazy Senior Dev & YAGNI**: Deletion beats addition, smallest complete change, no unasked-for wrappers or boilerplate. Sub-recipes: `ponytail-review` (diff review), `ponytail-audit` (repo audit), `ponytail-debt` (shortcut/todo tracking), `ponytail-gain` (benchmark savings). |
 | 🍣 | **`pstack`** | **Rigorous Agent Playbooks**: 23 execution playbooks (Investigation, Hillclimbing, Runtime Forensics, Babysit, Shipping). |
 | 🥗 | **`poteto`** | **Foundational Discipline**: Model the domain in types/state machines, laziness protocol, verified artifacts. |
 | 🍕 | **`thermonuclear`** | **Harsh Architectural Audit**: Anti-spaghetti conditionals, 1,000-line ceiling, structural "code judo" deletions. |
