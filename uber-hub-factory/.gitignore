@@ -1,0 +1,8 @@
+# Ignore transient stage outputs
+01_inventory/output/*
+02_scaffold_hub/output/*
+03_shims_and_compat/output/*
+04_verify_and_sync/output/*
+!*/output/.gitkeep
+__pycache__/
+*.pyc

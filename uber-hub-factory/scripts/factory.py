@@ -25,7 +25,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_PATH = Path(__file__).resolve()
+if SCRIPT_PATH.parent.name == "scripts":
+    SKILL_DIR = SCRIPT_PATH.parent.parent
+else:
+    SKILL_DIR = SCRIPT_PATH.parent
+
 TEMPLATES_DIR = SKILL_DIR / "_templates" / "uber-hub"
 CANONICAL_SKILLS_DIR = Path("/run/media/rodri/AI/skills")
 LOCAL_BIN_DIR = Path.home() / ".local" / "bin"
