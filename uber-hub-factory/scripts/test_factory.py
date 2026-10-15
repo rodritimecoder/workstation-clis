@@ -49,7 +49,7 @@ def test_factory_bridge_end_to_end():
         manifest = factory.stage1_discover(["mock-tool-a", "mock-tool-b"], output_file=m_file)
         assert "mock-tool-a" in manifest["skills"], "mock-tool-a not discovered"
         assert "mock-tool-b" in manifest["skills"], "mock-tool-b not discovered"
-        assert manifest["skills"]["mock-tool-a"]["scripts"] == ["tool_a.py"]
+        assert "scripts/tool_a.py" in manifest["skills"]["mock-tool-a"]["scripts"]
         assert m_file.is_file(), "Manifest file not created"
 
         # 2. Test Stage 2: Bridge & Scaffold

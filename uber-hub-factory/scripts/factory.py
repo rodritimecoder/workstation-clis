@@ -60,21 +60,27 @@ def stage1_discover(skill_names: list[str], output_file: Path = None) -> dict:
                     desc = " ".join(re.sub(r"^[>|]-?\s*", "", raw_desc).split()).strip('"\'')
 
         scripts = []
-        primary_entry = None
         scripts_dir = s_dir / "scripts"
         if scripts_dir.is_dir():
             for sf in sorted(scripts_dir.iterdir()):
                 if sf.is_file() and (sf.suffix in (".py", ".sh") or os.access(sf, os.X_OK)):
-                    scripts.append(sf.name)
-            if scripts:
-                primary_entry = f"scripts/{scripts[0]}"
+                    scripts.append(f"scripts/{sf.name}")
+        for rf in sorted(s_dir.iterdir()):
+            if rf.is_file() and rf.suffix in (".py", ".sh"):
+                if not rf.name.startswith("test_") and rf.name not in ("setup.py", "__init__.py"):
+                    scripts.append(rf.name)
 
-        # Check for root script if no scripts/ folder
-        if not primary_entry:
-            for cand in [s_dir / f"{s_name}.py", s_dir / f"{s_name.replace('-', '_')}.py"]:
-                if cand.is_file():
-                    primary_entry = cand.name
-                    break
+        # Pick best primary entrypoint
+        primary_entry = None
+        s_clean = s_name.lower().replace("-", "_")
+        prefix = s_name.split("-")[0].lower()
+        for candidate in scripts:
+            c_lower = candidate.lower()
+            if s_clean in c_lower or f"{prefix}_" in c_lower or "cli" in c_lower or "format" in c_lower:
+                primary_entry = candidate
+                break
+        if not primary_entry and scripts:
+            primary_entry = scripts[0]
 
         manifest["skills"][s_name] = {
             "name": s_name,

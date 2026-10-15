@@ -1,56 +1,107 @@
 {
   "skills": {
-    "markitdown-cli": {
-      "name": "markitdown-cli",
-      "folder": "markitdown-cli",
-      "path": "/run/media/rodri/AI/skills/markitdown-cli",
-      "description": "Convert documents to Markdown using Microsoft's MarkItDown library: PDF, DOCX, PPTX, XLSX, HTML, CSV, JSON, XML, YAML, EPUB, ZIP, Outlook .msg, Jupyter notebooks, images (with optional local OCR), and audio. Use when asked to convert, extract text from, or read a document/attachment/slidesheet/spreadsheet into Markdown or plain text for analysis, archiving, or LLM consumption.",
-      "entrypoint": "scripts/markitdown_cli.py",
+    "canvas-cli": {
+      "name": "canvas-cli",
+      "folder": "canvas-cli",
+      "path": "/run/media/rodri/AI/skills/canvas-cli",
+      "description": "Fetch Canvas LMS data including courses, assignments, grades, enrollments, announcements, modules, discussions, submissions, quizzes, pages, files, and calendar events. Use when asked about Canvas LMS, school assignments, grades, course content, homework, due dates, announcements, or any Canvas-related school data.",
+      "entrypoint": "scripts/canvas_cli.py",
       "scripts": [
-        "markitdown_cli.py",
-        "test_markitdown_cli.py"
+        "scripts/canvas_cli.py",
+        "scripts/pdf_ocr.py",
+        "scripts/test_canvas_cli.py"
       ],
       "has_skill_md": true,
       "tags": [
-        "markitdown-cli",
-        "convert",
-        "documents",
-        "markdown",
-        "using",
-        "microsoft"
+        "canvas-cli",
+        "fetch",
+        "canvas",
+        "lms",
+        "data",
+        "including"
       ]
     },
-    "video-miner": {
-      "name": "video-miner",
-      "folder": "video-miner",
-      "path": "/run/media/rodri/AI/skills/video-miner",
-      "description": "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (Imajev), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints.",
-      "entrypoint": "scripts/videomine.py",
+    "zoom-recorder": {
+      "name": "zoom-recorder",
+      "folder": "zoom-recorder",
+      "path": "/run/media/rodri/AI/skills/zoom-recorder",
+      "description": "Download transcripts, audio, and visual keyframe slides from Zoom cloud recordings (utsmeet.zoom.us and *.zoom.us) without requiring Zoom API admin credentials. Supports password validation, unwrapping Outlook/Mimecast protection URLs, and automated scraping/extraction from Canvas LMS pages and modules.",
+      "entrypoint": "scripts/zoom_download.py",
       "scripts": [
-        "videomine.py"
+        "scripts/align_pdf_transcript.py",
+        "scripts/zoom_download.py"
       ],
       "has_skill_md": true,
       "tags": [
-        "video-miner",
-        "extract",
-        "transcribe",
+        "zoom-recorder",
+        "download",
+        "transcripts",
+        "audio",
         "and",
-        "synthesize",
-        "knowledge"
+        "visual"
+      ]
+    },
+    "cornell-notes": {
+      "name": "cornell-notes",
+      "folder": "cornell-notes",
+      "path": "/run/media/rodri/AI/skills/cornell-notes",
+      "description": "Convert existing Markdown (.md) notes into clean, print-ready Cornell Notes HTML with active-recall cue\u2013note pairs, interactive self-quiz mode, and section summaries. Use whenever asked to convert notes, format into Cornell notes, make Cornell notes, create revision notes, export to Anki, or prepare print-ready study notes from a markdown document.",
+      "entrypoint": "format_notes.py",
+      "scripts": [
+        "format_notes.py",
+        "srs_review.py"
+      ],
+      "has_skill_md": true,
+      "tags": [
+        "cornell-notes",
+        "convert",
+        "existing",
+        "markdown",
+        "notes",
+        "into"
       ]
     }
   },
   "callers": {
-    "markitdown-cli": [
+    "canvas-cli": [
+      "AGENTS.md",
       "README.md",
+      "academic-icm/SKILL.md",
       "academic-icm/scripts/academic_icm.py",
-      "video-miner/_templates/workspace/AGENTS.md"
+      "uber-hub-factory/01_discover/CONTEXT.md",
+      "uber-hub-factory/01_discover/output/manifest.json",
+      "uber-hub-factory/README.md",
+      "uber-hub-factory/SKILL.md",
+      "uber-hub-factory/scripts/factory.py",
+      "uber-hub-factory/uber_hub_factory.py",
+      "zoom-recorder/README.md",
+      "zoom-recorder/SKILL.md",
+      "zoom-recorder/examples/canvas_zoom_pipeline.py"
     ],
-    "video-miner": [
+    "zoom-recorder": [
       "README.md",
-      "launchers/lighton-ocr.sh",
-      "local-hub/scripts/ocr.py"
+      "academic-icm/SKILL.md",
+      "academic-icm/scripts/academic_icm.py",
+      "uber-hub-factory/01_discover/CONTEXT.md",
+      "uber-hub-factory/01_discover/output/manifest.json",
+      "uber-hub-factory/README.md",
+      "uber-hub-factory/SKILL.md",
+      "uber-hub-factory/scripts/factory.py",
+      "uber-hub-factory/uber_hub_factory.py"
+    ],
+    "cornell-notes": [
+      "README.md",
+      "academic-icm/SKILL.md",
+      "academic-icm/scripts/academic_icm.py",
+      "uber-hub-factory/01_discover/CONTEXT.md",
+      "uber-hub-factory/01_discover/output/manifest.json",
+      "uber-hub-factory/README.md",
+      "uber-hub-factory/SKILL.md",
+      "uber-hub-factory/scripts/factory.py",
+      "uber-hub-factory/uber_hub_factory.py",
+      "zoom-recorder/SKILL.md",
+      "zoom-recorder/scripts/align_pdf_transcript.py"
     ]
   },
-  "timestamp": "2026-10-15T13:45:08.959397+00:00"
+  "timestamp": "2026-10-15T13:56:58.142505+00:00"
 }
