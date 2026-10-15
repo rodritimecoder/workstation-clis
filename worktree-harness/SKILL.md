@@ -68,3 +68,19 @@ python3 $HARNESS status --run-id run_v1 --json
 # Safely removes worktrees while keeping the consolidated integration branch and event log
 python3 $HARNESS teardown --run-id run_v1 --delete-branches
 ```
+
+### 7. Autonomous 1-Command Swarm Compiler (`swarm-dispatch`)
+Pairs `worktree-harness` with `openrouter-free` to spawn N parallel subagents in isolated worktrees, enforce section claims, run test quality gates, and automatically integrate passing branches:
+
+```bash
+# Via structured plan (tasks.json)
+swarm-dispatch --tasks tasks.json
+
+# Or direct CLI prompt
+swarm-dispatch \
+  --goal "Refactor user authentication and database models" \
+  --workers wt-auth wt-db wt-api \
+  --test "pytest" \
+  --model "gemini-3.5-flash-lite"
+```
+

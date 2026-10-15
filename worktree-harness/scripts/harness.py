@@ -346,7 +346,183 @@ def cmd_teardown(run_id: str, delete_branches: bool = False):
     print(f"✅ Teardown complete. Integration branch '{manifest['integration_branch']}' and event logs preserved.")
 
 
+def cmd_dispatch(
+    tasks_file: str = None,
+    goal: str = None,
+    workers_spec: list = None,
+    test_cmd: str = None,
+    run_name: str = None,
+    max_turns: int = 6,
+    timeout_worker: int = 300,
+    model_override: str = None,
+) -> dict:
+    repo = get_git_root()
+    tasks = []
+    goal_str = goal or "Autonomous Swarm Run"
+
+    if tasks_file:
+        p_tasks = Path(tasks_file)
+        if not p_tasks.is_file():
+            sys.exit(f"❌ Error: Tasks file '{tasks_file}' not found.")
+        loaded = json.loads(p_tasks.read_text(encoding="utf-8"))
+        if isinstance(loaded, list):
+            tasks = loaded
+        elif isinstance(loaded, dict):
+            goal_str = loaded.get("goal", goal_str)
+            tasks = loaded.get("tasks", [])
+    elif goal and workers_spec:
+        for idx, w in enumerate(workers_spec, start=1):
+            tasks.append({
+                "worker": w,
+                "task": f"Implement component {idx} for: {goal}",
+                "test": test_cmd or "pytest",
+                "files": [],
+            })
+    else:
+        sys.exit("❌ Error: Specify either --tasks <tasks.json> or --goal <goal> with --workers <w1 w2 ...>.")
+
+    if not tasks:
+        sys.exit("❌ Error: No tasks defined for dispatch.")
+
+    worker_names = [t["worker"] for t in tasks]
+    manifest = cmd_start(goal_str, worker_names, repo_dir=repo, run_name=run_name)
+    run_id = manifest["run_id"]
+    harness_dir = repo / ".harness" / "runs" / run_id
+    logs_dir = harness_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Pre-claim declared files
+    for t in tasks:
+        w_name = t["worker"]
+        for f in t.get("files", []):
+            cmd_claim(run_id, w_name, f, lines=t.get("lines"))
+
+    # 2. Locate or_agent / openrouter-free
+    or_agent_cli = shutil.which("openrouter-free") or str(Path.home() / ".local" / "bin" / "openrouter-free")
+    if not Path(or_agent_cli).exists():
+        or_agent_cli = str(Path(__file__).resolve().parent.parent.parent / "openrouter-free" / "scripts" / "or_agent.py")
+
+    harness_cli = str(Path(__file__).resolve())
+
+    print(f"\n🐝 [Swarm Dispatch] Launching {len(tasks)} parallel subagent worker(s)...")
+    worker_procs = {}
+
+    for t in tasks:
+        w_name = t["worker"]
+        w_task = t.get("task", f"Subtask for {w_name}")
+        w_files = ", ".join(t.get("files", [])) or "None specified upfront"
+        w_test = t.get("test") or test_cmd or "pytest"
+        w_model = model_override or t.get("model") or "gemini-3.5-flash-lite"
+        w_path = repo / manifest["workers"][w_name]["worktree_path"]
+
+        prompt = (
+            f"You are autonomous subagent '{w_name}' working in isolated git worktree: {w_path.name}\n\n"
+            f"🎯 Goal: {w_task}\n"
+            f"📁 Pre-Claimed Files: {w_files}\n"
+            f"🔬 Quality Gate Command: {w_test}\n\n"
+            f"INSTRUCTIONS:\n"
+            f"1. Use bash commands (ls, cat, etc.) to inspect existing files in this directory.\n"
+            f"2. If you need to edit additional files not listed above, claim them first:\n"
+            f"   python3 \"$HARNESS_CLI\" claim --run-id \"$HARNESS_RUN_ID\" --worker \"$HARNESS_WORKER\" --file <relative_path>\n"
+            f"3. Implement the necessary code and unit tests.\n"
+            f"4. Run your deterministic quality gate:\n"
+            f"   python3 \"$HARNESS_CLI\" gate --run-id \"$HARNESS_RUN_ID\" --worker \"$HARNESS_WORKER\" --test \"{w_test}\"\n"
+            f"5. If the gate fails, examine error output, fix the code, and re-run gate until green.\n"
+            f"6. Once the gate passes with status GATE_PASSED, commit your work: git add . && git commit -m 'Implement {w_task[:40]}'\n"
+            f"7. Immediately conclude by replying 'TASK_COMPLETED' with no further tool calls so your loop finishes cleanly."
+        )
+
+        env = os.environ.copy()
+        env["HARNESS_RUN_ID"] = run_id
+        env["HARNESS_WORKER"] = w_name
+        env["HARNESS_CLI"] = harness_cli
+
+        log_file = logs_dir / f"{w_name}.log"
+        log_fd = open(log_file, "w", encoding="utf-8")
+
+        cmd = [
+            sys.executable,
+            or_agent_cli,
+            "agent",
+            "--prompt", prompt,
+            "--model", w_model,
+            "--max-turns", str(max_turns),
+        ]
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=w_path,
+            env=env,
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        worker_procs[w_name] = {
+            "proc": proc,
+            "log_fd": log_fd,
+            "log_file": log_file,
+            "task": t,
+            "model": w_model,
+            "start_time": time.time(),
+        }
+        print(f"   ▶️  Worker '{w_name}' spawned (PID {proc.pid}, model: {w_model})")
+        log_event(harness_dir, "WORKER_DISPATCHED", {"worker": w_name, "pid": proc.pid, "model": w_model})
+
+    # 3. Monitor worker completion
+    active = set(worker_procs.keys())
+    exit_codes = {}
+
+    while active:
+        time.sleep(2)
+        now = time.time()
+        for w_name in list(active):
+            wp = worker_procs[w_name]
+            ret = wp["proc"].poll()
+            if ret is not None:
+                wp["log_fd"].close()
+                active.remove(w_name)
+                exit_codes[w_name] = ret
+                dur = round(now - wp["start_time"], 1)
+                icon = "✅" if ret == 0 else "❌"
+                print(f"   {icon} Worker '{w_name}' exited code {ret} in {dur}s (log: {wp['log_file'].relative_to(repo)})")
+                log_event(harness_dir, "WORKER_COMPLETED", {"worker": w_name, "exit_code": ret, "duration": dur})
+            elif now - wp["start_time"] > timeout_worker:
+                print(f"   ⏰ Worker '{w_name}' reached timeout ({timeout_worker}s). Terminating PID {wp['proc'].pid}...")
+                wp["proc"].terminate()
+                time.sleep(1)
+                if wp["proc"].poll() is None:
+                    wp["proc"].kill()
+                wp["log_fd"].close()
+                active.remove(w_name)
+                exit_codes[w_name] = -1
+                log_event(harness_dir, "WORKER_TIMEOUT", {"worker": w_name, "timeout": timeout_worker})
+
+    # 4. Automated Integration Phase
+    print(f"\n🔀 [Swarm Integration] Running automated merge into {manifest['integration_branch']}...")
+    int_res = cmd_integrate(run_id, test_cmd=test_cmd)
+
+    print(f"\n🏁 [Swarm Dispatch Finished] Run ID: {run_id}")
+    print(f"   🌿 Integrated Branch: {manifest['integration_branch']}")
+    print(f"   📊 Merged Workers: {', '.join(int_res.get('merged_workers', [])) or 'None'}")
+    if int_res.get("failed_merges"):
+        print(f"   ⚠️  Failed Merges: {', '.join(int_res['failed_merges'])}")
+    print(f"   📜 Event Timeline: {harness_dir / 'events.jsonl'}")
+
+    return {
+        "run_id": run_id,
+        "integration_branch": manifest["integration_branch"],
+        "exit_codes": exit_codes,
+        "integration": int_res,
+        "event_log": str(harness_dir / "events.jsonl"),
+    }
+
+
 if __name__ == "__main__":
+    # If invoked directly as swarm-dispatch CLI
+    if sys.argv[0].endswith("swarm-dispatch") and len(sys.argv) > 1:
+        if sys.argv[1] not in ["start", "claim", "gate", "integrate", "status", "teardown", "dispatch", "-h", "--help"]:
+            sys.argv.insert(1, "dispatch")
+
     parser = argparse.ArgumentParser(
         prog="worktree-harness",
         description="Multi-Agent Git Worktree Orchestration & Quality Gate Harness (Uber Protocol)"
@@ -387,6 +563,17 @@ if __name__ == "__main__":
     p_tear.add_argument("--run-id", required=True, help="Run ID")
     p_tear.add_argument("--delete-branches", action="store_true", help="Delete temporary worker branches")
 
+    # 7. Dispatch (Swarm Orchestrator)
+    p_disp = sub.add_parser("dispatch", help="Autonomous 1-command parallel subagent compiler")
+    p_disp.add_argument("--tasks", default=None, help="Path to tasks.json plan")
+    p_disp.add_argument("--goal", default=None, help="High-level goal string")
+    p_disp.add_argument("--workers", nargs="+", default=None, help="List of worker names (when tasks.json is omitted)")
+    p_disp.add_argument("--test", default=None, help="Global test gate command")
+    p_disp.add_argument("--run-name", default=None, help="Optional custom run ID")
+    p_disp.add_argument("--max-turns", type=int, default=6, help="Maximum turns per subagent")
+    p_disp.add_argument("--timeout", type=int, default=300, help="Per-worker timeout in seconds")
+    p_disp.add_argument("--model", default=None, help="Model override for all workers")
+
     args = parser.parse_args()
     if args.action == "start":
         cmd_start(args.goal, args.workers, run_name=args.run_name)
@@ -401,3 +588,15 @@ if __name__ == "__main__":
         cmd_status(args.run_id, as_json=args.json)
     elif args.action == "teardown":
         cmd_teardown(args.run_id, delete_branches=args.delete_branches)
+    elif args.action == "dispatch":
+        res = cmd_dispatch(
+            tasks_file=args.tasks,
+            goal=args.goal,
+            workers_spec=args.workers,
+            test_cmd=args.test,
+            run_name=args.run_name,
+            max_turns=args.max_turns,
+            timeout_worker=args.timeout,
+            model_override=args.model,
+        )
+

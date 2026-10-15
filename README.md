@@ -95,11 +95,12 @@ All models run 100% locally on dual AMD Radeon RX 9060 XT GPUs via ROCm and Vulk
 
 ## 📦 Curated CLI Catalog
 
-This suite contains 14 focused engineering, sandbox, and inference CLIs:
+This suite contains 15 focused engineering, sandbox, and inference CLIs:
 
 | Tool Directory | Identifier | Core Capabilities |
 | :--- | :--- | :--- |
-| [`worktree-harness`](worktree-harness/) | `worktree-harness` | Autonomous multi-agent Git worktree orchestration with pre-write section claims, deterministic test quality gates, and automated merge conflict arbitration. |
+| [`worktree-harness`](worktree-harness/) | `worktree-harness` / `swarm-dispatch` | Autonomous multi-agent Git worktree orchestration with `swarm-dispatch` 1-command parallel compiler, pre-write section claims, deterministic test quality gates, and automated merge conflict arbitration. |
+| [`openrouter-free`](openrouter-free/) | `openrouter-free` | Multimodal & subagent CLI with compound bash batching, verified free models (Nemotron-3 Ultra/Lightning, Gemini Flash Lite, Mercury Decide), calibrated decisions, and TTS speech synthesis. |
 | [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Uber Protocol & DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` | Autonomous fleet synchronizer (`sync-all`, `status-all`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
