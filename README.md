@@ -21,12 +21,12 @@ flowchart TD
         G3["No-Comments Discipline & TypeScript Invariant"]
     end
 
-    subgraph L2["2. Execution & Review Engine (DoorDash / craft-hub)"]
-        D1["doordash order ponytail (Minimal Diff & YAGNI)"]
-        D2["doordash order poteto (State Matrix & Domain Modeling)"]
-        D3["doordash order thermonuclear (1000-Line Ceiling & Structural Judo)"]
-        D4["doordash order create-verification ([REQ-XX] Traceability Maps)"]
-        D5["doordash order unslop (31 AI Tell Filters)"]
+    subgraph L2["2. Execution & Review Engine (review-hub)"]
+        D1["review-hub review ponytail (Minimal Diff & YAGNI)"]
+        D2["review-hub review poteto (State Matrix & Domain Modeling)"]
+        D3["review-hub review thermonuclear (1000-Line Ceiling & Structural Judo)"]
+        D4["review-hub review verification ([REQ-XX] Traceability Maps)"]
+        D5["review-hub review unslop (31 AI Tell Filters)"]
     end
 
     subgraph L3["3. Workspace Pipeline (Interpretable Context Methodology - ICM)"]
@@ -101,7 +101,7 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | :--- | :--- | :--- |
 | [`worktree-harness`](worktree-harness/) | `worktree-harness` / `swarm-dispatch` | Autonomous multi-agent Git worktree orchestration with `swarm-dispatch` 1-command parallel compiler, pre-write section claims, deterministic test quality gates, and automated merge conflict arbitration. |
 | [`openrouter-free`](openrouter-free/) | `openrouter-free` | Multimodal & subagent CLI with compound bash batching, verified free models (Nemotron-3 Ultra/Lightning, Gemini Flash Lite, Mercury Decide), calibrated decisions, and TTS speech synthesis. |
-| [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Uber Protocol & DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, and Grounded Verification. |
+| [`review-hub`](review-hub/) | `review-hub` | Unified code review and architecture audit gateway: Ponytail (minimal diff & YAGNI), pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, No-Comments, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` | Autonomous fleet synchronizer (`sync-all`, `status-all`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
 | [`local-hub`](local-hub/) | `local-hub` | Unified Dual-GPU hardware inference hub (`llm`, `ocr`, `decide`, `asr`, `status`) and late-binding gateway across all workstation skills. |
@@ -116,21 +116,21 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 
 ## 🚀 Tool Highlights
 
-### 1. `craft-hub` / `doordash` — On-Demand Code Craft & Review Hub
+### 1. `review-hub` — On-Demand Code Review & Architecture Audit Hub
 Enforce elite engineering rubrics on any codebase without bloating prompt context:
 ```bash
-# View available kitchens
-doordash menu
+# View available review suites
+review-hub list
 
-# Order specific audit or review pass
-doordash order ponytail [target]              # Minimal diff & YAGNI audit
-doordash order poteto [target]                # Domain modeling & State Transition Matrix
-doordash order thermonuclear [target]         # 1,000-line ceiling & structural judo
-doordash order create-verification [target]   # Generate [REQ-XX] Grounded Verification harness
-doordash order unslop [target]                # 31-rule AI tell scanner
+# Run specific audit or review pass
+review-hub review ponytail [target]           # Minimal diff & YAGNI audit
+review-hub review poteto [target]             # Domain modeling & State Transition Matrix
+review-hub review thermonuclear [target]      # 1,000-line ceiling & structural judo
+review-hub review verification [target]       # Grounded Verification harness & [REQ-XX] map
+review-hub review unslop [target]             # 31-rule AI tell scanner
 
-# Run full combo review
-doordash order combo [target]
+# Run all core review suites sequentially
+review-hub all [target]
 ```
 
 ### 2. `graph-memory` — Local Hybrid RAG & Exact-Quote Distillation

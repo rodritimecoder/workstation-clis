@@ -8,7 +8,7 @@ This document consolidates the architectural audit and gap analysis of the **Ste
 
 **StepUp matches or exceeds APIV across ~75% of the lifecycle.** APIV introduces no fundamentally new paradigm that StepUp does not already possess. 
 
-StepUp's foundation—anchored by [Interpretable Context Methodology (ICM)](../icm-architect/SKILL.md), [DoorDash / `craft-hub`](../craft-hub/SKILL.md), [Ponytail](../ponytail/SKILL.md), [Lauren Tan's `pstack`](../pstack/SKILL.md), and the [Grounded Verification Protocol](../../../home/rodri/GEMINI.md)—enforces structural invariants:
+StepUp's foundation—anchored by [Interpretable Context Methodology (ICM)](../icm-architect/SKILL.md), [`review-hub`](../review-hub/SKILL.md), [Ponytail](../ponytail/SKILL.md), [Lauren Tan's `pstack`](../pstack/SKILL.md), and the [Grounded Verification Protocol](../../../home/rodri/GEMINI.md)—enforces structural invariants:
 - **Folders as state machines** (ICM stage folders, `CONTEXT.md` input/output contracts)
 - **Physical single-writer boundaries** (Git worktrees, task briefs, `separate-before-serializing-shared-state`)
 - **Executable playbooks** (investigation, feature, prototype, multi-phase plan, orchestrate)
@@ -48,7 +48,7 @@ From the 14 APIV practices, two genuine, high-leverage blind spots were identifi
 |:---|:---|:---|:---|:---|
 | 1 | Outcome-first brief | Brief schema in `orchestrate`, `feature.md` | **Implemented** | Keep StepUp's concise inline briefs |
 | 2 | Shared ontology | Discriminated unions, `model-the-domain`, OKF | **Implemented** | Types beat separate glossary docs |
-| 3 | Pattern research | DoorDash API (`craft-hub`), `skills-hub`, `agent-reach` | **Implemented** | Pre-indexed skills beat manual spikes |
+| 3 | Pattern research | Review Hub API (`review-hub`), `skills-hub`, `agent-reach` | **Implemented** | Pre-indexed skills beat manual spikes |
 | 4 | Disposable prototypes | `prototype.md`, isolated scratch workspaces | **Implemented** | Throwaway code behind single switcher |
 | 5 | State matrix | Pre-implementation state matrix, Discriminated Unions | **Upgraded (P1)** | Tabulate State x Event -> Next State |
 | 6 | Data/module boundaries | ICM single-writer, `separate-before-serializing` | **Implemented** | Physical folder & worktree isolation |
