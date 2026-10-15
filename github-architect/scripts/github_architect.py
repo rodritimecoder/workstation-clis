@@ -841,7 +841,40 @@ def main():
     p_ins = subparsers.add_parser("insights", help="Scan machine transcripts and configs to generate model docs")
     p_ins.add_argument("path", type=str, nargs="?", default=".", help="Target directory")
 
+    # git-sync
+    p_gitsync = subparsers.add_parser("git-sync", help="Run disciplined 6-stage branch synchronization (git-sync protocol)")
+    p_gitsync.add_argument("-m", "--message", help="Commit message (default: auto conventional summary)")
+    p_gitsync.add_argument("-y", "--yes", action="store_true", help="Auto-confirm push to protected default branches")
+    p_gitsync.add_argument("--no-pull", action="store_true", help="Skip pulling from remote before pushing")
+    p_gitsync.add_argument("--no-gate", action="store_true", help="Skip pre-push automated test/lint gates")
+    p_gitsync.add_argument("--dry-run", action="store_true", help="Inspect and display actions without committing or pushing")
+
     args = parser.parse_args()
+
+    if args.command == "git-sync":
+        try:
+            from git_sync import main as gitsync_main
+        except ImportError:
+            import importlib.util
+            script_path = Path(__file__).resolve().parent / "git_sync.py"
+            spec = importlib.util.spec_from_file_location("git_sync", script_path)
+            git_sync_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(git_sync_mod)
+            gitsync_main = git_sync_mod.main
+
+        raw_args = []
+        if args.message:
+            raw_args.extend(["-m", args.message])
+        if args.yes:
+            raw_args.append("-y")
+        if args.no_pull:
+            raw_args.append("--no-pull")
+        if args.no_gate:
+            raw_args.append("--no-gate")
+        if args.dry_run:
+            raw_args.append("--dry-run")
+        gitsync_main(raw_args)
+        return
 
     if args.command == "status-all":
         cmd_status_all()
