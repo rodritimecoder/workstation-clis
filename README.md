@@ -104,7 +104,8 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Uber Protocol & DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` | Autonomous fleet synchronizer (`sync-all`, `status-all`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
-| [`skills-hub`](skills-hub/) | `skills-hub` | Uber OmniMCP & aifx late-binding gateway across 28+ agent skills with response projection and disk buffering. |
+| [`skills-hub`](skills-hub/) | `skills-hub` / `local-hub` | Uber OmniMCP & local workstation hub: fast native shortcuts (`llm`, `decide`, `ocr`, `asr`, `status`), late-binding discovery across 28+ skills, response projection, and disk buffering. |
+| [`llm-cli`](llm-cli/) | `llm-cli` | Dedicated CLI client for local Dual-GPU Qwen3.6-35B-A3B Genesis (:8080) with streaming, disk buffering, and resilient cloud fallback. |
 | [`graph-memory`](graph-memory/) | `graph-memory` | Local hybrid RAG (BM25 + BGE-small 384d) with exact-quote LLM distillation, prompt recall hooks, and session digests. |
 | [`litellm-vram-switcher`](litellm-vram-switcher/) | `vram-rig-ctl` | Multi-GPU VRAM switcher, llama-swap orchestrator (:8000), and LiteLLM failover manager (:4000). |
 | [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |

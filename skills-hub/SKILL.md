@@ -49,20 +49,20 @@ The agent then uses `grep` or `jq` on `/tmp/video_extract.json` on-demand.
 
 ---
 
-## CLI Reference
+## CLI Reference & Native Local Commands (`local-hub` / `skills-hub`)
 
 ```bash
-# Search by intent across all 28+ skills in the upstream vault
-skills-hub search "transcribe lecture video"
-skills-hub search "canvas assignments"
-skills-hub search "review git diff for memory leaks"
+# 1. Native Local Model Commands
+local-hub llm "Write a python function to compute Levenshtein distance"
+local-hub asr lecture.mp3 --out /tmp/transcript.txt
+local-hub decide "Card declined" "What is the intent?" '["billing","tech"]'
+local-hub ocr document.pdf --pages 1-3
+local-hub status              # Live ping on :8080, :8081, :8083, :8084, :8085, :8090
 
-# Step 2: List internal tools of a winning skill
-skills-hub tools audiocpp-asr
-
-# Step 3: Read single skill documentation
-skills-hub inspect audiocpp-asr
-
-# Step 4: Run dynamically with disk buffering
-skills-hub run audiocpp-asr asr.py ./lecture.mp3 --out /tmp/transcript.json
+# 2. Dynamic Discovery Funnel across 38+ Skills
+local-hub search "transcribe lecture video"
+local-hub tools audiocpp-asr
+local-hub inspect audiocpp-asr
+local-hub run audiocpp-asr asr.py ./lecture.mp3 --out /tmp/transcript.json
 ```
+

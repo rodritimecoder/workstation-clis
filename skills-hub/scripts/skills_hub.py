@@ -398,6 +398,35 @@ if __name__ == "__main__":
     p_mesh = sub.add_parser("mesh", help="View status and Tailscale routing endpoints for all local inference services")
     p_mesh.add_argument("--json", action="store_true", help="Output as JSON")
 
+    # 7. Native Local LLM (:8080 Genesis 35B)
+    p_llm = sub.add_parser("llm", help="Direct local LLM query to Qwen3.6-35B Genesis on :8080")
+    p_llm.add_argument("prompt", help="Prompt or coding task")
+    p_llm.add_argument("--stream", action="store_true", help="Stream response tokens in real-time")
+    p_llm.add_argument("--fallback", action="store_true", help="Fallback to cloud if :8080 is offline")
+    p_llm.add_argument("--out", help="Buffer output to disk file")
+
+    # 8. Native Local ASR (:8081 Nemotron)
+    p_asr = sub.add_parser("asr", help="Local speech-to-text via audio.cpp Nemotron on :8081")
+    p_asr.add_argument("audio", help="Audio file path to transcribe")
+    p_asr.add_argument("--engine", default="cli", choices=["cli", "server"], help="ASR engine mode (default: cli)")
+    p_asr.add_argument("--out", help="Buffer transcript to file")
+
+    # 9. Native Local Decision (:8083 Imajev-4B)
+    p_decide = sub.add_parser("decide", help="Calibrated probability decisions via Imajev-4B on :8083")
+    p_decide.add_argument("state", help="State or text to evaluate")
+    p_decide.add_argument("question", help="The decision question")
+    p_decide.add_argument("options", nargs="?", default=None, help="Options JSON, list, or omit for noul")
+
+    # 10. Native Local OCR (:8085 LightOnOCR)
+    p_ocr = sub.add_parser("ocr", help="Local vision OCR for slides, PDFs, and images on :8085")
+    p_ocr.add_argument("file", help="PDF or image file to extract")
+    p_ocr.add_argument("--pages", help="Page range (e.g. 1-3)")
+    p_ocr.add_argument("--out", help="Buffer extracted text to file")
+
+    # 11. Status / Health Check
+    sub.add_parser("status", help="Live health check of all local hardware inference endpoints (:8080-:8090)")
+    sub.add_parser("health", help="Alias for status")
+
     args = parser.parse_args()
     if args.action == "list":
         cmd_list(as_json=args.json)
@@ -411,4 +440,28 @@ if __name__ == "__main__":
         cmd_run(args.skill, args.args, out_path=args.out, project_fields=args.project, jq_expr=args.jq)
     elif args.action == "mesh":
         cmd_mesh(as_json=args.json)
+    elif args.action == "llm":
+        extra = []
+        if args.stream:
+            extra.append("--stream")
+        if args.fallback:
+            extra.append("--fallback")
+        if args.out:
+            extra.extend(["--out", args.out])
+        extra.append(args.prompt)
+        cmd_run("llm-cli", extra, out_path=args.out)
+    elif args.action == "asr":
+        cmd_run("audiocpp-asr", ["transcribe", args.audio, "--engine", args.engine], out_path=args.out)
+    elif args.action == "decide":
+        extra = [args.state, args.question]
+        if args.options:
+            extra.append(args.options)
+        cmd_run("jev-cli", extra)
+    elif args.action == "ocr":
+        extra = [args.file]
+        if args.pages:
+            extra.extend(["--pages", args.pages])
+        cmd_run("ocr-cli", extra, out_path=args.out)
+    elif args.action in ("status", "health"):
+        cmd_mesh(as_json=False)
 
