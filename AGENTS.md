@@ -10,40 +10,36 @@ Authoritative catalog of local AI inference engines, model weights, port binding
 
 Always check health before launching (`curl -s http://127.0.0.1:<port>/health`).
 
-| Port | Service | Default Model | Launcher | Health Check | Primary Skill Consumer |
+| Port | Service | Default Model | Launcher | Health Check | Unified local-hub Command |
 |---|---|---|---|---|---|
-| `:8080` | `llama-server` (Vulkan) | `Qwen3.6-35B-A3B Uncensored Genesis` | `sh/luffy_nothink.sh` | `curl -s http://127.0.0.1:8080/health` | Main Coding & Reasoning Agent |
-| `:8081` | `audio.cpp` (Vulkan) | `nemotron-asr`, `kokoro-v1.0`, `qwen3-forced-aligner` | `audio-v0.9.0-bin-ubuntu-x64-vulkan/run-audiocpp.sh` | `curl -s http://127.0.0.1:8081/health` | `audiocpp-asr`, `video-miner` |
-| `:8083` | `llama-server` (Vulkan) | `imajev-4b-Q4_K_M` + `mmproj` | `sh/imajev-4b.sh` | `curl -s http://127.0.0.1:8083/health` | `jev-cli`, `video-miner` |
-| `:8084` | `crispembed-server` | `CrispEmbed Scene Text (DBNet + PARSeq)` | `sh/crispembed-ocr.sh` | `curl -s http://127.0.0.1:8084/health` | `ocr-cli` |
-| `:8085` | `llama-server` (Vulkan) | `LightOnOCR-3-1B` | `sh/lighton-ocr.sh` | `curl -s http://127.0.0.1:8085/health` | `ocr-cli`, `video-miner` |
-| `:8090` | `jpt-engine` | `jpt-4b.Q4_K_M` + `mmproj` | `sh/jpt-4b/` | `curl -s http://127.0.0.1:8090/health` | `jev-cli` |
+| `:8080` | `llama-server` (Vulkan) | `Qwen3.6-35B-A3B Uncensored Genesis` | `sh/luffy_nothink.sh` | `curl -s http://127.0.0.1:8080/health` | `local-hub llm "<prompt>"` |
+| `:8081` | `audio.cpp` (Vulkan) | `nemotron-asr`, `kokoro-v1.0`, `qwen3-forced-aligner` | `audio-v0.9.0-bin-ubuntu-x64-vulkan/run-audiocpp.sh` | `curl -s http://127.0.0.1:8081/health` | `local-hub asr transcribe <audio>` |
+| `:8083` | `llama-server` (Vulkan) | `imajev-4b-Q4_K_M` + `mmproj` | `sh/imajev-4b.sh` | `curl -s http://127.0.0.1:8083/health` | `local-hub decide <state> <question> [options]` |
+| `:8084` | `crispembed-server` | `CrispEmbed Scene Text (DBNet + PARSeq)` | `sh/crispembed-ocr.sh` | `curl -s http://127.0.0.1:8084/health` | `local-hub ocr <image> --model crispembed` |
+| `:8085` | `llama-server` (Vulkan) | `LightOnOCR-3-1B` | `sh/lighton-ocr.sh` | `curl -s http://127.0.0.1:8085/health` | `local-hub ocr <image-or-pdf>` |
+| `:8090` | `jpt-engine` | `jpt-4b.Q4_K_M` + `mmproj` | `sh/jpt-4b/` | `curl -s http://127.0.0.1:8090/health` | `local-hub decide --model jpt <state> <question>` |
 
 ---
 
-## Unified Gateway & Skills Dispatch (`skills-hub`)
+## Unified Local Inference & Skills Gateway (`local-hub`)
 
-All 34+ agent skills in `/run/media/rodri/AI/skills/` are unified under the late-binding **`skills-hub`** gateway to eliminate skill shadowing, static table drift, and context bloat.
+All local hardware inference services and workstation agent skills in `/run/media/rodri/AI/skills/` are unified under the **`local-hub`** CLI (`~/.local/bin/local-hub`, backward-compatible alias `skills-hub`).
 
-### 1. Local Model Server Consumers
-The raw inference daemons listed in the port matrix above are consumed by dedicated CLI skills, executable directly or through `skills-hub run`:
+### 1. Unified Local Inference Commands
+Execute local Dual-GPU models with zero context overhead:
+- **LLM Coder (:8080):** `local-hub llm "<prompt>" [--stream] [--out <file>]`
+- **Speech-to-Text (:8081):** `local-hub asr transcribe <audio> [--out <file>]`
+- **Calibrated Decisions (:8083/:8090):** `local-hub decide "<state>" "<question>" [options]`
+- **Vision Document & Slide OCR (:8085):** `local-hub ocr <file> [--pages 1-3] [-o <file>]`
+- **Live Port & Mesh Health:** `local-hub status` (or `local-hub health`)
 
-| Daemon Port | Service & Engine | Primary Consumer Skill | Unified `skills-hub` Invocation |
-|---|---|---|---|
-| `:8080` | Genesis Qwen35B (Coding/Reasoning) | `eval-router`, `graph-memory` | `skills-hub run eval-router router.py exec "<prompt>"` |
-| `:8081` | `audio.cpp` (Nemotron 3.5 ASR) | `audiocpp-asr`, `video-miner` | `skills-hub run audiocpp-asr asr.py transcribe <audio>` |
-| `:8083` | `llama-server` (Imajev-4B Decision) | `jev-cli`, `eval-router`, `video-miner` | `skills-hub run jev-cli decide.py <state> <question> <options>` |
-| `:8084` | `crispembed-server` (Scene Text) | `ocr-cli` | `skills-hub run ocr-cli ocr.py <image> --model crispembed` |
-| `:8085` | `llama-server` (LightOnOCR-3-1B) | `ocr-cli`, `video-miner` | `skills-hub run ocr-cli ocr.py <image-or-pdf>` |
-| `:8090` | `jpt-engine` (JPT-4B System One) | `jev-cli` | `skills-hub run jev-cli decide.py --model jpt ...` |
-
-### 2. The 4-Step Late-Binding Funnel (No Static Table Redundancy)
+### 2. The 4-Step Late-Binding Funnel (Skill Discovery)
 Never dump static skill lists into the prompt or hardcode paths. Use the dynamic discovery funnel:
-- **Discover:** `skills-hub search "<intent>"` (searches all 34+ skills via full-body index)
-- **Inspect Tools:** `skills-hub tools <skill>` (lists available executable scripts)
-- **Read Contract:** `skills-hub inspect <skill>` (loads the exact YAML contract for that 1 skill only)
-- **Invoke with Projection:** `skills-hub run <skill> <script> [args] [--out / --project]` (runs with disk buffering)
-- **Full Live Vault:** `skills-hub list` (lists all 34+ skills dynamically from upstream)
+- **Discover:** `local-hub search "<intent>"` (searches all workstation skills via full-body index)
+- **Inspect Tools:** `local-hub tools <skill>` (lists available executable scripts)
+- **Read Contract:** `local-hub inspect <skill>` (loads the exact YAML contract for that 1 skill only)
+- **Invoke with Projection:** `local-hub run <skill> [script] [args] [--out / --project]` (runs with disk buffering)
+- **Full Live Vault:** `local-hub list` (lists all registered skills dynamically from upstream)
 
 ---
 

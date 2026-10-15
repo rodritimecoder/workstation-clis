@@ -104,16 +104,12 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Uber Protocol & DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` | Autonomous fleet synchronizer (`sync-all`, `status-all`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
-| [`skills-hub`](skills-hub/) | `skills-hub` / `local-hub` | Uber OmniMCP & local workstation hub: fast native shortcuts (`llm`, `decide`, `ocr`, `asr`, `status`), late-binding discovery across 28+ skills, response projection, and disk buffering. |
-| [`llm-cli`](llm-cli/) | `llm-cli` | Dedicated CLI client for local Dual-GPU Qwen3.6-35B-A3B Genesis (:8080) with streaming, disk buffering, and resilient cloud fallback. |
+| [`local-hub`](local-hub/) | `local-hub` | Unified Dual-GPU hardware inference hub (`llm`, `ocr`, `decide`, `asr`, `status`) and late-binding gateway across all workstation skills. |
 | [`graph-memory`](graph-memory/) | `graph-memory` | Local hybrid RAG (BM25 + BGE-small 384d) with exact-quote LLM distillation, prompt recall hooks, and session digests. |
 | [`litellm-vram-switcher`](litellm-vram-switcher/) | `vram-rig-ctl` | Multi-GPU VRAM switcher, llama-swap orchestrator (:8000), and LiteLLM failover manager (:4000). |
 | [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |
-| [`ocr-cli`](ocr-cli/) | `ocr-cli` | Multi-model local OCR engine uniting LightOnOCR-3-1B (#1 flagship), SmolDocling, and CrispEmbed. |
 | [`hybrid-browser`](hybrid-browser/) | `hybrid-browser` | Tiered browser automation agent using Podman Chromium, CDP, and DeskForge-Qwen3.5-4B visual grounding. |
 | [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, Imajev visual gating, and LightOnOCR code extraction. |
-| [`audiocpp-asr`](audiocpp-asr/) | `audiocpp-asr` | Local speech-to-text with Nemotron-3.5 streaming RNNT, hotword prompting, and live mic dictation. |
-| [`jev-cli`](jev-cli/) | `jev-cli` | Calibrated decision model CLI querying Imajev-4B and JPT-4B for probabilities, classifications, and gating. |
 | [`markitdown-cli`](markitdown-cli/) | `markitdown-cli` | Universal document converter to Markdown (PDF, DOCX, XLSX, PPTX, CSV, HTML, Audio). |
 
 ---
@@ -150,15 +146,23 @@ python3 graph-memory/rag/build_index.py --corpus "/path/to/notes"
 python3 graph-memory/rag/distil.py "/path/to/notes" --limit 10
 ```
 
-### 3. `ocr-cli` — High-Throughput Local Vision OCR
-Unifies local vision models without cloud latency or subscription costs:
+### 3. `local-hub` — Workstation Local Hardware Inference & Skills Hub
+Unified CLI for all local Dual-GPU inference endpoints on ports `:8080`–`:8090`:
 ```bash
-# Auto-detects running server (defaults to LightOnOCR on :8085)
-python3 ocr-cli/scripts/ocr.py slide_frame.png -o slide_frame.md
+# Query Genesis 35B Coder on :8080 (Dual RX 9060 XT offload)
+local-hub llm "Write an async rate limiter in TypeScript" --stream
 
-# Target specific local engine
-python3 ocr-cli/scripts/ocr.py document.pdf --engine lighton
-python3 ocr-cli/scripts/ocr.py storefront.png --engine crispembed
+# OCR PDFs, slides, and screenshots with LightOnOCR-3-1B on :8085
+local-hub ocr lecture.pdf --pages 1-5 -o notes.md
+
+# Calibrated decision gating with Imajev-4B on :8083
+local-hub decide "User request context" "Is this safe to run?"
+
+# Speech-to-text with Nemotron-3.5 on :8081
+local-hub asr transcribe meeting.mp3
+
+# Live health check on all inference ports
+local-hub status
 ```
 
 ### 4. `hybrid-browser` — Vision-Grounded Browser Agent
