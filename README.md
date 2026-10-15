@@ -111,6 +111,7 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | [`hybrid-browser`](hybrid-browser/) | `hybrid-browser` | Tiered browser automation agent using Podman Chromium, CDP, and DeskForge-Qwen3.5-4B visual grounding. |
 | [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, Imajev visual gating, and LightOnOCR code extraction. |
 | [`uber-hub-factory`](uber-hub-factory/) | `uber-hub-factory` | Autonomous ICM pipeline & CLI factory that bridges native standalone skills into unified, late-binding Uber API Hubs. |
+| [`agentic-engineering`](agentic-engineering/) | `agentic` | Autonomous 7-step engineering pipeline: target-local Kanban (`.kanban/`), Event Listener, Fresh-Context Judge, Splitter, and multi-model sandboxes. |
 | [`markitdown-cli`](markitdown-cli/) | `markitdown-cli` | Universal document converter to Markdown (PDF, DOCX, XLSX, PPTX, CSV, HTML, Audio). |
 
 ---
