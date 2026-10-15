@@ -1,0 +1,56 @@
+{
+  "skills": {
+    "markitdown-cli": {
+      "name": "markitdown-cli",
+      "folder": "markitdown-cli",
+      "path": "/run/media/rodri/AI/skills/markitdown-cli",
+      "description": "Convert documents to Markdown using Microsoft's MarkItDown library: PDF, DOCX, PPTX, XLSX, HTML, CSV, JSON, XML, YAML, EPUB, ZIP, Outlook .msg, Jupyter notebooks, images (with optional local OCR), and audio. Use when asked to convert, extract text from, or read a document/attachment/slidesheet/spreadsheet into Markdown or plain text for analysis, archiving, or LLM consumption.",
+      "entrypoint": "scripts/markitdown_cli.py",
+      "scripts": [
+        "markitdown_cli.py",
+        "test_markitdown_cli.py"
+      ],
+      "has_skill_md": true,
+      "tags": [
+        "markitdown-cli",
+        "convert",
+        "documents",
+        "markdown",
+        "using",
+        "microsoft"
+      ]
+    },
+    "video-miner": {
+      "name": "video-miner",
+      "folder": "video-miner",
+      "path": "/run/media/rodri/AI/skills/video-miner",
+      "description": "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (Imajev), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints.",
+      "entrypoint": "scripts/videomine.py",
+      "scripts": [
+        "videomine.py"
+      ],
+      "has_skill_md": true,
+      "tags": [
+        "video-miner",
+        "extract",
+        "transcribe",
+        "and",
+        "synthesize",
+        "knowledge"
+      ]
+    }
+  },
+  "callers": {
+    "markitdown-cli": [
+      "README.md",
+      "academic-icm/scripts/academic_icm.py",
+      "video-miner/_templates/workspace/AGENTS.md"
+    ],
+    "video-miner": [
+      "README.md",
+      "launchers/lighton-ocr.sh",
+      "local-hub/scripts/ocr.py"
+    ]
+  },
+  "timestamp": "2026-10-15T13:45:08.959397+00:00"
+}

@@ -1,0 +1,10 @@
+{
+  "hub_name": "test-hub",
+  "hub_path": "/tmp/tmprhtxf69r/skills/test-hub",
+  "suites_count": 2,
+  "suites": [
+    "mock-tool-a",
+    "mock-tool-b"
+  ],
+  "timestamp": "2026-10-15T13:44:01.494043+00:00"
+}

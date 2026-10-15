@@ -2,7 +2,16 @@
 
 {HUB_DESCRIPTION}
 
-Unified late-binding gateway across {SUITE_COUNT} suites.
+Unified late-binding bridge across {SUITE_COUNT} native standalone suites.
 
-## Suites
+## Bridged Suites
 {SUITES_MARKDOWN_TABLE}
+
+## Quickstart
+```bash
+{HUB_NAME} list
+{HUB_NAME} search "<intent>"
+{HUB_NAME} inspect <suite>
+{HUB_NAME} run <suite> [args]
+{HUB_NAME} <suite> [args]
+```

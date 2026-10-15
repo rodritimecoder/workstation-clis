@@ -1,38 +1,46 @@
 ---
 name: uber-hub-factory
-description: Autonomous ICM pipeline and CLI factory that consolidates scattered agent skills into unified, late-binding Uber API Hubs. Automatically maps callers, renames nested SKILL.md files to prevent registration bloat, generates backward-compatible ~/.local/bin/ shims, and handles zero-drift push synchronization.
+description: "Non-destructive ICM bridge pipeline and CLI factory that unifies native standalone skills into late-binding Uber API Hubs. Preserves standalone skills, native SKILL.md files, and existing CLIs while providing late-binding search, list, inspect, and response projection."
 ---
 
-# `uber-hub-factory` — Autonomous Skill Consolidation & Hub Factory
+# `uber-hub-factory` — Non-Destructive ICM Hub Bridge
 
-An automated **Interpretable Context Methodology (ICM)** workspace and CLI for consolidating scattered skills into unified, high-performance Uber API Hubs.
+An automated **Interpretable Context Methodology (ICM)** workspace and CLI for bridging standalone skills into unified, late-binding Uber API Hubs without moving, swallowing, or deleting source skills.
 
 ---
 
-## ⚡ The Problem It Solves
+## ⚡ Non-Destructive Bridge Pattern
 
-When multiple specialized tools exist in separate folders, each with its own `SKILL.md`:
-1. **Context Window Rot**: The AI agent's system prompt loads dozens of repetitive skill definitions.
-2. **Double Maintenance**: Separate scripts, separate sync pipelines, and drift between harnesses.
-3. **Manual Overhead**: Consolidating manually requires tracing callers, building CLI dispatchers, renaming files to avoid duplicates, and creating shell shims.
+Traditional consolidation forced moving folders into `suites/`, deleting standalone skills, and renaming `SKILL.md` to `rubric.md` to save a negligible token margin—creating maintenance friction and breaking standalone CLIs.
 
-`uber-hub-factory` runs this consolidation deterministically in a 4-stage pipeline.
+**The Bridge Pattern preserves standalone integrity:**
+1. **Zero Deletions**: Standalone skills keep their native directories, `SKILL.md` files, and independent CLI shims intact.
+2. **Dynamic Sibling Resolution**: The bridged hub resolves contracts from `../<skill>/SKILL.md` and delegates execution to `../<skill>/scripts/` or system PATH.
+3. **Dual Execution**: Skills can be invoked directly (`canvas-cli`, `zoom-recorder`) OR via the hub (`academic-icm run canvas` or `academic-icm canvas`).
+4. **Late-Binding Freight Savings**: Agents inspect contracts on demand (`<hub> inspect <skill>`) and buffer outputs (`--out / --project`) without polluting context.
 
 ---
 
 ## 🚀 CLI Usage
 
-### 1. Build / Consolidate Skills into a Hub
+### 1. Bridge Skills into a Unified Hub
 ```bash
-# Consolidate multiple skills into a single hub
-uber-hub-factory build --hub academic-hub --skills canvas-cli,zoom-recorder,cornell-notes,markitdown-cli
+# Bridge multiple standalone skills into a unified hub
+uber-hub-factory bridge --hub academic-icm --skills canvas-cli,zoom-recorder,cornell-notes
 
-# Dry-run inventory pass without modifying disk
-uber-hub-factory inventory --skills ocr-cli,jev-cli,audiocpp-asr
+# Discover skills and generate manifest only (Stage 1)
+uber-hub-factory discover --skills canvas-cli,zoom-recorder,cornell-notes
+
+# Run grounded verification on an existing hub (Stage 3)
+uber-hub-factory verify --hub academic-icm
 ```
 
-### 2. Stages Executed by the Factory
-1. **Stage 1 (Inventory)**: Inspects source skills, maps all executable scripts, extracts rubrics, and identifies callers across the workstation.
-2. **Stage 2 (Scaffold)**: Deploys the generic Uber API runner (`list`, `search`, `inspect`, `run`, `--project`, `--out`), moves files into `suites/`, and renames nested `SKILL.md` to `rubric.md` (preventing prompt bloat).
-3. **Stage 3 (Shimming)**: Automatically creates shell wrappers in `~/.local/bin/` so old CLI commands continue working without breaking existing pipelines.
-4. **Stage 4 (Verify & Sync)**: Runs health checks, deletes obsolete standalone folders upstream and downstream, and pushes to GitHub via `sync-skills --push`.
+---
+
+## 📂 The 3-Stage ICM Architecture
+
+| Stage | Name | Role | Output |
+|---|---|---|---|
+| `01_discover/` | Discover & Map | Scans standalone skills, extracts `SKILL.md` descriptions, CLI entrypoints, and callers. | `output/manifest.json` |
+| `02_bridge/` | Bridge & Scaffold | Generates non-destructive router `<hub>.py`, `SKILL.md`, `README.md`, and links `~/.local/bin/<hub>`. | `output/bridge_summary.json` |
+| `03_verify/` | Grounded Verification | Proves hub `--help`, `list`, `search`, `inspect`, and delegated execution; confirms standalone skills remain intact. | `output/verification_report.json` |

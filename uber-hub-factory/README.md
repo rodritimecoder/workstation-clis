@@ -1,21 +1,23 @@
 # uber-hub-factory
 
-Automated ICM Pipeline & CLI Factory for Consolidating Agent Skills into Unified Uber API Hubs.
+Non-destructive ICM pipeline and CLI factory that unifies native standalone skills into late-binding Uber API Hubs.
 
 ## Purpose
-Eliminates context window bloat and maintenance drift by consolidating scattered individual skills into unified, late-binding hubs (like `local-hub` and `review-hub`).
+Provides unified discovery and execution across multiple related skills without the friction of deleting or moving source directories. Preserves standalone skills, native `SKILL.md` files, and existing CLIs while enabling late-binding search, list, inspect, and response projection.
 
-## Pipeline Architecture
-1. **`01_inventory/`**: Scans candidate skills, scripts, and machine-wide referrers.
-2. **`02_scaffold_hub/`**: Deploys canonical Uber API runner, inlines rubrics into `suites/`, and renames nested `SKILL.md` to `rubric.md`.
-3. **`03_shims_and_compat/`**: Generates transparent bash shims in `~/.local/bin/` so old CLI commands continue working.
-4. **`04_verify_and_sync/`**: Runs Grounded Verification, purges obsolete standalone folders, and syncs via `sync-skills --push`.
+## 3-Stage ICM Pipeline
+1. **`01_discover/`**: Scans candidate skills, scripts, and callers; outputs `manifest.json`.
+2. **`02_bridge/`**: Generates non-destructive router `<hub>.py`, `SKILL.md`, `README.md`, and links `~/.local/bin/<hub>`.
+3. **`03_verify/`**: Runs Grounded Verification tests proving hub commands and ensuring standalone skills remain intact.
 
 ## Quickstart
 ```bash
-# Consolidate candidate skills into a new hub
-uber-hub-factory build --hub academic-hub --skills canvas-cli,zoom-recorder,cornell-notes,markitdown-cli
+# Bridge standalone skills into a unified hub
+uber-hub-factory bridge --hub academic-icm --skills canvas-cli,zoom-recorder,cornell-notes
 
-# Run inventory pass only
-uber-hub-factory inventory --skills canvas-cli,zoom-recorder
+# Run discovery only
+uber-hub-factory discover --skills canvas-cli,zoom-recorder,cornell-notes
+
+# Run verification only
+uber-hub-factory verify --hub academic-icm
 ```

@@ -110,7 +110,7 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |
 | [`hybrid-browser`](hybrid-browser/) | `hybrid-browser` | Tiered browser automation agent using Podman Chromium, CDP, and DeskForge-Qwen3.5-4B visual grounding. |
 | [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, Imajev visual gating, and LightOnOCR code extraction. |
-| [`uber-hub-factory`](uber-hub-factory/) | `uber-hub-factory` | Autonomous ICM pipeline & CLI factory that consolidates scattered agent skills into unified, late-binding Uber API Hubs with zero prompt bloat. |
+| [`uber-hub-factory`](uber-hub-factory/) | `uber-hub-factory` | Autonomous ICM pipeline & CLI factory that bridges native standalone skills into unified, late-binding Uber API Hubs. |
 | [`markitdown-cli`](markitdown-cli/) | `markitdown-cli` | Universal document converter to Markdown (PDF, DOCX, XLSX, PPTX, CSV, HTML, Audio). |
 
 ---
