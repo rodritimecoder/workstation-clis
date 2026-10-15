@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
 skills_hub.py — Meta-Tool Discovery and Execution Gateway for AI Agent Skills
-Implements the Uber API / Late-Binding Pattern: Search, Inspect, and Run skills dynamically.
+Implements the Uber OmniMCP / aifx "Code Mode" Protocol:
+  1. Full-Body Search across SKILL.md and scripts (91.7% routing signal)
+  2. 4-Step Funnel: discover -> tools -> schema -> invoke
+  3. Response Projection (--project, --jq) & Disk Buffering (--out) to eliminate context bloat
 """
 
 import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -37,7 +41,7 @@ def load_all_skills():
     for item in sorted(root.iterdir()):
         skill_md = item / "SKILL.md"
         if item.is_dir() and skill_md.is_file():
-            content = skill_md.read_text(encoding="utf-8")
+            content = skill_md.read_text(encoding="utf-8", errors="replace")
             name = item.name
             desc = "No description provided."
             match = re.search(r"^---\s*\n(.*?)\n---", content, re.DOTALL | re.MULTILINE)
@@ -49,10 +53,16 @@ def load_all_skills():
                 desc_m = re.search(r"^description:\s*([^\n]+(?:\n\s+[^\n]+)*)", fm, re.MULTILINE)
                 if desc_m:
                     raw_desc = desc_m.group(1).strip()
-                    # Strip leading YAML block scalars > or >- or |-
                     raw_desc = re.sub(r"^[>|]-?\s*", "", raw_desc)
-                    # Flatten newlines and whitespace
                     desc = " ".join(raw_desc.split()).strip('"\'')
+
+            # Enumerate internal executable scripts
+            scripts_dir = item / "scripts"
+            scripts = []
+            if scripts_dir.is_dir():
+                for sf in scripts_dir.iterdir():
+                    if sf.is_file() and (sf.suffix in (".py", ".sh") or os.access(sf, os.X_OK)):
+                        scripts.append(sf.name)
 
             skills[name] = {
                 "name": name,
@@ -61,6 +71,7 @@ def load_all_skills():
                 "description": desc,
                 "md_path": str(skill_md),
                 "full_text": content,
+                "scripts": scripts,
             }
     return skills
 
@@ -68,11 +79,14 @@ def load_all_skills():
 def cmd_list(as_json=False):
     skills = load_all_skills()
     if as_json:
-        data = [{"name": s["name"], "dir": s["dir_name"], "description": s["description"]} for s in skills.values()]
+        data = [
+            {"name": s["name"], "dir": s["dir_name"], "description": s["description"], "scripts": s["scripts"]}
+            for s in skills.values()
+        ]
         print(json.dumps(data, indent=2))
         return
 
-    print(f"\n📦 [Skills Hub] Registered Agent Skills ({len(skills)} found):")
+    print(f"\n📦 [Skills Hub / Uber Protocol] Registered Skills ({len(skills)} in vault):")
     print(f"{'Skill Name':<28} │ {'Description'}")
     print("─" * 29 + "┼" + "─" * 50)
     for s in skills.values():
@@ -80,9 +94,10 @@ def cmd_list(as_json=False):
         print(f"{s['name']:<28} │ {clean_desc}")
 
 
-def cmd_search(query: str):
+def cmd_search(query: str, as_json=False):
+    """Full-body search matching titles, descriptions, headers, and code examples."""
     skills = load_all_skills()
-    q_tokens = query.lower().split()
+    q_tokens = [t.lower() for t in query.split() if len(t) > 1]
     scored = []
 
     for s in skills.values():
@@ -92,11 +107,16 @@ def cmd_search(query: str):
         text_lower = s["full_text"].lower()
 
         for t in q_tokens:
-            if t in name_lower:
-                score += 5
+            if t == name_lower:
+                score += 15
+            elif t in name_lower:
+                score += 8
             if t in desc_lower:
-                score += 3
-            if t in text_lower:
+                score += 5
+            # Header or command matches get extra signal
+            if f"# {t}" in text_lower or f"## {t}" in text_lower:
+                score += 4
+            elif t in text_lower:
                 score += 1
 
         if score > 0:
@@ -104,18 +124,29 @@ def cmd_search(query: str):
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    print(f"\n🔍 [Skills Hub] Search results for '{query}':")
+    if as_json:
+        results = [
+            {"name": s["name"], "score": score, "description": s["description"], "path": s["path"], "scripts": s["scripts"]}
+            for score, s in scored[:5]
+        ]
+        print(json.dumps(results, indent=2))
+        return
+
+    print(f"\n🔍 [Uber Protocol Search] Intent: '{query}'")
     if not scored:
-        print("  (No matching skills found)")
+        print("  (No matching skills found in vault)")
         return
 
     for score, s in scored[:5]:
         print(f"\n  • 🎯 {s['name']} (relevance: {score})")
         print(f"    {s['description']}")
-        print(f"    Path: {s['path']}")
+        if s["scripts"]:
+            print(f"    Tools/Scripts: {', '.join(s['scripts'])}")
+        print(f"    Inspect: skills-hub inspect {s['name']}")
 
 
-def cmd_inspect(skill_name: str):
+def cmd_tools(skill_name: str):
+    """Step 2: Narrow into runnable tools/scripts within the winning skill."""
     skills = load_all_skills()
     target = None
     for name, s in skills.items():
@@ -124,16 +155,70 @@ def cmd_inspect(skill_name: str):
             break
 
     if not target:
-        sys.exit(f"❌ Error: Skill '{skill_name}' not found. Run 'skills-hub list' to view available skills.")
+        sys.exit(f"❌ Error: Skill '{skill_name}' not found.")
 
-    print(f"\n📖 [Skills Hub] Inspecting skill: {target['name']}\n")
+    print(f"\n🔧 [Uber Tools] Executable scripts for skill: {target['name']}")
+    if not target["scripts"]:
+        print("  (No standalone scripts found in scripts/; skill may be documentation-only or invoked via CLI)")
+    else:
+        for sc in target["scripts"]:
+            print(f"  • {sc}")
+            print(f"    Run via: skills-hub run {target['name']} {sc} --help")
+
+
+def cmd_inspect(skill_name: str):
+    """Step 3: Output the exact usage schema / rubric for this 1 tool only."""
+    skills = load_all_skills()
+    target = None
+    for name, s in skills.items():
+        if name == skill_name or s["dir_name"] == skill_name:
+            target = s
+            break
+
+    if not target:
+        sys.exit(f"❌ Error: Skill '{skill_name}' not found.")
+
+    print(f"\n📖 [Uber Schema & Contract] {target['name']}\n")
     content = Path(target["md_path"]).read_text(encoding="utf-8")
-    # Print content stripping raw frontmatter for clean reading
     clean_content = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL)
     print(clean_content)
 
 
-def cmd_run(skill_name: str, extra_args: list):
+def apply_response_projection(raw_output: str, project_fields: list = None, jq_expr: str = None) -> str:
+    """Pre-flight response projection: strips non-requested fields before LLM context."""
+    if not raw_output.strip():
+        return raw_output
+
+    # 1. JQ expression if available
+    if jq_expr and shutil.which("jq"):
+        try:
+            p = subprocess.run(["jq", jq_expr], input=raw_output, text=True, capture_output=True)
+            if p.returncode == 0:
+                return p.stdout.strip()
+        except Exception:
+            pass
+
+    # 2. JSON field projection
+    if project_fields:
+        try:
+            data = json.loads(raw_output)
+            if isinstance(data, dict):
+                filtered = {k: v for k, v in data.items() if k in project_fields}
+                return json.dumps(filtered, indent=2)
+            elif isinstance(data, list):
+                filtered = [
+                    {k: v for k, v in item.items() if k in project_fields} if isinstance(item, dict) else item
+                    for item in data
+                ]
+                return json.dumps(filtered, indent=2)
+        except Exception:
+            pass
+
+    return raw_output
+
+
+def cmd_run(skill_name: str, extra_args: list, out_path: str = None, project_fields: str = None, jq_expr: str = None):
+    """Step 4: Execute tool with Response Projection & Disk Buffering."""
     skills = load_all_skills()
     target = None
     for name, s in skills.items():
@@ -147,23 +232,27 @@ def cmd_run(skill_name: str, extra_args: list):
     skill_path = Path(target["path"])
     scripts_dir = skill_path / "scripts"
 
-    # 1. Look for executable scripts in scripts/
     candidates = []
     if scripts_dir.is_dir():
         for f in scripts_dir.iterdir():
             if f.is_file() and (f.suffix in (".py", ".sh") or os.access(f, os.X_OK)):
                 candidates.append(f)
 
-    # 2. Check ~/.local/bin for exact matches
     local_bin_match = Path.home() / ".local" / "bin" / target["name"]
     if local_bin_match.is_file() and os.access(local_bin_match, os.X_OK):
         cmd = [str(local_bin_match)] + extra_args
     elif candidates:
         primary = candidates[0]
-        for c in candidates:
-            if target["name"].replace("-", "_") in c.name or target["name"] in c.name:
-                primary = c
-                break
+        # Match script name if explicitly requested in extra_args[0]
+        if extra_args and extra_args[0] in [c.name for c in candidates]:
+            primary = [c for c in candidates if c.name == extra_args[0]][0]
+            extra_args = extra_args[1:]
+        else:
+            for c in candidates:
+                if target["name"].replace("-", "_") in c.name or target["name"] in c.name:
+                    primary = c
+                    break
+
         if primary.suffix == ".py":
             cmd = [sys.executable, str(primary)] + extra_args
         elif primary.suffix == ".sh":
@@ -173,34 +262,76 @@ def cmd_run(skill_name: str, extra_args: list):
     else:
         sys.exit(f"❌ Error: No runnable script found for skill '{skill_name}' in {scripts_dir}")
 
-    print(f"🚀 [Skills Hub] Executing: {' '.join(cmd)}\n")
-    proc = subprocess.run(cmd)
-    sys.exit(proc.returncode)
+    sys.stderr.write(f"🚀 [Uber Gateway] Executing: {' '.join(cmd)}\n")
+
+    # If projection or disk buffering is requested, capture output
+    if out_path or project_fields or jq_expr:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        raw_out = proc.stdout
+        raw_err = proc.stderr
+
+        if out_path:
+            full_payload = raw_out + ("\n--- STDERR ---\n" + raw_err if raw_err else "")
+            Path(out_path).write_text(full_payload, encoding="utf-8")
+            sys.stderr.write(f"💾 [Disk Buffer] Wrote {len(full_payload.encode('utf-8'))} bytes to {out_path}\n")
+
+        fields = [f.strip() for f in project_fields.split(",")] if project_fields else None
+        projected = apply_response_projection(raw_out, fields, jq_expr)
+
+        if out_path and not project_fields and not jq_expr:
+            # Emit a lean receipt if buffered to disk without explicit projection
+            print(f"[Execution Complete (exit {proc.returncode}). Full output saved to {out_path}]")
+            if raw_err:
+                print(f"Errors/Warnings:\n{raw_err.strip()[:1000]}")
+        else:
+            print(projected)
+
+        sys.exit(proc.returncode)
+    else:
+        proc = subprocess.run(cmd)
+        sys.exit(proc.returncode)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Skills Hub — Meta-Tool Discovery and Execution Gateway")
+    parser = argparse.ArgumentParser(
+        prog="skills-hub",
+        description="Skills Hub — Uber OmniMCP & aifx Late-Binding Gateway for Agent Skills"
+    )
     sub = parser.add_subparsers(dest="action", required=True)
 
-    p_list = sub.add_parser("list", help="List all registered skills")
+    # 1. Discover / List
+    p_list = sub.add_parser("list", help="List all registered skills in the vault")
     p_list.add_argument("--json", action="store_true", help="Output as JSON")
 
-    p_search = sub.add_parser("search", help="Search skills by keyword or intent")
-    p_search.add_argument("query", help="Search query")
+    # 2. Search / Discover
+    p_search = sub.add_parser("search", help="Step 1: Search skills by intent across full body content")
+    p_search.add_argument("query", help="Intent query (e.g. 'speech transcription', 'canvas grades')")
+    p_search.add_argument("--json", action="store_true", help="Output as JSON")
 
-    p_inspect = sub.add_parser("inspect", help="Inspect a skill's full documentation and commands")
+    # 3. Tools
+    p_tools = sub.add_parser("tools", help="Step 2: List executable scripts/tools inside a skill")
+    p_tools.add_argument("skill", help="Name of skill")
+
+    # 4. Inspect / Schema
+    p_inspect = sub.add_parser("inspect", help="Step 3: Inspect exact usage contract and schema for 1 skill")
     p_inspect.add_argument("skill", help="Name of skill to inspect")
 
-    p_run = sub.add_parser("run", help="Execute a skill command dynamically")
+    # 5. Run / Invoke
+    p_run = sub.add_parser("run", help="Step 4: Execute a skill with Response Projection & Disk Buffering")
     p_run.add_argument("skill", help="Name of skill to run")
+    p_run.add_argument("--out", default=None, help="Buffer raw execution output to disk file")
+    p_run.add_argument("--project", default=None, help="Comma-separated fields to project from JSON output")
+    p_run.add_argument("--jq", default=None, help="JQ filter expression to project output")
     p_run.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to the skill")
 
     args = parser.parse_args()
     if args.action == "list":
         cmd_list(as_json=args.json)
     elif args.action == "search":
-        cmd_search(args.query)
+        cmd_search(args.query, as_json=args.json)
+    elif args.action == "tools":
+        cmd_tools(args.skill)
     elif args.action == "inspect":
         cmd_inspect(args.skill)
     elif args.action == "run":
-        cmd_run(args.skill, args.args)
+        cmd_run(args.skill, args.args, out_path=args.out, project_fields=args.project, jq_expr=args.jq)

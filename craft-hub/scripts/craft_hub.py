@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-craft_hub.py — The DoorDash API for Code Craft, Audits, and Rigorous Reviews
-Unified late-binding dispatch hub for 5 elite engineering kitchens:
-Ponytail, pstack, Poteto Mode, Thermo-Nuclear, and Unslop.
+craft_hub.py — Uber Protocol & DoorDash API for Code Craft, Audits, and Rigorous Reviews
+Unified late-binding dispatch gateway for 9 elite engineering kitchens:
+Ponytail, pstack, Poteto Mode, Thermo-Nuclear, Unslop, Verification, No-Comments, and TypeScript.
+Features full Response Projection (--project) and Disk Buffering (--out) to eliminate context bloat.
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -66,7 +68,7 @@ KITCHENS = {
         "chef": "The Grounded Verifier",
         "skill_dir": "pstack/skills/create-verification-skill",
         "tags": ["verification", "test harness", "requirement traceability", "drive", "doctor", "launch", "evidence", "feature map", "prove it works"],
-        "description": "Generate a project-local verification skill (.cursor/skills/verify-<app>/) that drives the real app the way a user does with Launch, Doctor, Drive, Evidence, Cleanup, and [REQ-XX] Feature Map.",
+        "description": "Generate a project-local verification skill with Launch, Doctor, Drive, Evidence, Cleanup, and [REQ-XX] Feature Map.",
         "related": ["maintain-verification", "poteto"]
     },
     "maintain-verification": {
@@ -122,8 +124,16 @@ def resolve_skill_file(skill_dir: str) -> Path:
     return candidates[0]
 
 
-def cmd_menu():
-    print("\n🍽️  [DoorDash Code Craft Hub] Available Kitchens Menu:\n")
+def cmd_menu(as_json=False):
+    if as_json:
+        data = [
+            {"id": k_id, "name": info["name"], "chef": info["chef"], "description": info["description"], "tags": info["tags"]}
+            for k_id, info in KITCHENS.items()
+        ]
+        print(json.dumps(data, indent=2))
+        return
+
+    print("\n🍽️  [Uber / DoorDash Code Craft Hub] Available Kitchens Menu:\n")
     print(f"{'#':<3} {'Kitchen':<22} {'Chef / Origin':<32} {'Specialty & Vibe'}")
     print("─" * 80)
     for i, (k_id, info) in enumerate(KITCHENS.items(), start=1):
@@ -132,7 +142,7 @@ def cmd_menu():
     print("\n💡 Commands: 'craft-hub inspect <kitchen>' | 'craft-hub order <kitchen> [target]'\n")
 
 
-def cmd_search(query: str):
+def cmd_search(query: str, as_json=False):
     tokens = query.lower().split()
     scored = []
     for k_id, info in KITCHENS.items():
@@ -149,11 +159,19 @@ def cmd_search(query: str):
             scored.append((score, k_id, info))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    if not scored:
-        print(f"\n🔍 No kitchens matched '{query}'. Run 'craft-hub menu' to see all 5 available options.\n")
+    if as_json:
+        results = [
+            {"id": k_id, "name": info["name"], "score": score, "description": info["description"], "tags": info["tags"]}
+            for score, k_id, info in scored
+        ]
+        print(json.dumps(results, indent=2))
         return
 
-    print(f"\n🔍 [DoorDash Craft Hub] Search Results for '{query}':\n")
+    if not scored:
+        print(f"\n🔍 No kitchens matched '{query}'. Run 'craft-hub menu' to see available options.\n")
+        return
+
+    print(f"\n🔍 [Uber Protocol Craft Search] Results for '{query}':\n")
     for score, k_id, info in scored:
         print(f"  • {info['emoji']} \033[1m{info['name']}\033[0m (`{k_id}`) — {info['chef']}")
         print(f"    {info['description']}")
@@ -164,7 +182,6 @@ def cmd_inspect(kitchen_id: str):
     k_id = kitchen_id.lower().replace("-", "")
     info = KITCHENS.get(kitchen_id.lower()) or KITCHENS.get(k_id)
     if not info:
-        # Match by prefix
         for key in KITCHENS:
             if key.startswith(k_id):
                 info = KITCHENS[key]
@@ -224,16 +241,55 @@ def get_git_touched_files():
         return []
 
 
-def cmd_order(kitchen_id: str, target: str = None):
+def cmd_order(kitchen_id: str, target: str = None, out_path: str = None, project_fields: str = None, as_json: bool = False):
     k_id = kitchen_id.lower().replace("-", "")
 
-    # Handle "combo" meal: all 5 kitchens!
+    # Grand combo platter
     if k_id == "combo":
-        print("\n🍱 [DoorDash Grand Combo Platter] Ordering from ALL 5 Kitchens!\n" + "=" * 70)
-        for sub_k in ["ponytail", "pstack", "poteto", "thermonuclear", "unslop"]:
-            cmd_order(sub_k, target)
+        results = {}
+        for sub_k in ["ponytail", "pstack", "poteto", "thermonuclear", "unslop", "typescript", "no-comments"]:
+            sub_res = evaluate_kitchen(sub_k, target)
+            results[sub_k] = sub_res
+
+        if as_json or project_fields or out_path:
+            full_json = json.dumps(results, indent=2)
+            if out_path:
+                Path(out_path).write_text(full_json, encoding="utf-8")
+                print(f"[Combo Audit Complete. Full trace buffered to {out_path}]")
+            else:
+                print(full_json)
+        else:
+            print("\n🍱 [Uber / DoorDash Grand Combo Platter] Audit across ALL Kitchens:\n" + "=" * 70)
+            for sub_k, res in results.items():
+                print(f"\n{res['emoji']} {res['name']}: {res['status']}")
+                for check in res.get("checks", []):
+                    print(f"   • {check}")
         return
 
+    res = evaluate_kitchen(kitchen_id, target)
+    if as_json or project_fields or out_path:
+        if project_fields:
+            fields = [f.strip() for f in project_fields.split(",")]
+            res = {k: v for k, v in res.items() if k in fields}
+        full_json = json.dumps(res, indent=2)
+        if out_path:
+            Path(out_path).write_text(full_json, encoding="utf-8")
+            print(f"[Audit Complete for {res.get('name', kitchen_id)}. Output buffered to {out_path}]")
+        else:
+            print(full_json)
+    else:
+        print(f"\n📦 \033[1m[Order Dispatched]\033[0m {res['emoji']} \033[1m{res['name']}\033[0m")
+        print(f"   👨‍🍳 Chef: {res['chef']}")
+        print(f"   🎯 Lens: {res['description']}")
+        print(f"   🔍 Target: {res['target_desc']}")
+        print("─" * 70)
+        for check in res.get("checks", []):
+            print(f"   {check}")
+        print(f"\n📋 [Review Rubric Available in {res['skill_file']}]")
+
+
+def evaluate_kitchen(kitchen_id: str, target: str = None) -> dict:
+    k_id = kitchen_id.lower().replace("-", "")
     info = KITCHENS.get(kitchen_id.lower()) or KITCHENS.get(k_id)
     if not info:
         for key in KITCHENS:
@@ -243,15 +299,8 @@ def cmd_order(kitchen_id: str, target: str = None):
                 break
 
     if not info:
-        print(f"❌ Unknown kitchen '{kitchen_id}'. Available: {', '.join(KITCHENS.keys())}, combo")
-        sys.exit(1)
+        return {"error": f"Unknown kitchen '{kitchen_id}'"}
 
-    print(f"\n📦 \033[1m[Order Dispatched]\033[0m {info['emoji']} \033[1m{info['name']}\033[0m")
-    print(f"   👨‍🍳 Chef: {info['chef']}")
-    print(f"   🎯 Lens: {info['description']}")
-    print("─" * 70)
-
-    # 1. Resolve Target
     target_text = ""
     is_git_diff = False
     target_desc = ""
@@ -262,7 +311,6 @@ def cmd_order(kitchen_id: str, target: str = None):
     elif target and Path(target).is_dir():
         target_desc = f"Directory: {target}"
     else:
-        # Default: current git diff
         diff = get_git_diff()
         if diff:
             target_desc = "Current Git Diff (staged + unstaged)"
@@ -271,57 +319,54 @@ def cmd_order(kitchen_id: str, target: str = None):
         else:
             target_desc = "Workspace Codebase"
 
-    print(f"   🔍 Target: {target_desc}")
+    checks = []
+    status = "OK"
 
-    # 2. Kitchen-Specific Automated Pre-Checks
     if k_id == "thermonuclear":
-        print("\n⚡ [Thermo-Nuclear Automated Checks]:")
         touched = get_git_touched_files() if is_git_diff else ([target] if target and Path(target).is_file() else [])
         if touched:
             for tf in touched:
                 try:
-                    line_count = len(Path(tf).read_text(encoding="utf-8", errors="replace").splitlines())
-                    status = "\033[31m❌ VIOLATION (>1,000 lines)\033[0m" if line_count > 1000 else "\033[32m✅ OK (<1,000 lines)\033[0m"
-                    print(f"   • {tf}: {line_count} lines {status}")
+                    lines = len(Path(tf).read_text(encoding="utf-8", errors="replace").splitlines())
+                    if lines > 1000:
+                        checks.append(f"❌ VIOLATION: {tf} is {lines} lines (>1,000 ceiling)")
+                        status = "VIOLATION"
+                    else:
+                        checks.append(f"✅ OK: {tf} is {lines} lines (<1,000 lines)")
                 except Exception:
                     pass
         else:
-            print("   • No modified files detected for line-count check.")
+            checks.append("• Clean working tree or no diff for file size audit.")
 
     elif k_id == "ponytail":
-        print("\n⚡ [Ponytail Minimal Diff Checks]:")
         if target_text and is_git_diff:
             added = sum(1 for line in target_text.splitlines() if line.startswith("+") and not line.startswith("+++"))
             deleted = sum(1 for line in target_text.splitlines() if line.startswith("-") and not line.startswith("---"))
-            ratio = f"+{added} / -{deleted} (Net: {added - deleted:+d} lines)"
-            print(f"   • Diff Volume: {ratio}")
+            checks.append(f"• Diff Volume: +{added} / -{deleted} (Net: {added - deleted:+d} lines)")
             if added > 150:
-                print("   ⚠️  Caution: Large addition (>150 lines). Can this be solved with less new code?")
+                checks.append("⚠️  Caution: Large addition (>150 lines). Can this be solved with less new code?")
+                status = "WARNING"
             else:
-                print("   ✅ Diff volume is compact and focused.")
+                checks.append("✅ Diff volume is compact and minimal.")
         else:
-            print("   • Clean working tree or no diff to calculate delta.")
+            checks.append("• Clean working tree or no diff to calculate delta.")
 
     elif k_id == "unslop":
-        print("\n⚡ [Unslop Automated AI Tell Scan]:")
         findings = scan_unslop(target_text) if target_text else []
         if findings:
-            print(f"   ⚠️  Found {len(findings)} potential AI tell pattern(s):")
-            for f in findings[:8]:
-                print(f"      [Line {f['line']}] {f['label']}: \"{f['match']}\" in: {f['context']}")
-            if len(findings) > 8:
-                print(f"      ... and {len(findings) - 8} more.")
+            checks.append(f"⚠️  Found {len(findings)} potential AI tell pattern(s):")
+            for f in findings[:6]:
+                checks.append(f"   [Line {f['line']}] {f['label']}: \"{f['match']}\"")
+            status = "WARNING"
         else:
-            print("   ✅ Clean! No obvious AI tell words detected.")
+            checks.append("✅ Clean! Zero obvious AI tell words detected.")
 
     elif k_id in ["pstack", "poteto"]:
-        print("\n⚡ [pstack / Poteto Architectural Principles Checklist]:")
-        print("   1. Model the Domain: Are states modeled as explicit unions/state machines instead of boolean flags?")
-        print("   2. Laziness Protocol: Is every line needed? Can dead code be deleted first?")
-        print("   3. Verify Artifacts: Is there a concrete check (test, screenshot, command run)?")
+        checks.append("1. Model the Domain: States as explicit unions/state machines instead of loose flags.")
+        checks.append("2. Laziness Protocol: Deletion beats addition; verify every line is strictly necessary.")
+        checks.append("3. Grounded Artifacts: Never trust assumptions; verify with real command execution.")
 
     elif "typescript" in k_id or k_id == "ts":
-        print("\n⚡ [TypeScript Best Practices Scan]:")
         touched = get_git_touched_files() if is_git_diff else ([target] if target and Path(target).is_file() else [])
         ts_files = [f for f in touched if f.endswith((".ts", ".tsx"))]
         if ts_files:
@@ -334,20 +379,19 @@ def cmd_order(kitchen_id: str, target: str = None):
                     as_count += len(re.findall(r"\bas\s+[A-Z]", content))
                 except Exception:
                     pass
-            print(f"   • Scanned {len(ts_files)} TypeScript file(s)")
+            checks.append(f"• Scanned {len(ts_files)} TypeScript file(s)")
             if any_count > 0:
-                print(f"   ⚠️  Found {any_count} loose 'any' annotations! (Prefer 'unknown' or domain types)")
-            else:
-                print("   ✅ Zero unvalidated 'any' types detected.")
+                checks.append(f"⚠️ Found {any_count} loose 'any' annotations. (Prefer 'unknown' or domain types)")
+                status = "WARNING"
             if as_count > 0:
-                print(f"   ⚠️  Found {as_count} 'as' type assertion(s)! (Prefer 'satisfies' or type guards)")
-            else:
-                print("   ✅ Zero risky 'as' type casts detected.")
+                checks.append(f"⚠️ Found {as_count} unvalidated 'as' casts. (Prefer 'satisfies' or type guards)")
+                status = "WARNING"
+            if any_count == 0 and as_count == 0:
+                checks.append("✅ Zero unvalidated 'any' or risky 'as' casts detected.")
         else:
-            print("   • No modified .ts/.tsx files found to scan.")
+            checks.append("• No modified .ts/.tsx files found to scan.")
 
-    elif "nocomments" in k_id:
-        print("\n⚡ [Comment Sicko Cleanliness Scan]:")
+    elif "nocomments" in k_id or "no-comments" in k_id:
         touched = get_git_touched_files() if is_git_diff else ([target] if target and Path(target).is_file() else [])
         code_files = [f for f in touched if not f.endswith((".md", ".txt", ".json", ".yaml", ".yml"))]
         if code_files:
@@ -356,55 +400,65 @@ def cmd_order(kitchen_id: str, target: str = None):
                     lines = Path(cf).read_text(encoding="utf-8", errors="replace").splitlines()
                     comment_lines = sum(1 for l in lines if re.match(r"^\s*(//|#|/\*|\*)", l))
                     ratio = (comment_lines / len(lines) * 100) if lines else 0
-                    print(f"   • {cf}: {comment_lines}/{len(lines)} lines are comments ({ratio:.1f}%)")
                     if ratio > 25:
-                        print(f"     ⚠️  High comment ratio ({ratio:.1f}%). Strip obvious code comments; encode constraints into types.")
+                        checks.append(f"⚠️ {cf}: {comment_lines}/{len(lines)} lines are comments ({ratio:.1f}%). Strip trivial comments.")
+                        status = "WARNING"
+                    else:
+                        checks.append(f"✅ {cf}: comment ratio clean ({ratio:.1f}%)")
                 except Exception:
                     pass
         else:
-            print("   • No modified code files found to audit comments.")
+            checks.append("• No modified code files found to audit comments.")
 
-    elif "verification" in k_id or "verify" in k_id:
-        print("\n⚡ [Verification Stack Readiness]:")
-        has_local_verify = any(Path(p).is_dir() for p in [".cursor/skills", ".gemini/config/skills", "tests", "__tests__"])
-        print(f"   • Existing Verification Harness Detected: {'✅ Yes' if has_local_verify else '❌ No'}")
-        print("   • Mandatory 5 Invariants: Launch -> Doctor -> Drive -> Evidence -> Cleanup")
-
-    # 3. Output the Authoritative Review Rubric
     skill_file = resolve_skill_file(info["skill_dir"])
-    print(f"\n📋 [Review Rubric from {skill_file.name}]:")
-    print(f"   Ready to apply {info['name']} standards to {target_desc}.\n")
+    return {
+        "kitchen_id": k_id,
+        "name": info["name"],
+        "emoji": info["emoji"],
+        "chef": info["chef"],
+        "description": info["description"],
+        "target_desc": target_desc,
+        "status": status,
+        "checks": checks,
+        "skill_file": str(skill_file),
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="craft-hub",
-        description="The DoorDash API for Code Craft, Audits, and Rigorous Reviews"
+        description="The Uber Protocol & DoorDash API for Code Craft, Audits, and Rigorous Reviews"
     )
     sub = parser.add_subparsers(dest="action", required=True)
 
-    sub.add_parser("menu", help="List all 5 kitchens and their specialties")
+    p_menu = sub.add_parser("menu", help="List all kitchens and their specialties")
+    p_menu.add_argument("--json", action="store_true", help="Output menu as JSON")
+
     sub.add_parser("list", help="Alias for menu")
 
     p_search = sub.add_parser("search", help="Search kitchens by intent or keyword")
     p_search.add_argument("query", help="Intent query (e.g. 'harsh audit', 'delete bloat')")
+    p_search.add_argument("--json", action="store_true", help="Output results as JSON")
 
     p_inspect = sub.add_parser("inspect", help="Read a kitchen's full rubric and rules")
-    p_inspect.add_argument("kitchen", help="Kitchen name (ponytail, pstack, poteto, thermonuclear, unslop)")
+    p_inspect.add_argument("kitchen", help="Kitchen name (ponytail, pstack, poteto, thermonuclear, unslop, combo)")
 
     p_order = sub.add_parser("order", help="Dispatch a review order on git diff or target file")
     p_order.add_argument("kitchen", help="Kitchen name (ponytail, pstack, poteto, thermonuclear, unslop, combo)")
     p_order.add_argument("target", nargs="?", default=None, help="Optional file or directory path")
+    p_order.add_argument("--out", default=None, help="Buffer raw audit output to disk file")
+    p_order.add_argument("--project", default=None, help="Comma-separated fields to project (e.g. 'status,checks')")
+    p_order.add_argument("--json", action="store_true", help="Output audit results as JSON")
 
     args = parser.parse_args()
     if args.action in ["menu", "list"]:
-        cmd_menu()
+        cmd_menu(as_json=getattr(args, "json", False))
     elif args.action == "search":
-        cmd_search(args.query)
+        cmd_search(args.query, as_json=args.json)
     elif args.action == "inspect":
         cmd_inspect(args.kitchen)
     elif args.action == "order":
-        cmd_order(args.kitchen, args.target)
+        cmd_order(args.kitchen, args.target, out_path=args.out, project_fields=args.project, as_json=args.json)
 
 
 if __name__ == "__main__":

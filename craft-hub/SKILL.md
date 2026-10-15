@@ -1,22 +1,20 @@
 ---
 name: craft-hub
 description: >
-  The DoorDash API for Code Craft, Audits, and Rigorous Reviews. Late-binding dispatch
-  hub for 5 elite engineering kitchens: Ponytail (minimal diff & YAGNI), pstack (23 playbooks),
+  The Uber Protocol & DoorDash Gateway for Code Craft, Audits, and Rigorous Reviews. Late-binding
+  dispatch hub for 9 elite engineering kitchens: Ponytail (minimal diff & YAGNI), pstack (23 playbooks),
   Poteto Mode (domain modeling & discipline), Thermo-Nuclear (harsh architectural audit),
-  and Unslop (31 AI tell elimination rules). Use whenever asked to review code, audit
-  a repo or pull request, check git diffs, run "doordash", clean up AI writing slop,
-  apply ponytail/pstack/poteto, or when an agent needs high-leverage code quality enforcement
-  without bloating the context window. Provides CLI commands: `craft-hub` and `doordash`.
+  Unslop (31 AI tell elimination rules), Verification, No-Comments, and TypeScript. Provides
+  full pre-flight response projection (--project) and disk buffering (--out) to eliminate context bloat.
 ---
 
 # Code Craft & Review Hub (`craft-hub` / `doordash`)
 
-`craft-hub` is the specialized "DoorDash API" for high-leverage code reviews, architecture audits, and quality enforcement. Instead of polluting context windows with thousands of lines of review prompts, agents order on-demand from 5 elite engineering kitchens.
+`craft-hub` is the specialized **Uber Protocol & DoorDash Gateway** for high-leverage code reviews, architecture audits, and quality enforcement. Instead of polluting context windows with thousands of lines of prompt rules, agents discover and dispatch audits on-demand with pre-flight response projection.
 
 ---
 
-## 🍽️ The Kitchens & Specialty Stations Menu
+## 🍽️ The 9 Kitchens & Specialty Stations
 
 | # | Kitchen ID | Specialty & Core Philosophy |
 |---|---|---|
@@ -34,39 +32,38 @@ description: >
 
 ## 🚀 CLI Commands (`craft-hub` or `doordash`)
 
-### 1. View the Menu
+### 1. View Menu & Kitchens
 ```bash
 craft-hub menu
-# or
-doordash menu
+# Or structured JSON
+craft-hub menu --json
 ```
 
-### 2. Search by Intent
+### 2. Search Kitchens by Intent
 ```bash
 craft-hub search "harsh audit"
 craft-hub search "delete bloat"
 craft-hub search "ai writing tells"
 ```
 
-### 3. Inspect a Kitchen's Rubric & Rules
+### 3. Inspect a Single Rubric (Zero Startup Context Freight)
 ```bash
 craft-hub inspect ponytail
 craft-hub inspect thermonuclear
-craft-hub inspect pstack
-craft-hub inspect unslop
+craft-hub inspect typescript
 ```
 
-### 4. Place an "Order" (Run Review on Diff, File, or Repo)
+### 4. Dispatch a Review Order with Response Projection & Disk Buffering
 ```bash
-# Review current git diff for minimal size & YAGNI
+# Basic run on current git diff
 craft-hub order ponytail
 
-# Harsh review against 1,000-line ceiling & spaghetti logic
-craft-hub order thermonuclear
+# Harsh review with output buffered to disk (keeps agent context lean)
+craft-hub order thermonuclear --out /tmp/audit.json
+
+# Run all kitchens (Combo Platter) with field projection
+craft-hub order combo --project "status,checks"
 
 # Scan markdown or docs for 31 AI tell patterns
 craft-hub order unslop README.md
-
-# Run all 5 kitchens in a single comprehensive gauntlet
-craft-hub order combo
 ```

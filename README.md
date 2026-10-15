@@ -2,7 +2,7 @@
 
 [![Public Repository](https://img.shields.io/badge/Repository-Public-green.svg)](https://github.com/rodritimecoder/workstation-clis)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tools: 11 CLIs](https://img.shields.io/badge/Tools-11%20CLIs-blue.svg)](#-curated-cli-catalog)
+[![Tools: 14 CLIs](https://img.shields.io/badge/Tools-14%20CLIs-blue.svg)](#-curated-cli-catalog)
 [![Hardware: Dual RX 9060 XT](https://img.shields.io/badge/Hardware-Dual%20RX%209060%20XT-purple.svg)](#-local-hardware--inference-substrate)
 
 > **High-performance local CLI utilities, autonomous agent execution engines, and multimodal inference pipelines designed for dual-GPU AI workstations.**
@@ -95,14 +95,15 @@ All models run 100% locally on dual AMD Radeon RX 9060 XT GPUs via ROCm and Vulk
 
 ## 📦 Curated CLI Catalog
 
-This suite contains 13 focused engineering, sandbox, and inference CLIs:
+This suite contains 14 focused engineering, sandbox, and inference CLIs:
 
 | Tool Directory | Identifier | Core Capabilities |
 | :--- | :--- | :--- |
-| [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Late-binding DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, and Grounded Verification. |
+| [`worktree-harness`](worktree-harness/) | `worktree-harness` | Autonomous multi-agent Git worktree orchestration with pre-write section claims, deterministic test quality gates, and automated merge conflict arbitration. |
+| [`craft-hub`](craft-hub/) | `craft-hub` / `doordash` | Uber Protocol & DoorDash API for code craft & review: Ponytail, pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` | Autonomous fleet synchronizer (`sync-all`, `status-all`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
-| [`skills-hub`](skills-hub/) | `skills-hub` | Unified meta-tool discovery and execution layer for workstation skills with zero context bloat. |
+| [`skills-hub`](skills-hub/) | `skills-hub` | Uber OmniMCP & aifx late-binding gateway across 28+ agent skills with response projection and disk buffering. |
 | [`graph-memory`](graph-memory/) | `graph-memory` | Local hybrid RAG (BM25 + BGE-small 384d) with exact-quote LLM distillation, prompt recall hooks, and session digests. |
 | [`litellm-vram-switcher`](litellm-vram-switcher/) | `vram-rig-ctl` | Multi-GPU VRAM switcher, llama-swap orchestrator (:8000), and LiteLLM failover manager (:4000). |
 | [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |

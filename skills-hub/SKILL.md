@@ -1,45 +1,68 @@
 ---
 name: skills-hub
 description: >
-  Unified meta-tool discovery and execution layer for 28+ agent skills. Lets agents
-  search skills by intent, inspect exact usage runbooks, and execute commands dynamically
-  without bloating the context window with individual tool schemas.
+  Unified Uber OmniMCP and aifx Late-Binding Gateway for 28+ agent skills. Eliminates
+  skill shadowing and tool bloat via a 4-step discovery funnel (discover -> tools -> schema -> invoke),
+  full-body search (91.7% routing signal), pre-flight response projection (--project, --jq),
+  and disk buffering (--out).
 ---
 
-# Skills Hub (`skills-hub`)
+# Skills Hub — Uber OmniMCP & `aifx` Gateway (`skills-hub`)
 
-The Meta-Tool Discovery and Execution Gateway for your agent environment. Instead of injecting 28+ separate tool schemas into an LLM context, `skills-hub` exposes 3 universal operations:
-
-1. **`search`**: Find relevant skills by natural language intent (e.g. "transcribe lecture", "audit git repo").
-2. **`inspect`**: Read the authoritative runbook, CLI flags, and parameter schemas for a chosen skill.
-3. **`run`**: Execute the skill's CLI tool directly and capture the output.
+`skills-hub` is the primary late-binding execution gateway for all agent skills on this workstation. It implements the **Uber OmniMCP & `aifx` Protocol** to solve the dual crises of **Skill Shadowing** (where loading 30+ skills drops accuracy by 21 points) and **Output Bloat** (where unprojected JSON destroys context).
 
 ---
 
-## 🚀 Quick Usage
+## 🏛️ The 4-Step Funnel (Uber OmniMCP Pattern)
 
-### 1. Search for Skills by Intent
+Instead of dumping 30+ skill definitions into the agent's system prompt at startup, the agent uses a 4-step progressive funnel:
+
+| Step | CLI Command | Purpose | Context Freight |
+|---|---|---|---|
+| **1. Discover** | `skills-hub search "<intent>"` | Searches full `SKILL.md` bodies & scripts for winning skills. | ~50 tokens |
+| **2. Tools** | `skills-hub tools <skill>` | Lists executable scripts and utilities inside the winning skill. | ~20 tokens |
+| **3. Schema** | `skills-hub inspect <skill>` | Loads the exact usage contract and rubric for **that 1 skill only**. | ~300 tokens |
+| **4. Invoke** | `skills-hub run <skill> [args] [--out / --project]` | Executes the tool with response projection & disk buffering. | Filtered / Lean |
+
+---
+
+## 🛡️ Response Projection & Disk Buffering
+
+To prevent a single tool response from dumping a 50 KB payload into the agent's context window:
+
+### 1. Pre-Flight Field Projection (`--project` or `--jq`)
+Filter fields before output enters the LLM context:
 ```bash
-skills-hub search "transcribe audio"
-skills-hub search "git secrets and audit"
-skills-hub search "ocr text extraction"
+# Project specific keys from JSON output
+skills-hub run canvas-cli courses --project "id,name,course_code"
+
+# Filter with JQ syntax
+skills-hub run github-architect list --jq '.[].name'
 ```
 
-### 2. Inspect a Skill's Full Usage & Commands
+### 2. Disk Buffering (`--out`)
+Stream the heavy raw execution trace to a file on disk, returning only an exit status receipt to the LLM:
 ```bash
+skills-hub run video-miner videomine.py "https://..." --out /tmp/video_extract.json
+```
+The agent then uses `grep` or `jq` on `/tmp/video_extract.json` on-demand.
+
+---
+
+## CLI Reference
+
+```bash
+# Search by intent across all 28+ skills in the upstream vault
+skills-hub search "transcribe lecture video"
+skills-hub search "canvas assignments"
+skills-hub search "review git diff for memory leaks"
+
+# Step 2: List internal tools of a winning skill
+skills-hub tools audiocpp-asr
+
+# Step 3: Read single skill documentation
 skills-hub inspect audiocpp-asr
-skills-hub inspect github-architect
-skills-hub inspect litellm-vram-switcher
-```
 
-### 3. Run a Skill Dynamically
-```bash
-skills-hub run tailscale-ops peers
-skills-hub run github-architect audit .
-skills-hub run litellm-vram-switcher status
-```
-
-### 4. List All Registered Skills
-```bash
-skills-hub list
+# Step 4: Run dynamically with disk buffering
+skills-hub run audiocpp-asr asr.py ./lecture.mp3 --out /tmp/transcript.json
 ```

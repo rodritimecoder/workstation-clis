@@ -271,9 +271,15 @@ def run_stage_03_visual_sample(workspace: Path) -> None:
         "  st(0, 0) + (isnan(prev_selected_t) + gte(t - prev_selected_t, 0.5)),"
         "  0)"
     )
+    # VLM tile boundary snapping: clamp max dimension to 1568 and snap W & H to multiples of 28px patch grid
+    scale_expr = "scale=w='trunc(min(1568,iw)/28)*28':h='trunc((min(1568,iw)*ih/iw)/28)*28':flags=lanczos"
+    # Burn-in timestamp watermark overlay (bottom-right with semi-transparent badge)
+    drawtext_expr = "drawtext=text='[%{pts\\:hms}]':x=w-tw-16:y=h-th-16:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=4"
+    vf_chain = f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,{scale_expr},{drawtext_expr},showinfo"
+
     cmd = [
         "ffmpeg", "-y", "-i", str(video_mp4),
-        "-vf", f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,scale='min(1920,iw)':-1,showinfo",
+        "-vf", vf_chain,
         "-vsync", "vfr",
         "-q:v", "2",
         str(frames_dir / "frame_%06d.jpg")
@@ -390,6 +396,21 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
 
     ocr_json = out_dir / "ocr_timeline.json"
     ocr_md = out_dir / "ocr_timeline.md"
+    preprocessed_dir = out_dir / "preprocessed_frames"
+    preprocessed_dir.mkdir(parents=True, exist_ok=True)
+
+    def preprocess_frame_for_ocr(frame_path: Path) -> Path:
+        """Applies grayscale, contrast boost (1.3x), and unsharp mask to maximize OCR legibility."""
+        ocr_target = preprocessed_dir / f"{frame_path.stem}_ocr.jpg"
+        if not ocr_target.exists():
+            cmd = [
+                "ffmpeg", "-y", "-i", str(frame_path),
+                "-vf", "format=gray,eq=contrast=1.3:brightness=0.02,unsharp=5:5:1.0:5:5:0.0",
+                "-q:v", "2",
+                str(ocr_target)
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        return ocr_target if ocr_target.exists() else frame_path
 
     if not kept:
         ocr_json.write_text("[]", encoding="utf-8")
@@ -512,7 +533,8 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
                 continue
                 
             print(f"[05_visual_ocr] Processing frame {idx}/{len(kept)}: {r['filename']} ({r['timestamp_str']})...")
-            text_out = ocr_single_frame(frame_file)
+            ocr_input_file = preprocess_frame_for_ocr(frame_file)
+            text_out = ocr_single_frame(ocr_input_file)
             
             # Deduplicate consecutive identical text
             if text_out and text_out != last_text:
