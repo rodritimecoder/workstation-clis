@@ -51,6 +51,8 @@ def auto_remove_background(img: Image.Image, tolerance: int = 30) -> Image.Image
                     pixels[x, y] = (0, 0, 0, 0)
                 elif a > 0 and g > r and g > b:
                     pixels[x, y] = (0, 0, 0, 0)
+                elif a < 64:
+                    pixels[x, y] = (0, 0, 0, 0)
         return img
 
     # 2. General corner-based keying
@@ -480,19 +482,21 @@ def cmd_slice_sheet(
 
     if grid == "2x2":
         hw, hh = w // 2, h // 2
+        pad = 6
         crops = {
-            "idle": (0, 0, hw, hh),
-            "blink": (hw, 0, w, hh),
-            "talk_small": (0, hh, hw, h),
-            "talk_wide": (hw, hh, w, h),
+            "idle": (pad, pad, hw - pad, hh - pad),
+            "blink": (hw + pad, pad, w - pad, hh - pad),
+            "talk_small": (pad, hh + pad, hw - pad, h - pad),
+            "talk_wide": (hw + pad, hh + pad, w - pad, h - pad),
         }
     else:
         pw = w // 4
+        pad = 6
         crops = {
-            "idle": (0, 0, pw, h),
-            "blink": (pw, 0, pw * 2, h),
-            "talk_small": (pw * 2, 0, pw * 3, h),
-            "talk_wide": (pw * 3, 0, w, h),
+            "idle": (pad, pad, pw - pad, h - pad),
+            "blink": (pw + pad, pad, pw * 2 - pad, h - pad),
+            "talk_small": (pw * 2 + pad, pad, pw * 3 - pad, h - pad),
+            "talk_wide": (pw * 3 + pad, pad, w - pad, h - pad),
         }
 
     panels: Dict[str, Image.Image] = {}
@@ -594,6 +598,11 @@ def create_showcase_gif(dist_dir: Path, out_path: Path, scale: int = 2) -> Path:
             img = Image.open(p).convert("RGBA")
             if scale != 1:
                 img = img.resize((target_dim, target_dim), resample=Image.Resampling.NEAREST)
+            p_pixels = img.load()
+            for py in range(target_dim):
+                for px in range(target_dim):
+                    if p_pixels[px, py][3] < 128:
+                        p_pixels[px, py] = (0, 0, 0, 0)
             frames.append(img)
             durations.append(dur)
 
