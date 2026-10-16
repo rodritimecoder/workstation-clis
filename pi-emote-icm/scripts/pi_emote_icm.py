@@ -43,11 +43,13 @@ def auto_remove_background(img: Image.Image, tolerance: int = 30) -> Image.Image
             green_count += 1
 
     if green_count >= 3:
-        # Green screen mode
+        # Green screen mode with edge defringing
         for y in range(h):
             for x in range(w):
                 r, g, b, a = pixels[x, y]
-                if g > 130 and g > r * 1.3 and g > b * 1.3:
+                if g > 110 and g > r * 1.15 and g > b * 1.15:
+                    pixels[x, y] = (0, 0, 0, 0)
+                elif a > 0 and g > r and g > b:
                     pixels[x, y] = (0, 0, 0, 0)
         return img
 
@@ -166,18 +168,16 @@ def decompose_sprite_layers(sprite_128: Image.Image, layers_dir: Path) -> Dict[s
     # Bounding box of character face region
     bbox = sprite_128.getbbox() or (0, 0, w, h)
     bx0, by0, bx1, by1 = bbox
-    cx = (bx0 + bx1) // 2
-
-    # Find eye and mouth anchor points
-    # Default proportional anchors
-    lx = bx0 + int((bx1 - bx0) * 0.36)
-    rx = bx0 + int((bx1 - bx0) * 0.64)
-    ey = by0 + int((by1 - by0) * 0.39)
-    my = by0 + int((by1 - by0) * 0.50)
+    # Anchor points for face features
+    cx = 64
+    lx = 51
+    rx = 76
+    ey = 51
+    my = 64
 
     # Sample skin color from face center
     pixels = sprite_128.load()
-    skin_cand = pixels[cx, my - 4]
+    skin_cand = pixels[cx, my - 6]
     skin = skin_cand if skin_cand[3] > 100 else (250, 222, 210, 255)
     eyelash = (42, 28, 48, 255)
 
@@ -189,38 +189,41 @@ def decompose_sprite_layers(sprite_128: Image.Image, layers_dir: Path) -> Dict[s
     # Eye: Blink (covers pupil with skin tone and draws curved eyelid lashes)
     img_eyes_blink = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_blink)
-    d.rectangle([lx - 7, ey - 1, lx + 6, ey + 4], fill=skin)
-    d.rectangle([rx - 7, ey - 1, rx + 6, ey + 4], fill=skin)
-    d.line([(lx - 7, ey + 1), (lx, ey + 3), (lx + 6, ey + 1)], fill=eyelash, width=2)
-    d.line([(rx - 6, ey + 1), (rx, ey + 3), (rx + 7, ey + 1)], fill=eyelash, width=2)
+    d.rectangle([lx - 6, ey - 2, lx + 7, ey + 3], fill=skin)
+    d.rectangle([rx - 6, ey - 2, rx + 7, ey + 3], fill=skin)
+    d.line([(lx - 6, ey), (lx, ey + 2), (lx + 6, ey)], fill=eyelash, width=2)
+    d.line([(rx - 6, ey), (rx, ey + 2), (rx + 6, ey)], fill=eyelash, width=2)
     img_eyes_blink.save(layers_dir / "eyes_blink.png")
 
     # Eye: Look Up / Think
     img_eyes_think = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_think)
-    d.rectangle([lx - 7, ey, lx + 6, ey + 4], fill=skin)
-    d.rectangle([rx - 7, ey, rx + 6, ey + 4], fill=skin)
-    d.arc([lx - 6, ey - 3, lx + 6, ey + 3], 180, 360, fill=eyelash, width=2)
-    d.arc([rx - 6, ey - 3, rx + 6, ey + 3], 180, 360, fill=eyelash, width=2)
+    d.rectangle([lx - 6, ey - 2, lx + 7, ey + 3], fill=skin)
+    d.rectangle([rx - 6, ey - 2, rx + 7, ey + 3], fill=skin)
+    d.line([(lx - 6, ey + 1), (lx, ey - 2), (lx + 6, ey + 1)], fill=eyelash, width=2)
+    d.line([(rx - 6, ey + 1), (rx, ey - 2), (rx + 6, ey + 1)], fill=eyelash, width=2)
     img_eyes_think.save(layers_dir / "eyes_look_up.png")
 
     # Eye: Sparkle (Success / Hi)
     img_eyes_sparkle = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_sparkle)
-    d.line([lx - 6, ey + 2, lx, ey - 3, lx + 6, ey + 2], fill=eyelash, width=2)
-    d.line([rx - 6, ey + 2, rx, ey - 3, rx + 6, ey + 2], fill=eyelash, width=2)
-    d.point([(lx - 8, ey - 4), (lx + 8, ey - 4), (rx - 8, ey - 4), (rx + 8, ey - 4)], fill=(255, 230, 80, 255))
+    d.rectangle([lx - 6, ey - 2, lx + 7, ey + 3], fill=skin)
+    d.rectangle([rx - 6, ey - 2, rx + 7, ey + 3], fill=skin)
+    d.line([(lx - 6, ey + 1), (lx, ey - 2), (lx + 6, ey + 1)], fill=eyelash, width=2)
+    d.line([(rx - 6, ey + 1), (rx, ey - 2), (rx + 6, ey + 1)], fill=eyelash, width=2)
+    # Yellow sparkle stars next to eyes
+    d.point([(lx - 8, ey - 3), (lx + 8, ey - 3), (rx - 8, ey - 3), (rx + 8, ey - 3)], fill=(255, 230, 80, 255))
     img_eyes_sparkle.save(layers_dir / "eyes_sparkle.png")
 
     # Eye: X / Dead (Failure)
     img_eyes_x = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_x)
-    d.rectangle([lx - 7, ey - 2, lx + 6, ey + 4], fill=skin)
-    d.rectangle([rx - 7, ey - 2, rx + 6, ey + 4], fill=skin)
-    d.line([lx - 5, ey - 2, lx + 5, ey + 3], fill=(220, 40, 50, 255), width=2)
-    d.line([lx - 5, ey + 3, lx + 5, ey - 2], fill=(220, 40, 50, 255), width=2)
-    d.line([rx - 5, ey - 2, rx + 5, ey + 3], fill=(220, 40, 50, 255), width=2)
-    d.line([rx - 5, ey + 3, rx + 5, ey - 2], fill=(220, 40, 50, 255), width=2)
+    d.rectangle([lx - 6, ey - 2, lx + 7, ey + 3], fill=skin)
+    d.rectangle([rx - 6, ey - 2, rx + 7, ey + 3], fill=skin)
+    d.line([lx - 4, ey - 2, lx + 4, ey + 2], fill=(220, 40, 50, 255), width=2)
+    d.line([lx - 4, ey + 2, lx + 4, ey - 2], fill=(220, 40, 50, 255), width=2)
+    d.line([rx - 4, ey - 2, rx + 4, ey + 2], fill=(220, 40, 50, 255), width=2)
+    d.line([rx - 4, ey + 2, rx + 4, ey - 2], fill=(220, 40, 50, 255), width=2)
     img_eyes_x.save(layers_dir / "eyes_x.png")
 
     # 3. Mouth Layers (4 pi-emote weights)
@@ -458,6 +461,58 @@ def cmd_build(input_image: str, slug: Optional[str] = None, grid_size: int = 32,
         install_emote_set(dist_dir, avatar_slug, target=target)
 
 
+def create_showcase_gif(dist_dir: Path, out_path: Path, scale: int = 2) -> Path:
+    """Assembles all emote states and talk variations into a single looping showcase GIF."""
+    sequence = [
+        (dist_dir / "hi" / "hi.png", 600),
+        (dist_dir / "idle" / "idle.png", 800),
+        (dist_dir / "idle" / "idle_blink.png", 160),
+        (dist_dir / "idle" / "idle.png", 600),
+        (dist_dir / "talk" / "talk_small.png", 130),
+        (dist_dir / "talk" / "talk_mid.png", 130),
+        (dist_dir / "talk" / "talk_wide.png", 220),
+        (dist_dir / "talk" / "talk_mid.png", 130),
+        (dist_dir / "talk" / "talk_small.png", 130),
+        (dist_dir / "talk" / "talk_close.png", 300),
+        (dist_dir / "think" / "think.png", 600),
+        (dist_dir / "think" / "think_hard.png", 700),
+        (dist_dir / "read" / "read.png", 700),
+        (dist_dir / "write" / "write.png", 700),
+        (dist_dir / "tool" / "tool.png", 700),
+        (dist_dir / "success" / "success.png", 800),
+        (dist_dir / "failure" / "failure.png", 800),
+        (dist_dir / "compact" / "compact.png", 700),
+        (dist_dir / "idle" / "idle.png", 600),
+    ]
+
+    frames = []
+    durations = []
+    target_dim = 128 * scale
+
+    for p, dur in sequence:
+        if p.is_file():
+            img = Image.open(p).convert("RGBA")
+            if scale != 1:
+                img = img.resize((target_dim, target_dim), resample=Image.Resampling.NEAREST)
+            frames.append(img)
+            durations.append(dur)
+
+    if not frames:
+        sys.exit(f"❌ Error: No emote frames found in {dist_dir}")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    frames[0].save(
+        out_path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=durations,
+        loop=0,
+        disposal=2
+    )
+    print(f"🎬 [pi-emote-icm] Created showcase GIF ({len(frames)} frames, {target_dim}x{target_dim}) -> {out_path}")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="pi-emote-icm — Autonomous ICM Pixel Art Pipeline for pi-emote")
     sub = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -490,13 +545,20 @@ def main():
     p_ins.add_argument("slug", help="Avatar slug name")
     p_ins.add_argument("--target", choices=["user", "project"], default="user", help="Install target (user or project)")
 
-    # 6. build (all-in-one pipeline)
+    # 6. gif
+    p_gif = sub.add_parser("gif", help="Create a looping animated showcase GIF across all expressions")
+    p_gif.add_argument("dist_dir", help="Path to dist directory containing states")
+    p_gif.add_argument("--out", "-o", default="showcase.gif", help="Output GIF file path")
+    p_gif.add_argument("--scale", "-s", type=int, default=2, help="Pixel scaling multiplier (default: 2 -> 256x256)")
+
+    # 7. build (all-in-one pipeline)
     p_bld = sub.add_parser("build", help="Run full pipeline from raw image to pi-emote package")
     p_bld.add_argument("image", help="Raw concept image path")
     p_bld.add_argument("--slug", "-s", help="Avatar slug name (default: filename)")
     p_bld.add_argument("--grid", "-g", type=int, default=32, help="Pixel grid density (default: 32)")
     p_bld.add_argument("--install", "-i", action="store_true", help="Automatically install into ~/.pi/agent/extensions/pi-emote/emotes/")
     p_bld.add_argument("--target", choices=["user", "project"], default="user", help="Install target")
+    p_bld.add_argument("--gif", action="store_true", help="Generate showcase animated GIF in dist folder")
 
     args = parser.parse_args()
 
@@ -516,8 +578,13 @@ def main():
         assemble_emote_set(Path(args.layers_dir).resolve(), Path(args.states_dir).resolve(), Path(args.dist_dir).resolve())
     elif args.command == "install":
         install_emote_set(Path(args.dist_dir).resolve(), args.slug, target=args.target)
+    elif args.command == "gif":
+        create_showcase_gif(Path(args.dist_dir).resolve(), Path(args.out).resolve(), scale=args.scale)
     elif args.command == "build":
         cmd_build(args.image, slug=args.slug, grid_size=args.grid, install=args.install, target=args.target)
+        if args.gif:
+            dist_p = Path.cwd() / "pi-emote-workspaces" / (args.slug or Path(args.image).stem.lower().replace(" ", "_")) / "06_dist"
+            create_showcase_gif(dist_p, dist_p / "showcase.gif", scale=2)
     else:
         parser.print_help()
 
