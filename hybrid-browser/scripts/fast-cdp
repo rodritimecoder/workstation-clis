@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUST_BIN="${SKILL_DIR}/bin/fast-cdp"
+VENV="${SKILL_DIR}/.venv"
+SCRIPT="${SKILL_DIR}/scripts/fast_cdp.py"
+
+if [[ -x "${RUST_BIN}" ]]; then
+  exec "${RUST_BIN}" "$@"
+fi
+
+if [[ -x "${VENV}/bin/python" ]]; then
+  exec "${VENV}/bin/python" "${SCRIPT}" "$@"
+fi
+
+echo "Error: Neither native fast-cdp binary nor python venv found at ${SKILL_DIR}" >&2
+exit 1

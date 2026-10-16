@@ -1,6 +1,6 @@
 ---
 name: local-hub
-description: Unified local workstation inference hub and CLI gateway for Dual-GPU AMD Radeon hardware: Genesis 35B coder (:8080), LightOnOCR-3-1B vision (:8085), Imajev-4B calibrated decisions (:8083), Nemotron 3.5 ASR (:8081), live health checks, and skill discovery.
+description: "Unified local workstation inference hub and CLI gateway for Dual-GPU AMD Radeon hardware: Genesis 35B coder (:8080), LightOnOCR-3-1B vision (:8085), Imajev-4B calibrated decisions (:8083), Nemotron 3.5 ASR (:8081), live health checks, and skill discovery."
 ---
 
 # `local-hub` — Workstation Inference & Skills Gateway

@@ -1,6 +1,6 @@
 ---
 name: github-architect
-description: Autonomous GitHub repository architect, synchronizer, and multi-machine bootstrapper. Features disciplined 6-stage git branch synchronization (git-sync: Look, Guard, Commit, Gate, Pull, Push, Report), fleet-wide status and rebase sync, secret & blob shielding, and zero-drift environment onboarding.
+description: "Autonomous GitHub repository architect, synchronizer, and multi-machine bootstrapper. Features disciplined 6-stage git branch synchronization (git-sync: Look, Guard, Commit, Gate, Pull, Push, Report), fleet-wide status and rebase sync, secret & blob shielding, and zero-drift environment onboarding."
 ---
 
 # GitHub Architect (`github-architect`)
@@ -17,18 +17,18 @@ Executable directly or via Python:
 
 ```bash
 # 1. Disciplined 6-Stage Branch Synchronization (git-sync protocol)
-git-sync [-m "commit message"] [-y] [--dry-run] [--no-pull] [--no-gate]
+git-sync [-m "commit message"] [-y] [--dry-run] [--no-pull] [--no-gate] [--table] [--json]
 # Or via github-architect:
-github-architect git-sync [-m "commit message"] [-y] [--dry-run]
+github-architect git-sync [-m "commit message"] [-y] [--dry-run] [--table] [--json]
 
 # 2. Fleet Dashboard: Inspect all workstation repositories at a glance
-github-architect status-all
+github-architect status-all [--table] [--json] [--project repository branch worktree remote_sync] [--limit 5]
 
 # 3. Fleet Sync: Pull rebase, commit local changes, and push across ALL fleet repositories
 github-architect sync-all [-m "sync fleet updates"]
 
 # 4. Single Repository Audit (git status, auth, secret scanning, oversized blob guard)
-github-architect audit [path]
+github-architect audit [path] [--table] [--json]
 
 # 5. Single Repository Sync (pull rebase + auto-commit + push)
 github-architect sync [path] [-m "commit message"]

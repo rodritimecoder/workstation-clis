@@ -94,3 +94,54 @@ In the REPL:
 - `press <key>`
 - `snap`
 - `screenshot`
+
+---
+
+## Ultra-Fast Deterministic CDP Verification (`fast-cdp`)
+
+For sub-second grounded verification in agent loops, use `fast-cdp`. It is powered by a compiled native Rust binary (`fast-cdp-rs`, located at `bin/fast-cdp`) communicating directly over Chrome DevTools Protocol (`:9222`) WebSockets and HTTP targets with zero Python/Node.js process overhead (~35ms end-to-end wall clock vs ~470ms in Python).
+
+### Engine Architecture & Latency Profile
+- **Native Rust Engine**: Direct JSON-RPC over `tungstenite` WebSocket + `ureq` HTTP target management. Cold CLI start + verification in **30–45ms**.
+- **Python Fallback Engine**: Automatic fallback to Playwright sync Python if the native binary is absent.
+- **Resource Blocklist**: Pre-emptively drops images, fonts, analytics, and tracking scripts to guarantee deterministic, bandwidth-free execution.
+
+### Daemon Management
+```bash
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp daemon start
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp daemon status
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp daemon stop
+```
+
+### Verification Commands
+```bash
+# Verify selector & text presence in <100ms
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp verify "http://localhost:3000" \
+  --assert-selector "h1" \
+  --assert-text "Dashboard" \
+  --json
+
+# Click and verify dynamic state update
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp verify "http://localhost:3000" \
+  --click "#submit-btn" \
+  --assert-text "Saved successfully" \
+  --screenshot "/tmp/verification_proof.png"
+```
+
+### Autonomous UAT Mode (Jev / JPT-4B Driven)
+Autonomous goal-directed browser actions in 200–400ms without Vision model overhead:
+```bash
+# Hand interactive elements to JPT-4B (:8090) to decide and click the checkout button:
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp uat "http://localhost:3000" \
+  --goal "Proceed to checkout" \
+  --expect-text "Checkout Successful" \
+  --model jpt \
+  --json
+
+# Or with local Imajev-4B (:8083):
+~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp uat "http://localhost:3000" \
+  --goal "Log out of the account" \
+  --model imajev
+```
+
+

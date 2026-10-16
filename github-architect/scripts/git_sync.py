@@ -14,11 +14,36 @@ Stages:
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+
+def render_table(rows: list[dict], columns: list[str] | None = None, headers: list[str] | None = None) -> str:
+    if not rows:
+        return "*(no records)*\n"
+    if columns is None:
+        columns = list(rows[0].keys())
+    if headers is None:
+        headers = [col.replace("_", " ").title() for col in columns]
+
+    col_widths = [len(h) for h in headers]
+    for r in rows:
+        for idx, col in enumerate(columns):
+            val_str = str(r.get(col, "")).replace("\n", " ").strip()
+            if len(val_str) > col_widths[idx]:
+                col_widths[idx] = len(val_str)
+
+    header_line = "| " + " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers)) + " |"
+    sep_line = "| " + " | ".join("-" * col_widths[i] for i in range(len(headers))) + " |"
+    row_lines = []
+    for r in rows:
+        row_str = "| " + " | ".join(str(r.get(col, "")).replace("\n", " ").strip().ljust(col_widths[i]) for i, col in enumerate(columns)) + " |"
+        row_lines.append(row_str)
+    return "\n".join([header_line, sep_line] + row_lines) + "\n"
 
 SECRET_FILE_PATTERNS = [
     r"^\.env(?!\.example$)",
@@ -219,6 +244,9 @@ def main(argv=None):
     parser.add_argument("--no-gate", action="store_true", help="Skip pre-push automated test/lint gates")
     parser.add_argument("--dry-run", action="store_true", help="Inspect and display actions without committing or pushing")
 
+    parser.add_argument("--table", "-t", action="store_true", help="Emit receipt as Markdown table")
+    parser.add_argument("--json", action="store_true", help="Emit receipt as JSON")
+
     args = parser.parse_args(argv)
 
     # Stage 1: Look
@@ -227,17 +255,30 @@ def main(argv=None):
     changed = look_info["changed_files"]
 
     if not changed and look_info["ahead"] == 0 and look_info["behind"] == 0:
-        print(f"✨ Branch '{branch}' is clean and in sync with remote.")
+        if args.json:
+            print(json.dumps({"status": "clean", "branch": branch, "message": "Branch is clean and in sync with remote."}, indent=2))
+        else:
+            print(f"✨ Branch '{branch}' is clean and in sync with remote.")
         return
 
     # Stage 2: Guard
     safe_files, blocked_files = stage2_guard(changed)
 
     if args.dry_run:
-        print(f"\n🔍 [git-sync DRY-RUN] Status for branch '{branch}':")
-        print(f"   Safe to stage ({len(safe_files)}): {', '.join(safe_files) if safe_files else 'none'}")
-        print(f"   Blocked ({len(blocked_files)}): {', '.join([f[0] for f in blocked_files]) if blocked_files else 'none'}")
-        print(f"   Ahead: {look_info['ahead']} | Behind: {look_info['behind']}")
+        if args.json:
+            print(json.dumps({
+                "status": "dry_run",
+                "branch": branch,
+                "safe_files": safe_files,
+                "blocked_files": blocked_files,
+                "ahead": look_info["ahead"],
+                "behind": look_info["behind"]
+            }, indent=2))
+        else:
+            print(f"\n🔍 [git-sync DRY-RUN] Status for branch '{branch}':")
+            print(f"   Safe to stage ({len(safe_files)}): {', '.join(safe_files) if safe_files else 'none'}")
+            print(f"   Blocked ({len(blocked_files)}): {', '.join([f[0] for f in blocked_files]) if blocked_files else 'none'}")
+            print(f"   Ahead: {look_info['ahead']} | Behind: {look_info['behind']}")
         return
 
     # Stage 3: Commit
@@ -261,6 +302,30 @@ def main(argv=None):
     stage6_push(branch, look_info["has_upstream"], auto_yes=args.yes)
 
     # Stage 7: Report
+    if args.json:
+        receipt = {
+            "status": "ok",
+            "branch": branch,
+            "commits": [{"sha": sha, "message": msg} for sha, msg in committed],
+            "pull": pull_status,
+            "push": f"Pushed to {branch}",
+            "blocked": [{"file": bf, "reason": r} for bf, r in blocked_files]
+        }
+        print(json.dumps(receipt, indent=2))
+        return
+
+    if args.table:
+        rows = [
+            {"step": "Branch", "status": branch, "details": look_info.get("upstream") or "local only"},
+            {"step": "Commit", "status": f"{len(committed)} commit(s)" if committed else "Clean", "details": ", ".join(f"{s} {m}" for s, m in committed) if committed else "Working tree clean"},
+            {"step": "Pull", "status": pull_status, "details": "Merged remote changes" if "Auto" in pull_status else pull_status},
+            {"step": "Push", "status": "Success", "details": f"Pushed upstream to {branch}"},
+            {"step": "Left Out", "status": f"{len(blocked_files)} blocked" if blocked_files else "None", "details": ", ".join(bf for bf, _ in blocked_files) if blocked_files else "Clean"},
+        ]
+        print(f"### git-sync Receipt: `{branch}`\n")
+        print(render_table(rows, ["step", "status", "details"]))
+        return
+
     print("\n📋 \033[1m[git-sync Receipt]\033[0m")
     print("─" * 60)
     if committed:

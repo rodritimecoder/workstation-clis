@@ -21,6 +21,11 @@ def main():
     # 1. search
     p_search = sub.add_parser("search", help="Search the index via hybrid BM25 + vector reciprocal rank fusion")
     p_search.add_argument("query", help="Query string")
+    p_search.add_argument("--table", "-t", action="store_true", help="Render search results as high-density Markdown table")
+    p_search.add_argument("--json", action="store_true", help="Output results as JSON")
+    p_search.add_argument("--project", "-p", help="Comma-separated fields to project")
+    p_search.add_argument("--limit", "-n", type=int, default=3, help="Max number of hits (default: 3)")
+    p_search.add_argument("--out", "-o", help="Buffer full hits to file and emit table receipt")
 
     # 2. index
     p_index = sub.add_parser("index", help="Rebuild the index over notes corpus")
@@ -35,6 +40,16 @@ def main():
 
     if args.action == "search":
         cmd = [sys.executable, str(RAG_DIR / "search.py"), args.query]
+        if args.table:
+            cmd.append("--table")
+        if args.json:
+            cmd.append("--json")
+        if args.project:
+            cmd.extend(["--project", args.project])
+        if args.limit:
+            cmd.extend(["--limit", str(args.limit)])
+        if args.out:
+            cmd.extend(["--out", args.out])
         sys.exit(subprocess.run(cmd).returncode)
     elif args.action == "index":
         cmd = [sys.executable, str(RAG_DIR / "build_index.py"), "--corpus", args.corpus]

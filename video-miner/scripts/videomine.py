@@ -128,24 +128,88 @@ def stage_status(workspace: Path, stage_idx: int) -> str:
     return "COMPLETE"
 
 
-def print_status(workspace: Path) -> None:
-    """Print the ICM pipeline status diagram."""
+def render_table(rows: list[dict], columns: list[str] | None = None, headers: list[str] | None = None) -> str:
+    if not rows:
+        return "*(no records)*\n"
+    if columns is None:
+        columns = list(rows[0].keys())
+    if headers is None:
+        headers = [col.replace("_", " ").title() for col in columns]
+
+    col_widths = [len(h) for h in headers]
+    for r in rows:
+        for idx, col in enumerate(columns):
+            val_str = str(r.get(col, "")).replace("\n", " ").strip()
+            if len(val_str) > col_widths[idx]:
+                col_widths[idx] = len(val_str)
+
+    header_line = "| " + " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers)) + " |"
+    sep_line = "| " + " | ".join("-" * col_widths[i] for i in range(len(headers))) + " |"
+    row_lines = []
+    for r in rows:
+        row_str = "| " + " | ".join(str(r.get(col, "")).replace("\n", " ").strip().ljust(col_widths[i]) for i, col in enumerate(columns)) + " |"
+        row_lines.append(row_str)
+    return "\n".join([header_line, sep_line] + row_lines) + "\n"
+
+
+def stage_artifacts(workspace: Path, stage_name: str) -> str:
+    out_dir = workspace / "stages" / stage_name / "output"
+    if not out_dir.exists():
+        return "none"
+    files = [f.name for f in out_dir.glob("*") if f.is_file() and f.name != ".gitkeep"]
+    dirs = [d.name for d in out_dir.glob("*") if d.is_dir()]
+    parts = []
+    if files:
+        parts.append(", ".join(files[:3]) + (f" (+{len(files)-3})" if len(files) > 3 else ""))
+    if dirs:
+        parts.append(f"{len(dirs)} dir(s)")
+    return "; ".join(parts) or "none"
+
+
+def get_pipeline_status(workspace: Path) -> list[dict]:
+    res = []
+    for i, s in enumerate(STAGES):
+        st = stage_status(workspace, i)
+        arts = stage_artifacts(workspace, s)
+        res.append({
+            "stage": s,
+            "status": st,
+            "artifacts": arts
+        })
+    return res
+
+
+def print_status(workspace: Path, as_table: bool = False, as_json: bool = False, project_keys: list[str] | None = None) -> None:
+    """Print the ICM pipeline status diagram or table."""
+    statuses = get_pipeline_status(workspace)
+    if project_keys:
+        statuses = [{k: v for k, v in row.items() if k.lower() in project_keys} for row in statuses]
+
+    if as_json:
+        print(json.dumps({"workspace": workspace.name, "stages": statuses}, indent=2))
+        return
+
+    if as_table:
+        cols = list(statuses[0].keys()) if statuses else ["stage", "status", "artifacts"]
+        print(f"### Pipeline Status: {workspace.name}\n")
+        print(render_table(statuses, cols))
+        return
+
+    # Default ASCII status
     print(f"\nPipeline Status: {workspace.name}")
     print("=" * 60)
-    statuses = [stage_status(workspace, i) for i in range(len(STAGES))]
-    
+    raw_statuses = [stage_status(workspace, i) for i in range(len(STAGES))]
     header = "  " + " -> ".join(f"[{s}]" for s in STAGES)
-    # Align labels
     cols = []
-    for s, st in zip(STAGES, statuses):
+    for s, st in zip(STAGES, raw_statuses):
         bracket_len = len(s) + 2
         cols.append(st.center(bracket_len))
     status_line = "  " + "    ".join(cols)
-    
+
     print(header)
     print(status_line)
     print("-" * 60)
-    for s, st in zip(STAGES, statuses):
+    for s, st in zip(STAGES, raw_statuses):
         print(f"  {s:18} : {st}")
     print()
 
@@ -329,13 +393,12 @@ def run_stage_03_visual_sample(workspace: Path) -> None:
         "  0)"
     )
     # VLM tile boundary snapping: clamp max dimension to 1568 and snap W & H to multiples of 28px patch grid
-    scale_expr = "scale=w='trunc(min(1568,iw)/28)*28':h='trunc((min(1568,iw)*ih/iw)/28)*28':flags=lanczos"
-    # Burn-in timestamp watermark overlay (bottom-right with semi-transparent badge)
-    drawtext_expr = "drawtext=text='[%{pts\\:hms}]':x=w-tw-16:y=h-th-16:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=4"
-    vf_chain = f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,{scale_expr},{drawtext_expr},showinfo"
+    scale_expr = "scale=w='trunc(min(1568,iw)/28)*28':h='trunc((min(1568,iw)*ih/iw)/28)*28':flags=bicubic"
+    vf_chain = f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,{scale_expr},showinfo"
 
     cmd = [
         "ffmpeg", "-y", "-i", str(video_mp4),
+        "-an",
         "-vf", vf_chain,
         "-vsync", "vfr",
         "-q:v", "2",
@@ -750,37 +813,128 @@ def run_pipeline(workspace: Path, video_source: str | None = None, until_stage: 
     print_status(workspace)
 
 
+def extract_timeline(workspace: Path, limit: int = 0) -> list[dict]:
+    """Extract chronological timeline checkpoints from mined video artifacts."""
+    synth_json = workspace / "stages" / "06_synthesize" / "output" / "mined_video.json"
+    events = []
+    if synth_json.is_file():
+        try:
+            events = json.loads(synth_json.read_text(encoding="utf-8"))
+        except Exception:
+            events = []
+
+    if not events:
+        ocr_file = workspace / "stages" / "05_visual_ocr" / "output" / "ocr_timeline.json"
+        if ocr_file.is_file():
+            try:
+                for o in json.loads(ocr_file.read_text(encoding="utf-8")):
+                    events.append({
+                        "type": "visual",
+                        "timestamp": o.get("timestamp", 0.0),
+                        "frame": o.get("frame", ""),
+                        "text": o.get("text", "")
+                    })
+            except Exception:
+                pass
+
+        asr_file = workspace / "stages" / "02_audio_asr" / "output" / "transcript.json"
+        if asr_file.is_file():
+            try:
+                for t in json.loads(asr_file.read_text(encoding="utf-8")):
+                    events.append({
+                        "type": "audio",
+                        "timestamp": t.get("timestamp", 0.0),
+                        "frame": "-",
+                        "text": t.get("text", "")
+                    })
+            except Exception:
+                pass
+
+    events.sort(key=lambda x: x.get("timestamp", 0.0))
+    rows = []
+    for ev in events:
+        ts = ev.get("timestamp", 0.0)
+        ts_str = format_timestamp(ts)
+        ev_type = "Visual" if ev.get("type") == "visual" else "Speech"
+        raw_text = str(ev.get("text") or "").strip().replace("\n", " ")
+        preview = raw_text[:75] + "..." if len(raw_text) > 75 else raw_text
+        frame = ev.get("frame") or "-"
+        rows.append({
+            "time": ts_str,
+            "type": ev_type,
+            "preview": preview,
+            "frame": frame
+        })
+
+    if limit and limit > 0:
+        rows = rows[:limit]
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="videomine - ICM Video Mining Pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    
+
     # init
     p_init = subparsers.add_parser("init", help="Initialize a new ICM workspace")
     p_init.add_argument("workspace", type=Path, help="Workspace directory")
     p_init.add_argument("source", type=str, help="Video URL or local file path")
-    
+
     # status
     p_status = subparsers.add_parser("status", help="Show ICM status")
     p_status.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
-    
+    p_status.add_argument("--table", "-t", action="store_true", help="Render status as a Markdown table")
+    p_status.add_argument("--json", action="store_true", help="Render status as JSON")
+    p_status.add_argument("--project", "-p", help="Comma-separated fields to project")
+
+    # outline / timeline
+    p_outline = subparsers.add_parser("outline", aliases=["timeline"], help="Extract chronological timeline outline of video checkpoints")
+    p_outline.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
+    p_outline.add_argument("--table", "-t", action="store_true", default=True, help="Render as Markdown table (default: True)")
+    p_outline.add_argument("--json", action="store_true", help="Render as JSON")
+    p_outline.add_argument("--project", "-p", help="Comma-separated fields to project")
+    p_outline.add_argument("--limit", "-n", type=int, default=0, help="Cap number of rows")
+    p_outline.add_argument("--out", "-o", help="Buffer full JSON to disk and output a 1-line receipt")
+
     # step
     p_step = subparsers.add_parser("step", help="Run the next single stage and stop at human checkpoint")
     p_step.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
     p_step.add_argument("--source", type=str, help="Video source if running stage 01")
-    
+
     # run
     p_run = subparsers.add_parser("run", help="Run pipeline stages")
     p_run.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
     p_run.add_argument("--source", type=str, help="Video source")
     p_run.add_argument("--until", type=str, help="Stop at this stage (e.g. 02_audio_asr)")
-    
+
     args = parser.parse_args()
-    
+
     if args.command == "init":
         init_workspace(args.workspace, args.source)
         print_status(args.workspace)
     elif args.command == "status":
-        print_status(args.workspace.resolve())
+        project_keys = [k.strip().lower() for k in args.project.split(",") if k.strip()] if getattr(args, "project", None) else None
+        print_status(args.workspace.resolve(), as_table=args.table, as_json=args.json, project_keys=project_keys)
+    elif args.command in ["outline", "timeline"]:
+        ws = args.workspace.resolve()
+        rows = extract_timeline(ws, limit=args.limit)
+        if args.out:
+            out_p = Path(args.out).expanduser()
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            out_p.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"### Buffered {len(rows)} timeline checkpoints to `{args.out}`\n")
+        if getattr(args, "project", None) and rows:
+            proj = [k.strip().lower() for k in args.project.split(",") if k.strip()]
+            cols = [c for c in list(rows[0].keys()) if c.lower() in proj] or list(rows[0].keys())
+            rows = [{k: r[k] for k in cols if k in r} for r in rows]
+        else:
+            cols = list(rows[0].keys()) if rows else ["time", "type", "preview", "frame"]
+
+        if args.json:
+            print(json.dumps(rows, indent=2, ensure_ascii=False))
+        else:
+            print(f"### Timeline Outline: {ws.name}\n")
+            print(render_table(rows, cols))
     elif args.command == "step":
         run_pipeline(args.workspace.resolve(), video_source=args.source, step_only=True)
     elif args.command == "run":

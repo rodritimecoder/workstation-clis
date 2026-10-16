@@ -252,9 +252,9 @@ def ask_imajev(state, question, opts, typ, port=IMAJEV_PORT, timeout=180):
         return {"type": "score", "probabilities": probs,
                 "score": sum(float(k) * probs[k] for k in levels)}
     best = max(probs, key=probs.get)
-    ent = -sum(p * math.log(p + 1e-12) for p in probs.values())
+    conf = round(1.0 - ent / math.log(len(probs)), 4) if len(probs) > 1 else 1.0
     return {"type": "choice", "answer": best, "probabilities": probs,
-            "confidence": round(1.0 - ent / math.log(len(probs)), 4)}
+            "confidence": conf}
 
 
 def _health(url, timeout=3):

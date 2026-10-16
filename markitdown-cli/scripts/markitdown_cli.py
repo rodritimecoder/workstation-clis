@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -257,6 +258,133 @@ def cmd_doctor(ns, md: MarkItDown) -> None:
         print("vision model  disabled (pass --ocr to enable local OCR)")
 
 
+def render_table(rows: list[dict], columns: list[str], headers: list[str] | None = None) -> str:
+    if not rows:
+        return "*(no records)*\n"
+    if headers is None:
+        headers = [col.replace("_", " ").title() for col in columns]
+    col_widths = [len(h) for h in headers]
+    for r in rows:
+        for idx, col in enumerate(columns):
+            val_str = str(r.get(col, "")).replace("\n", " ")
+            if len(val_str) > col_widths[idx]:
+                col_widths[idx] = len(val_str)
+    header_line = "| " + " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers)) + " |"
+    sep_line = "| " + " | ".join("-" * col_widths[i] for i in range(len(headers))) + " |"
+    row_lines = []
+    for r in rows:
+        row_str = "| " + " | ".join(str(r.get(col, "")).replace("\n", " ").ljust(col_widths[i]) for i, col in enumerate(columns)) + " |"
+        row_lines.append(row_str)
+    return "\n".join([header_line, sep_line] + row_lines) + "\n"
+
+
+def extract_outline(content: str) -> list[dict]:
+    lines = content.splitlines()
+    atx_re = re.compile(r"^(#{1,6})\s+(.+)$")
+    headings = []
+
+    for idx, line in enumerate(lines):
+        m = atx_re.match(line)
+        if m:
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            title = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", title)
+            headings.append({
+                "level": f"H{level}",
+                "level_int": level,
+                "heading": title,
+                "line": idx + 1,
+            })
+        elif idx > 0 and line and not line.startswith(" "):
+            prev_line = lines[idx - 1].strip()
+            if prev_line and not prev_line.startswith("#") and not prev_line.startswith("|"):
+                if re.match(r"^={3,}\s*$", line):
+                    title = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", prev_line)
+                    headings.append({
+                        "level": "H1",
+                        "level_int": 1,
+                        "heading": title,
+                        "line": idx,
+                    })
+                elif re.match(r"^-{3,}\s*$", line) and not prev_line.startswith("-"):
+                    title = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", prev_line)
+                    headings.append({
+                        "level": "H2",
+                        "level_int": 2,
+                        "heading": title,
+                        "line": idx,
+                    })
+
+    headings.sort(key=lambda x: x["line"])
+    for i, h in enumerate(headings):
+        start_line = h["line"]
+        next_line = len(lines)
+        for next_h in headings[i + 1:]:
+            if next_h["level_int"] <= h["level_int"]:
+                next_line = next_h["line"] - 1
+                break
+        section_lines = lines[start_line:next_line]
+        h["words"] = len(" ".join(section_lines).split())
+
+    return headings
+
+
+def extract_section(content: str, target_heading: str) -> str:
+    lines = content.splitlines()
+    atx_re = re.compile(r"^(#{1,6})\s+(.+)$")
+    target_lower = target_heading.lower().strip()
+
+    start_idx = -1
+    target_level = -1
+    for idx, line in enumerate(lines):
+        m = atx_re.match(line)
+        if m:
+            title = m.group(2).strip()
+            if target_lower in title.lower():
+                start_idx = idx
+                target_level = len(m.group(1))
+                break
+
+    if start_idx == -1:
+        return f"*(Section matching '{target_heading}' not found)*\n"
+
+    end_idx = len(lines)
+    for idx in range(start_idx + 1, len(lines)):
+        m = atx_re.match(lines[idx])
+        if m and len(m.group(1)) <= target_level:
+            end_idx = idx
+            break
+
+    return "\n".join(lines[start_idx:end_idx]).strip() + "\n"
+
+
+def grep_content(content: str, pattern: str, context_lines: int = 1) -> str:
+    lines = content.splitlines()
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return f"*(Invalid regex pattern: {e})*\n"
+
+    matched_indices = set()
+    for idx, line in enumerate(lines):
+        if regex.search(line):
+            for i in range(max(0, idx - context_lines), min(len(lines), idx + context_lines + 1)):
+                matched_indices.add(i)
+
+    if not matched_indices:
+        return f"*(No matches found for pattern '{pattern}')*\n"
+
+    sorted_idx = sorted(matched_indices)
+    output_lines = []
+    prev = None
+    for i in sorted_idx:
+        if prev is not None and i > prev + 1:
+            output_lines.append("---")
+        output_lines.append(f"{i + 1:4d}: {lines[i]}")
+        prev = i
+    return "\n".join(output_lines) + "\n"
+
+
 def convert_one(md: MarkItDown, path: Path, target: Path | None, ns) -> bool:
     if ns.verbose:
         print(f"converting {path}")
@@ -266,7 +394,51 @@ def convert_one(md: MarkItDown, path: Path, target: Path | None, ns) -> bool:
         print(f"ERROR {path}: {type(e).__name__}: {e}", file=sys.stderr)
         return False
     content = with_frontmatter(result.text_content, None if ns.no_metadata else getattr(result, "title", None))
+
+    if getattr(ns, "outline", False):
+        headings = extract_outline(content)
+        if getattr(ns, "limit", 0) and ns.limit > 0:
+            headings = headings[:ns.limit]
+        cols = ["level", "heading", "line", "words"]
+        if getattr(ns, "project", None):
+            proj = [k.strip().lower() for k in ns.project.split(",") if k.strip()]
+            cols = [c for c in cols if c in proj] or cols
+        if getattr(ns, "json", False):
+            print(json.dumps({"file": str(path), "total_headings": len(headings), "headings": headings}, indent=2))
+        else:
+            print(f"### Outline: {path.name}")
+            print(render_table(headings, cols))
+        if target:
+            write_output(content, target)
+        return True
+
+    if getattr(ns, "section", None):
+        section_text = extract_section(content, ns.section)
+        if target:
+            write_output(section_text, target)
+        else:
+            print(section_text, end="")
+        return True
+
+    if getattr(ns, "grep", None):
+        grep_text = grep_content(content, ns.grep)
+        if target:
+            write_output(grep_text, target)
+        else:
+            print(grep_text, end="")
+        return True
+
     write_output(content, target)
+    if hasattr(ns, "_receipts") and target:
+        headings = extract_outline(content)
+        words = len(content.split())
+        ns._receipts.append({
+            "input": path.name,
+            "output": str(target),
+            "words": words,
+            "headings": len(headings),
+            "status": "converted"
+        })
     if ns.verbose and target:
         print(f"  -> {target}")
     return True
@@ -322,12 +494,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list-formats", action="store_true", help="list supported inputs and exit")
     p.add_argument("--doctor", action="store_true", help="check the environment and vision endpoint")
     p.add_argument("-v", "--verbose", action="store_true", help="log each conversion")
+
+    g_token = p.add_argument_group("token shielding / ICM inspection")
+    g_token.add_argument("--outline", "--toc", action="store_true", help="extract heading outline / table of contents")
+    g_token.add_argument("--section", help="extract only the section under the specified heading")
+    g_token.add_argument("--grep", help="search for regex pattern and extract matching lines with context")
+    g_token.add_argument("--table", "-t", action="store_true", help="output tables in Markdown pipe table format")
+    g_token.add_argument("--project", "-p", help="comma-separated fields to project in outline table or receipt")
+    g_token.add_argument("--limit", "-n", type=int, default=0, help="cap number of outline rows or output lines")
+    g_token.add_argument("--receipt", action="store_true", help="emit conversion receipt instead of silent completion")
+    g_token.add_argument("--json", action="store_true", help="emit output as JSON")
+
     return p
 
 
 def main() -> int:
     parser = build_parser()
     ns = parser.parse_args()
+    ns._receipts = []
 
     md = MarkItDown()          # probe instance for --list-formats / --doctor
     if ns.list_formats:
@@ -378,6 +562,17 @@ def main() -> int:
             claimed.add(target)
         if not convert_one(engine, f, target, ns):
             failures += 1
+
+    if getattr(ns, "receipt", False) or getattr(ns, "table", False) or (getattr(ns, "json", False) and not getattr(ns, "outline", False)):
+        if ns._receipts:
+            if getattr(ns, "json", False):
+                print(json.dumps({"status": "ok", "converted": ns._receipts}, indent=2))
+            else:
+                cols = ["input", "output", "words", "headings", "status"]
+                if getattr(ns, "project", None):
+                    proj = [k.strip().lower() for k in ns.project.split(",") if k.strip()]
+                    cols = [c for c in cols if c in proj] or cols
+                print(render_table(ns._receipts, cols))
 
     if ns.verbose:
         print(f"converted {len(files) - failures}/{len(files)} file(s), skipped {len(skipped)}")

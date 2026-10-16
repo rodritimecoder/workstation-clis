@@ -38,28 +38,46 @@ python3 $CLI init ./my_video_run "https://www.youtube.com/watch?v=..."
 python3 $CLI init ./lecture_run ~/Videos/lecture.mp4
 ```
 
-### 2. Check pipeline status
+### 2. Check pipeline status (ASCII diagram or Token-Shielded table)
 
 ```bash
+# Default ASCII flowchart:
 python3 $CLI status ./my_video_run
-```
-Outputs an ICM status diagram (`PENDING`, `COMPLETE`, or `STALE`).
 
-### 3. Step through one stage at a time (Human Checkpoint Mode)
+# Token-shielded Markdown pipe table with artifacts:
+python3 $CLI status ./my_video_run --table
+```
+
+### 3. Timeline Outline & Chapter Bookmarks (Glitch Cat / Kem Architecture)
+
+Instead of reading 30k tokens of full synthesized video notes, extract a high-density chronological timeline table (~150 tokens):
+
+```bash
+# High-density timeline of visual slides and speech checkpoints:
+python3 $CLI outline ./my_video_run --table
+
+# Project specific columns and cap rows:
+python3 $CLI outline ./my_video_run -p time,type,preview -n 15
+
+# Buffer full timeline JSON to disk with receipt:
+python3 $CLI outline ./my_video_run -o ./checkpoints.json
+```
+
+### 4. Step through one stage at a time (Human Checkpoint Mode)
 
 Run the next stage and stop so you can review and edit intermediate files:
 ```bash
 python3 $CLI step ./my_video_run
 ```
 
-### 4. Run up to a specific checkpoint
+### 5. Run up to a specific checkpoint
 
 ```bash
 # E.g. run acquisition and ASR first, then pause for transcript review:
 python3 $CLI run ./my_video_run --until 02_audio_asr
 ```
 
-### 5. Run the entire pipeline end-to-end
+### 6. Run the entire pipeline end-to-end
 
 ```bash
 python3 $CLI run ./my_video_run
@@ -74,3 +92,35 @@ Because every stage output is an edit surface:
 - **Audio Transcript Checkpoint (`02_audio_asr`):** Open `stages/02_audio_asr/output/transcript.md` and correct any misrecognized technical jargon or names. Downstream synthesis will use your edits.
 - **Visual Gating Checkpoint (`04_visual_gate`):** Inspect `stages/04_visual_gate/output/gated_frames.json`. If a slide or code frame was excluded, toggle `"keep": true`.
 - **OCR Checkpoint (`05_visual_ocr`):** Open `stages/05_visual_ocr/output/ocr_timeline.md` and polish any code blocks before final merge.
+
+---
+
+## 🏛️ Creator Video Vault (`vault-mine`)
+
+Curate and archive creator videos, architectural diagrams, and full transcripts into `/run/media/rodri/AI/creator-vault/`:
+
+```bash
+VAULT_CLI=~/.gemini/config/skills/video-miner/scripts/vault-mine
+
+# List vaulted videos in a high-density Markdown table (100 tokens instead of opening directories):
+$VAULT_CLI list --table --limit 10
+
+# Filter vault by creator:
+$VAULT_CLI list --creator "kem_glitch" --table
+
+# Mine video directly from URL into the vault
+$VAULT_CLI add "https://www.instagram.com/p/DeZUVT1t5vQ/" --creator "kem_glitch" --title "5-agents-worktree"
+
+# Import an existing mined ICM workspace into the vault
+$VAULT_CLI import ./my_video_run --creator "kem_glitch" --title "5-agents-worktree"
+
+# Rebuild vault catalog index
+$VAULT_CLI reindex
+```
+
+## Tests
+
+```bash
+python3 ~/.gemini/config/skills/video-miner/scripts/test_videomine.py
+```
+

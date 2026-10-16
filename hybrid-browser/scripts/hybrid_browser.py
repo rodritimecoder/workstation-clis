@@ -82,6 +82,9 @@ class HybridBrowser:
             sys.exit(1)
             
         self.context = self.browser.contexts[0] if self.browser.contexts else self.browser.new_context()
+        overlay_file = Path(__file__).parent / "cursor_overlay.js"
+        if overlay_file.is_file():
+            self.context.add_init_script(path=str(overlay_file))
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
     def navigate(self, url: str):
@@ -112,12 +115,37 @@ class HybridBrowser:
             ]
             for loc in locators:
                 if loc.count() > 0 and loc.first.is_visible():
+                    box = loc.first.bounding_box()
+                    if box:
+                        target_x = box["x"] + box["width"] / 2
+                        target_y = box["y"] + box["height"] / 2
+                        self._glide_cursor(target_x, target_y)
                     loc.first.click(timeout=2000)
                     print(f"  [✓ DOM Success] Clicked '{target_description}' natively (0 VLM tokens).")
                     self.page.wait_for_timeout(1000)
+                    self.page.evaluate("window.__hideAgentCursor?.()")
                     return True
         except Exception as e:
             print(f"  [DOM Skipped] {e}")
+
+    def _glide_cursor(self, target_x: float, target_y: float, steps: int = 25):
+        try:
+            current = self.page.evaluate("() => ({ x: parseFloat(document.getElementById('agent-cursor-overlay')?.style.left || 0), y: parseFloat(document.getElementById('agent-cursor-overlay')?.style.top || 0) })")
+            start_x = current.get("x", target_x)
+            start_y = current.get("y", target_y)
+            if start_x <= 0:
+                start_x, start_y = target_x, target_y
+
+            for i in range(1, steps + 1):
+                t = i / steps
+                cx = start_x + (target_x - start_x) * t
+                cy = start_y + (target_y - start_y) * t
+                self.page.evaluate(f"window.__moveAgentCursor?.({cx:.1f}, {cy:.1f})")
+                time.sleep(0.01)
+            self.page.evaluate(f"window.__agentClick?.({target_x:.1f}, {target_y:.1f})")
+            self.page.mouse.move(target_x, target_y)
+        except Exception:
+            pass
 
         # --- TIER 2: HARD PATH (DeskForge Vision Grounding) ---
         print(f"  -> [Tier 2: DeskForge Vision Fallback] Element obscured/canvas/custom. Capturing screenshot...")
@@ -168,9 +196,10 @@ class HybridBrowser:
             nx, ny = action_data["coords"]
             pixel_x = round(nx * orig_w)
             pixel_y = round(ny * orig_h)
-            print(f"  [✓ Vision Success] Grounded to coordinates ({pixel_x}, {pixel_y}) on {orig_w}x{orig_h} screen.")
+            self._glide_cursor(pixel_x, pixel_y, steps=30)
             self.page.mouse.click(pixel_x, pixel_y)
             self.page.wait_for_timeout(1000)
+            self.page.evaluate("window.__hideAgentCursor?.()")
             return True
         else:
             print(f"  [✗ Failed] DeskForge did not return valid click coordinates.")

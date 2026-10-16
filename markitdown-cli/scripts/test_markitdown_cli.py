@@ -332,6 +332,93 @@ class TestOcrEndToEnd(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.received, [], "no vision call should happen without --ocr")
 
+class TestTokenShieldingAndInspection(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.p = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_doc(self) -> Path:
+        doc = self.p / "lecture.md"
+        doc.write_text(
+            "# Chapter 1: Introduction\n"
+            "This is the opening overview of the course.\n\n"
+            "## Section 1.1: CMOS Basics\n"
+            "CMOS logic gates consist of PMOS and NMOS devices.\n\n"
+            "## Section 1.2: Inverter Propagation Delay\n"
+            "The propagation delay tpHL is measured from 50% input to 50% output.\n"
+            "The NMOS discharge current determines the fall time.\n\n"
+            "# Chapter 2: Dynamic Power\n"
+            "Power dissipation has dynamic and static components.\n"
+        )
+        return doc
+
+    def test_outline_table(self):
+        src = self._make_doc()
+        r = run(str(src), "--outline", "--table")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("### Outline: lecture.md", r.stdout)
+        self.assertIn("| Level | Heading", r.stdout)
+        self.assertIn("Chapter 1: Introduction", r.stdout)
+        self.assertIn("Inverter Propagation Delay", r.stdout)
+        self.assertIn("Chapter 2: Dynamic Power", r.stdout)
+
+    def test_outline_projection_and_limit(self):
+        src = self._make_doc()
+        r = run(str(src), "--outline", "-p", "heading,words", "-n", "2")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("| Heading", r.stdout)
+        self.assertNotIn("| Level", r.stdout)
+        # Only 2 rows + header + sep = 4 lines
+        table_lines = [l for l in r.stdout.splitlines() if l.startswith("|")]
+        self.assertEqual(len(table_lines), 4)
+
+    def test_outline_json(self):
+        src = self._make_doc()
+        r = run(str(src), "--outline", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["total_headings"], 4)
+        self.assertEqual(data["headings"][0]["heading"], "Chapter 1: Introduction")
+
+    def test_section_extraction(self):
+        src = self._make_doc()
+        r = run(str(src), "--section", "Propagation Delay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("propagation delay tpHL", r.stdout)
+        self.assertNotIn("Chapter 2: Dynamic Power", r.stdout)
+        self.assertNotIn("CMOS Basics", r.stdout)
+
+    def test_grep_extraction(self):
+        src = self._make_doc()
+        r = run(str(src), "--grep", "tpHL")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("tpHL", r.stdout)
+        self.assertIn(":", r.stdout)  # line numbered
+
+    def test_receipt_table_on_disk_write(self):
+        src = self._make_doc()
+        out = self.p / "converted.md"
+        r = run(str(src), "-o", str(out), "--table")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(out.exists())
+        self.assertIn("| Input", r.stdout)
+        self.assertIn("converted", r.stdout)
+
+    def test_receipt_json_on_disk_write(self):
+        src = self._make_doc()
+        out = self.p / "converted.md"
+        r = run(str(src), "-o", str(out), "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(out.exists())
+        data = json.loads(r.stdout)
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(len(data["converted"]), 1)
+        self.assertEqual(data["converted"][0]["input"], "lecture.md")
+
 
 if __name__ == "__main__":
     # Each TestBasics method needs a temp dir; give the class one lazily.

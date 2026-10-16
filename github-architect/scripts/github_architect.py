@@ -8,6 +8,7 @@ scanning for secrets and large blobs, and managing fleet repositories via the Gi
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -154,6 +155,16 @@ CORE_REPOSITORIES = [
         "name": "academic-agent-skills",
         "target": "academic-agent-skills",
         "description": "Academic ICM, Canvas LMS, and Cornell active-recall tools",
+    },
+    {
+        "name": "glitch-cat-skills",
+        "target": "glitch-cat-skills",
+        "description": "Autonomous production agent harness implementing Kem's Glitch Cat Club architecture",
+    },
+    {
+        "name": "free-frontier-skills",
+        "target": "free-frontier-skills",
+        "description": "Autonomous subagent coding loops, bash batching, and embeddings on free frontier endpoints",
     },
     {
         "name": "agent-multiplayer-template",
@@ -353,44 +364,77 @@ Private repository owned by {author}. Contains customized pipelines, academic in
 """
 
 
-def cmd_audit(target: Path):
-    print(f"\n🔍 [Audit] Inspecting repository target: {target.resolve()}")
+def cmd_audit(target: Path, as_table: bool = False, as_json: bool = False):
     if not target.is_dir():
-        print(f"❌ Error: Target directory does not exist: {target}")
+        print(f"❌ Error: Target directory does not exist: {target}", file=sys.stderr)
         return False
 
     has_git = (target / ".git").is_dir()
     has_gitignore = (target / ".gitignore").is_file()
     has_readme = (target / "README.md").is_file()
     has_license = (target / "LICENSE").is_file() or (target / "LICENSE.md").is_file()
+    is_auth, gh_user = check_gh_status()
+    git_user = run_cmd("git config user.name", check=False).stdout.strip()
+    git_email = run_cmd("git config user.email", check=False).stdout.strip()
 
+    sec_hits, blob_hits = [], []
+    dirty = False
+    branch_tracking = ""
+    remote_origin = ""
+
+    if has_git:
+        remotes = run_cmd("git remote -v", cwd=target, check=False).stdout.strip()
+        remote_origin = remotes.splitlines()[0] if remotes else "No remote"
+        dirty = bool(run_cmd("git status --porcelain", cwd=target, check=False).stdout.strip())
+        status_sb = run_cmd("git status -sb", cwd=target, check=False).stdout.strip().splitlines()
+        branch_tracking = status_sb[0] if status_sb else ""
+        sec_hits, blob_hits = check_secrets_and_blobs(target, staged_only=False)
+
+    checks = [
+        {"item": "Git Initialized", "status": "Yes" if has_git else "Missing"},
+        {"item": ".gitignore", "status": "Yes" if has_gitignore else "Missing"},
+        {"item": "README.md", "status": "Yes" if has_readme else "Missing"},
+        {"item": "LICENSE", "status": "Yes" if has_license else "Missing"},
+        {"item": "GitHub Auth", "status": f"Logged in (@{gh_user})" if is_auth else "Not logged in"},
+        {"item": "Git Identity", "status": f"{git_user} <{git_email}>" if git_user and git_email else "Incomplete"},
+        {"item": "Working Tree", "status": "Uncommitted changes" if dirty else "Clean"},
+        {"item": "Secret Scanner", "status": f"{len(sec_hits)} warning(s)" if sec_hits else "Clean"},
+        {"item": "Large Blobs", "status": f"{len(blob_hits)} warning(s)" if blob_hits else f"Clean (<{MAX_BLOB_SIZE_MB}MB)"},
+    ]
+
+    if as_json:
+        payload = {
+            "target": str(target.resolve()),
+            "checks": checks,
+            "secret_warnings": sec_hits,
+            "large_blobs": blob_hits,
+            "branch_tracking": branch_tracking,
+            "remote": remote_origin
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return True
+
+    if as_table:
+        print(f"### Repository Audit: {target.name}\n")
+        print(render_table(checks, ["item", "status"], ["Audit Check", "Status"]))
+        return True
+
+    print(f"\n🔍 [Audit] Inspecting repository target: {target.resolve()}")
     print(f"  • Git initialized:   {'✅ Yes' if has_git else '❌ Missing (.git folder)'}")
     print(f"  • .gitignore:        {'✅ Yes' if has_gitignore else '❌ Missing (.gitignore)'}")
     print(f"  • README.md:         {'✅ Yes' if has_readme else '❌ Missing (README.md)'}")
     print(f"  • LICENSE:           {'✅ Yes' if has_license else '❌ Missing (LICENSE)'}")
-
-    is_auth, gh_user = check_gh_status()
     print(f"  • GitHub CLI Auth:   {'✅ Logged in (@' + gh_user + ')' if is_auth else '❌ Not logged in (run gh auth login)'}")
-
-    git_user = run_cmd("git config user.name", check=False).stdout.strip()
-    git_email = run_cmd("git config user.email", check=False).stdout.strip()
     if git_user and git_email:
         print(f"  • Git Identity:      ✅ {git_user} <{git_email}>")
     else:
         print(f"  • Git Identity:      ⚠️ Incomplete ({git_user or 'no user'} / {git_email or 'no email'})")
 
     if has_git:
-        remotes = run_cmd("git remote -v", cwd=target, check=False).stdout.strip()
-        print(f"  • Remote Origin:     {remotes.splitlines()[0] if remotes else '⚪ No remote configured'}")
-
-        dirty = bool(run_cmd("git status --porcelain", cwd=target, check=False).stdout.strip())
+        print(f"  • Remote Origin:     {remote_origin or '⚪ No remote configured'}")
         print(f"  • Working Tree:      {'⚠️ Uncommitted changes' if dirty else '✅ Clean'}")
-
-        status_sb = run_cmd("git status -sb", cwd=target, check=False).stdout.strip().splitlines()
-        if status_sb:
-            print(f"  • Branch Tracking:   {status_sb[0]}")
-
-        sec_hits, blob_hits = check_secrets_and_blobs(target, staged_only=False)
+        if branch_tracking:
+            print(f"  • Branch Tracking:   {branch_tracking}")
         if sec_hits:
             print(f"  • ⚠️  Secret Warnings: {len(sec_hits)} suspicious key patterns detected!")
             for s in sec_hits[:3]:
@@ -598,46 +642,113 @@ def discover_fleet_repos() -> List[Dict[str, Any]]:
     return fleet
 
 
-def cmd_status_all() -> None:
+def render_table(rows: list[dict], columns: list[str] | None = None, headers: list[str] | None = None) -> str:
+    if not rows:
+        return "*(no records)*\n"
+    if columns is None:
+        columns = list(rows[0].keys())
+    if headers is None:
+        headers = [col.replace("_", " ").title() for col in columns]
+
+    col_widths = [len(h) for h in headers]
+    for r in rows:
+        for idx, col in enumerate(columns):
+            val_str = str(r.get(col, "")).replace("\n", " ").strip()
+            if len(val_str) > col_widths[idx]:
+                col_widths[idx] = len(val_str)
+
+    header_line = "| " + " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers)) + " |"
+    sep_line = "| " + " | ".join("-" * col_widths[i] for i in range(len(headers))) + " |"
+    row_lines = []
+    for r in rows:
+        row_str = "| " + " | ".join(str(r.get(col, "")).replace("\n", " ").strip().ljust(col_widths[i]) for i, col in enumerate(columns)) + " |"
+        row_lines.append(row_str)
+    return "\n".join([header_line, sep_line] + row_lines) + "\n"
+
+
+def get_fleet_status_records(fleet: list[dict]) -> list[dict]:
+    records = []
+    for r in fleet:
+        p = r["path"]
+        branch = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip() or "main"
+        dirty_lines = [l for l in run_cmd(["git", "status", "--porcelain"], cwd=p, check=False).stdout.strip().splitlines() if l.strip()]
+        dirty_count = len(dirty_lines)
+
+        rev_res = run_cmd(["git", "rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"], cwd=p, check=False)
+        ahead, behind = 0, 0
+        sync_label = "No upstream"
+        if rev_res.returncode == 0:
+            parts = rev_res.stdout.strip().split()
+            ahead = int(parts[0]) if len(parts) > 0 else 0
+            behind = int(parts[1]) if len(parts) > 1 else 0
+            if ahead == 0 and behind == 0:
+                sync_label = "Up to date"
+            elif ahead > 0 and behind == 0:
+                sync_label = f"Ahead ({ahead})"
+            elif ahead == 0 and behind > 0:
+                sync_label = f"Behind ({behind})"
+            else:
+                sync_label = f"Diverged (+{ahead}/-{behind})"
+
+        last_commit = run_cmd(["git", "log", "-1", "--format=%h (%cr) - %s"], cwd=p, check=False).stdout.strip()
+        last_commit_short = last_commit[:45] + "..." if len(last_commit) > 45 else last_commit
+        records.append({
+            "repository": r["name"],
+            "branch": branch,
+            "worktree": f"{dirty_count} dirty" if dirty_count > 0 else "Clean",
+            "remote_sync": sync_label,
+            "last_commit": last_commit_short,
+            "path": str(p)
+        })
+    return records
+
+
+def cmd_status_all(as_table: bool = False, as_json: bool = False, project_keys: list[str] | None = None, limit: int = 0) -> None:
     fleet = discover_fleet_repos()
     if not fleet:
-        print("❌ No workstation fleet repositories found.")
+        if as_json:
+            print("[]")
+        else:
+            print("❌ No workstation fleet repositories found.")
+        return
+
+    records = get_fleet_status_records(fleet)
+    if limit and limit > 0:
+        records = records[:limit]
+
+    if as_json:
+        if project_keys:
+            records = [{k: v for k, v in r.items() if k.lower() in project_keys} for r in records]
+        print(json.dumps(records, indent=2, ensure_ascii=False))
+        return
+
+    if as_table:
+        cols = ["repository", "branch", "worktree", "remote_sync", "last_commit"]
+        if project_keys:
+            cols = [c for c in cols if c.lower() in project_keys] or cols
+        table_rows = [{k: r[k] for k in cols if k in r} for r in records]
+        print(f"### Workstation Fleet Status ({len(records)} repositories)\n")
+        print(render_table(table_rows, cols))
         return
 
     print(f"\n🚢 [Fleet Status] Inspecting {len(fleet)} workstation repositories:\n")
     print(f"  {'Repository':<28} │ {'Branch':<8} │ {'Worktree':<10} │ {'Remote Sync':<15} │ Last Commit")
     print("  ─────────────────────────────┼──────────┼────────────┼─────────────────┼──────────────────────────────")
 
-    for r in fleet:
-        p = r["path"]
-        branch = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip() or "main"
-        dirty_lines = run_cmd(["git", "status", "--porcelain"], cwd=p, check=False).stdout.strip().splitlines()
-        dirty_count = len(dirty_lines)
-        if dirty_count > 0:
-            worktree_str = f"\033[33m{dirty_count} dirty\033[0m"
+    for r in records:
+        dirty_str = f"\033[33m{r['worktree']}\033[0m" if "dirty" in r["worktree"] else f"\033[32m{r['worktree']}\033[0m"
+        sync_str = r["remote_sync"]
+        if "Up to date" in sync_str:
+            sync_color = f"\033[32m{sync_str}\033[0m"
+        elif "Ahead" in sync_str:
+            sync_color = f"\033[33m{sync_str}\033[0m"
+        elif "Behind" in sync_str:
+            sync_color = f"\033[31m{sync_str}\033[0m"
+        elif "Diverged" in sync_str:
+            sync_color = f"\033[35m{sync_str}\033[0m"
         else:
-            worktree_str = "\033[32mClean\033[0m"
-
-        rev_res = run_cmd(["git", "rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"], cwd=p, check=False)
-        if rev_res.returncode == 0:
-            parts = rev_res.stdout.strip().split()
-            ahead = int(parts[0]) if len(parts) > 0 else 0
-            behind = int(parts[1]) if len(parts) > 1 else 0
-            if ahead == 0 and behind == 0:
-                sync_str = "\033[32mUp to date\033[0m"
-            elif ahead > 0 and behind == 0:
-                sync_str = f"\033[33mAhead ({ahead})\033[0m"
-            elif ahead == 0 and behind > 0:
-                sync_str = f"\033[31mBehind ({behind})\033[0m"
-            else:
-                sync_str = f"\033[35mDiverged (+{ahead}/-{behind})\033[0m"
-        else:
-            sync_str = "\033[90mNo upstream\033[0m"
-
-        last_commit = run_cmd(["git", "log", "-1", "--format=%h (%cr) - %s"], cwd=p, check=False).stdout.strip()
-        last_commit_short = last_commit[:40] + "..." if len(last_commit) > 40 else last_commit
-
-        print(f"  {r['name']:<28} │ {branch:<8} │ {worktree_str:<19} │ {sync_str:<24} │ {last_commit_short}")
+            sync_color = f"\033[90m{sync_str}\033[0m"
+        print(f"  {r['repository']:<28} │ {r['branch']:<8} │ {dirty_str:<19} │ {sync_color:<24} │ {r['last_commit']}")
     print()
 
 
@@ -796,7 +907,11 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # status-all
-    subparsers.add_parser("status-all", help="Display real-time status across all workstation fleet repositories")
+    p_status = subparsers.add_parser("status-all", help="Display real-time status across all workstation fleet repositories")
+    p_status.add_argument("-t", "--table", action="store_true", help="Emit status as compact Markdown table")
+    p_status.add_argument("--json", action="store_true", help="Emit status as structured JSON")
+    p_status.add_argument("-p", "--project", nargs="*", help="Filter output fields (e.g. repository branch worktree remote_sync)")
+    p_status.add_argument("-n", "--limit", type=int, default=0, help="Limit number of repositories displayed")
 
     # sync-all
     p_sync_all = subparsers.add_parser("sync-all", help="Synchronize and rebase all workstation fleet repositories in one command")
@@ -806,6 +921,8 @@ def main():
     # audit
     p_audit = subparsers.add_parser("audit", help="Audit local repo structure, files, git, secrets, and gh status")
     p_audit.add_argument("path", type=str, nargs="?", default=".", help="Target directory (default: current)")
+    p_audit.add_argument("-t", "--table", action="store_true", help="Emit audit checks as compact Markdown table")
+    p_audit.add_argument("--json", action="store_true", help="Emit audit checks as structured JSON")
 
     # scaffold
     p_scaffold = subparsers.add_parser("scaffold", help="Generate .gitignore, LICENSE, and README.md")
@@ -848,6 +965,8 @@ def main():
     p_gitsync.add_argument("--no-pull", action="store_true", help="Skip pulling from remote before pushing")
     p_gitsync.add_argument("--no-gate", action="store_true", help="Skip pre-push automated test/lint gates")
     p_gitsync.add_argument("--dry-run", action="store_true", help="Inspect and display actions without committing or pushing")
+    p_gitsync.add_argument("-t", "--table", action="store_true", help="Emit receipt as Markdown table")
+    p_gitsync.add_argument("--json", action="store_true", help="Emit receipt as structured JSON")
 
     args = parser.parse_args()
 
@@ -873,11 +992,16 @@ def main():
             raw_args.append("--no-gate")
         if args.dry_run:
             raw_args.append("--dry-run")
+        if args.table:
+            raw_args.append("--table")
+        if args.json:
+            raw_args.append("--json")
         gitsync_main(raw_args)
         return
 
     if args.command == "status-all":
-        cmd_status_all()
+        project_keys = [k.lower() for k in args.project] if args.project else None
+        cmd_status_all(as_table=args.table, as_json=args.json, project_keys=project_keys, limit=args.limit)
         return
 
     if args.command == "sync-all":
@@ -898,7 +1022,7 @@ def main():
     repo_name = getattr(args, "name", None) or target_path.name
 
     if args.command == "audit":
-        cmd_audit(target_path)
+        cmd_audit(target_path, as_table=args.table, as_json=args.json)
     elif args.command == "scaffold":
         cmd_scaffold(target_path, repo_name, private=True, license_type=args.license)
     elif args.command == "publish":

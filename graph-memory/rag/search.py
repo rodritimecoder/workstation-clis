@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DB = HERE / "rag.db"
+DB = Path(os.environ.get("RAG_DB_PATH", str(HERE / "rag.db")))
 K = 60  # rank fusion smoothing constant
 TOP = 3
 CONTEXT_LINES = 6
@@ -102,12 +102,56 @@ def show(db, rowid, position, legs):
     print()
 
 
-def utf8_out():
-    """Write UTF-8 whatever the console's code page is.
+def render_table(rows, columns=None, headers=None):
+    if not rows:
+        return "*(no records)*\n"
+    if columns is None:
+        columns = list(rows[0].keys())
+    if headers is None:
+        headers = [col.replace("_", " ").title() for col in columns]
 
-    Windows consoles default to cp1252, which cannot encode an arrow, a curly
-    quote or a pound sign, and notes are full of them.
-    """
+    col_widths = [len(h) for h in headers]
+    for r in rows:
+        for idx, col in enumerate(columns):
+            val_str = str(r.get(col, "")).replace("\n", " ").strip()
+            if len(val_str) > col_widths[idx]:
+                col_widths[idx] = len(val_str)
+
+    header_line = "| " + " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers)) + " |"
+    sep_line = "| " + " | ".join("-" * col_widths[i] for i in range(len(headers))) + " |"
+    row_lines = []
+    for r in rows:
+        row_str = "| " + " | ".join(str(r.get(col, "")).replace("\n", " ").strip().ljust(col_widths[i]) for i, col in enumerate(columns)) + " |"
+        row_lines.append(row_str)
+    return "\n".join([header_line, sep_line] + row_lines) + "\n"
+
+
+def fetch_hit(db, rowid, position, legs):
+    file, section, start, end, text, kind = db.execute(
+        "SELECT file, section, start_line, end_line, text, kind FROM chunks WHERE id=?",
+        (rowid,),
+    ).fetchone()
+    first_non_empty = ""
+    for l in text.splitlines():
+        cl = l.strip().lstrip("#").strip()
+        if cl and not cl.startswith("source:"):
+            first_non_empty = cl
+            break
+    snippet = first_non_empty[:85] + "..." if len(first_non_empty) > 85 else first_non_empty
+    line_range = f"{start}-{end}" if start > 0 else "-"
+    return {
+        "rank": position,
+        "file": file,
+        "section": section,
+        "lines": line_range,
+        "legs": "+".join(legs),
+        "snippet": snippet,
+        "text": text,
+    }
+
+
+def utf8_out():
+    """Write UTF-8 whatever the console's code page is."""
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -116,10 +160,20 @@ def utf8_out():
 
 
 def main():
+    import argparse
     utf8_out()
-    if len(sys.argv) < 2:
-        sys.exit('usage: python search.py "your question"')
-    query = " ".join(sys.argv[1:])
+
+    parser = argparse.ArgumentParser(description="Search local graph-memory index")
+    parser.add_argument("query", nargs="+", help="Query terms")
+    parser.add_argument("--table", "-t", action="store_true", help="Render results as high-density Markdown table")
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
+    parser.add_argument("--project", "-p", help="Comma-separated fields to project")
+    parser.add_argument("--limit", "-n", type=int, default=TOP, help=f"Max number of hits (default: {TOP})")
+    parser.add_argument("--out", "-o", help="Buffer full text hits to file and return table receipt")
+
+    args = parser.parse_args()
+    query = " ".join(args.query)
+
     if not DB.is_file():
         sys.exit("no index yet: run python build_index.py first")
     db = sqlite3.connect(DB)
@@ -127,16 +181,45 @@ def main():
     legs = {"keyword": keyword_leg(db, query)}
     meaning = meaning_leg(db, query)
     if meaning is None:
-        print(f"meaning leg off (endpoint {EMBEDDING_URL} unavailable), keyword only\n")
+        if not (args.json or args.table or args.out):
+            print(f"meaning leg off (endpoint {EMBEDDING_URL} unavailable), keyword only\n")
     else:
         legs["meaning"] = meaning
 
     ranked, found_by = fuse(legs)
     if not ranked:
-        print("no matches")
+        if args.json:
+            print("[]")
+        else:
+            print("no matches")
         return
-    for position, rowid in enumerate(ranked[:TOP], start=1):
-        show(db, rowid, position, found_by[rowid])
+
+    hits = []
+    for position, rowid in enumerate(ranked[:args.limit], start=1):
+        hits.append(fetch_hit(db, rowid, position, found_by[rowid]))
+
+    if args.out:
+        out_p = Path(args.out).expanduser()
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(json.dumps(hits, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"### Buffered {len(hits)} memory hits to `{args.out}`\n")
+
+    if args.table or args.out:
+        cols = ["rank", "file", "section", "lines", "legs", "snippet"]
+        if args.project:
+            proj = [k.strip().lower() for k in args.project.split(",") if k.strip()]
+            cols = [c for c in cols if c in proj] or cols
+        table_rows = [{k: h[k] for k in cols if k in h} for h in hits]
+        print(render_table(table_rows, cols))
+    elif args.json:
+        if args.project:
+            proj = [k.strip().lower() for k in args.project.split(",") if k.strip()]
+            hits = [{k: h[k] for k in h if k.lower() in proj} for h in hits]
+        print(json.dumps(hits, indent=2, ensure_ascii=False))
+    else:
+        # Backward-compatible verbose show
+        for position, rowid in enumerate(ranked[:args.limit], start=1):
+            show(db, rowid, position, found_by[rowid])
 
 
 if __name__ == "__main__":

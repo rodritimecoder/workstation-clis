@@ -21,19 +21,35 @@ A zero-dependency local RAG and memory system adapted from Glitch Cat Club's `gr
 
 ## Commands
 
-### Search the Index
+### Search the Index (Token-Shielded Markdown Table)
 ```bash
-python3 /run/media/rodri/AI/skills/graph-memory/rag/search.py "<your query>"
+# High-density Markdown table output (~120 tokens instead of full text chunks):
+python3 /run/media/rodri/AI/skills/graph-memory/graph_memory.py search "propagation delay" --table
+
+# Field projection and top-N capping:
+python3 /run/media/rodri/AI/skills/graph-memory/graph_memory.py search "dynamic power" --table -p file,section,snippet -n 5
+
+# Buffer full text hits to disk with receipt preview:
+python3 /run/media/rodri/AI/skills/graph-memory/graph_memory.py search "cmos inverters" -o /tmp/hits.json
+
+# Raw JSON output:
+python3 /run/media/rodri/AI/skills/graph-memory/graph_memory.py search "op amp" --json -n 3
 ```
 
 ### Rebuild Index over Notes
 ```bash
-python3 /run/media/rodri/AI/skills/graph-memory/rag/build_index.py --corpus "/run/media/rodri/AI/University/notes"
+python3 /run/media/rodri/AI/skills/graph-memory/graph_memory.py index --corpus "/run/media/rodri/AI/University/notes"
 ```
 
 ### Distil Notes into Question-Quote Triplet Memory
 ```bash
-python3 /run/media/rodri/AI/skills/graph-memory/rag/distil.py "/run/media/rodri/AI/University/notes" [--limit N]
+python3 /run/media/rodri/AI/skills/graph-memory/graph_memory.py distil "/run/media/rodri/AI/University/notes" [--limit N]
+```
+
+## Tests
+
+```bash
+python3 /run/media/rodri/AI/skills/graph-memory/rag/test_search.py
 ```
 
 ## Local Inference Endpoints
