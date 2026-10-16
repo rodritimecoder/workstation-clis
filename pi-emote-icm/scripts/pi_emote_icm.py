@@ -29,23 +29,35 @@ except ImportError:
 
 
 def auto_remove_background(img: Image.Image, tolerance: int = 30) -> Image.Image:
-    """Removes solid or flat background using corner-sampled color keying."""
+    """Removes green-screen or solid/flat background using chroma keying."""
     img = img.convert("RGBA")
     w, h = img.size
     pixels = img.load()
 
-    # Sample the 4 corners
-    corners = [pixels[0, 0], pixels[w - 1, 0], pixels[0, h - 1], pixels[w - 1, h - 1]]
-    # Pick the most common corner color
-    bg_color = max(set(corners), key=corners.count)
+    # 1. Check for bright green screen (e.g. #00FF00)
+    green_count = 0
+    sample_points = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1), (w // 2, 0), (w // 4, 0)]
+    for sx, sy in sample_points:
+        r, g, b, a = pixels[sx, sy]
+        if g > 140 and g > r * 1.35 and g > b * 1.35:
+            green_count += 1
 
-    # If already mostly transparent, return as is
+    if green_count >= 3:
+        # Green screen mode
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = pixels[x, y]
+                if g > 130 and g > r * 1.3 and g > b * 1.3:
+                    pixels[x, y] = (0, 0, 0, 0)
+        return img
+
+    # 2. General corner-based keying
+    corners = [pixels[0, 0], pixels[w - 1, 0], pixels[0, h - 1], pixels[w - 1, h - 1]]
+    bg_color = max(set(corners), key=corners.count)
     if bg_color[3] == 0:
         return img
 
     br, bg, bb = bg_color[0], bg_color[1], bg_color[2]
-
-    # Flood fill / mask out colors within tolerance
     for y in range(h):
         for x in range(w):
             r, g, b, a = pixels[x, y]
@@ -65,19 +77,19 @@ def square_and_center(img: Image.Image, target_size: int = 128) -> Image.Image:
     w, h = img.size
     max_dim = max(w, h)
     
-    # Create square canvas with 10% breathing margin
-    side = int(max_dim * 1.1)
+    # Create square canvas with 5% breathing margin
+    side = int(max_dim * 1.05)
     square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     paste_x = (side - w) // 2
     paste_y = (side - h) // 2
     square.paste(img, (paste_x, paste_y), img)
 
-    return square.resize((target_size, target_size), resample=Image.Resampling.BILINEAR)
+    return square.resize((target_size, target_size), resample=Image.Resampling.LANCZOS)
 
 
 def pixelate_nearest_neighbor(
     img: Image.Image,
-    grid_size: int = 32,
+    grid_size: int = 128,
     target_size: int = 128,
     palette_colors: int = 32,
 ) -> Tuple[Image.Image, Image.Image]:
@@ -88,6 +100,11 @@ def pixelate_nearest_neighbor(
     """
     img = img.convert("RGBA")
     
+    if grid_size >= target_size:
+        # Native resolution mode — preserve all hand-drawn / AI pixel details
+        final_img = img.resize((target_size, target_size), resample=Image.Resampling.LANCZOS)
+        return final_img, final_img
+
     # 1. Downsample to small pixel grid
     small = img.resize((grid_size, grid_size), resample=Image.Resampling.BOX)
 
@@ -150,102 +167,111 @@ def decompose_sprite_layers(sprite_128: Image.Image, layers_dir: Path) -> Dict[s
     bbox = sprite_128.getbbox() or (0, 0, w, h)
     bx0, by0, bx1, by1 = bbox
     cx = (bx0 + bx1) // 2
-    face_y = by0 + int((by1 - by0) * 0.35)
-    eye_offset = int((bx1 - bx0) * 0.16)
-    pixel_block = 4  # 32x32 scaled to 128 is 4px per pixel block
 
-    # Eye coordinates
-    lx, rx = cx - eye_offset, cx + eye_offset
-    ey = face_y
-    # Mouth coordinate
-    my = by0 + int((by1 - by0) * 0.52)
+    # Find eye and mouth anchor points
+    # Default proportional anchors
+    lx = bx0 + int((bx1 - bx0) * 0.36)
+    rx = bx0 + int((bx1 - bx0) * 0.64)
+    ey = by0 + int((by1 - by0) * 0.39)
+    my = by0 + int((by1 - by0) * 0.50)
+
+    # Sample skin color from face center
+    pixels = sprite_128.load()
+    skin_cand = pixels[cx, my - 4]
+    skin = skin_cand if skin_cand[3] > 100 else (250, 222, 210, 255)
+    eyelash = (42, 28, 48, 255)
 
     # 2. Eye Layers
-    # Eye: Open (default)
+    # Eye: Open (empty layer so natural face shines through)
     img_eyes_open = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img_eyes_open)
-    d.rectangle([lx - pixel_block, ey - pixel_block, lx + pixel_block, ey + pixel_block], fill=(20, 20, 25, 255))
-    d.rectangle([rx - pixel_block, ey - pixel_block, rx + pixel_block, ey + pixel_block], fill=(20, 20, 25, 255))
     img_eyes_open.save(layers_dir / "eyes_open.png")
 
-    # Eye: Blink (horizontal closed slit)
+    # Eye: Blink (covers pupil with skin tone and draws curved eyelid lashes)
     img_eyes_blink = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_blink)
-    d.rectangle([lx - pixel_block * 2, ey, lx + pixel_block * 2, ey + pixel_block // 2], fill=(20, 20, 25, 255))
-    d.rectangle([rx - pixel_block * 2, ey, rx + pixel_block * 2, ey + pixel_block // 2], fill=(20, 20, 25, 255))
+    d.rectangle([lx - 7, ey - 1, lx + 6, ey + 4], fill=skin)
+    d.rectangle([rx - 7, ey - 1, rx + 6, ey + 4], fill=skin)
+    d.line([(lx - 7, ey + 1), (lx, ey + 3), (lx + 6, ey + 1)], fill=eyelash, width=2)
+    d.line([(rx - 6, ey + 1), (rx, ey + 3), (rx + 7, ey + 1)], fill=eyelash, width=2)
     img_eyes_blink.save(layers_dir / "eyes_blink.png")
 
-    # Eye: Look Up (Think)
+    # Eye: Look Up / Think
     img_eyes_think = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_think)
-    d.rectangle([lx - pixel_block, ey - pixel_block * 2, lx + pixel_block, ey], fill=(20, 20, 25, 255))
-    d.rectangle([rx - pixel_block, ey - pixel_block * 2, rx + pixel_block, ey], fill=(20, 20, 25, 255))
+    d.rectangle([lx - 7, ey, lx + 6, ey + 4], fill=skin)
+    d.rectangle([rx - 7, ey, rx + 6, ey + 4], fill=skin)
+    d.arc([lx - 6, ey - 3, lx + 6, ey + 3], 180, 360, fill=eyelash, width=2)
+    d.arc([rx - 6, ey - 3, rx + 6, ey + 3], 180, 360, fill=eyelash, width=2)
     img_eyes_think.save(layers_dir / "eyes_look_up.png")
 
     # Eye: Sparkle (Success / Hi)
     img_eyes_sparkle = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_sparkle)
-    d.line([lx - pixel_block * 2, ey + pixel_block, lx, ey - pixel_block, lx + pixel_block * 2, ey + pixel_block], fill=(255, 220, 50, 255), width=pixel_block)
-    d.line([rx - pixel_block * 2, ey + pixel_block, rx, ey - pixel_block, rx + pixel_block * 2, ey + pixel_block], fill=(255, 220, 50, 255), width=pixel_block)
+    d.line([lx - 6, ey + 2, lx, ey - 3, lx + 6, ey + 2], fill=eyelash, width=2)
+    d.line([rx - 6, ey + 2, rx, ey - 3, rx + 6, ey + 2], fill=eyelash, width=2)
+    d.point([(lx - 8, ey - 4), (lx + 8, ey - 4), (rx - 8, ey - 4), (rx + 8, ey - 4)], fill=(255, 230, 80, 255))
     img_eyes_sparkle.save(layers_dir / "eyes_sparkle.png")
 
     # Eye: X / Dead (Failure)
     img_eyes_x = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_eyes_x)
-    d.line([lx - pixel_block, ey - pixel_block, lx + pixel_block, ey + pixel_block], fill=(220, 50, 50, 255), width=pixel_block // 2)
-    d.line([lx - pixel_block, ey + pixel_block, lx + pixel_block, ey - pixel_block], fill=(220, 50, 50, 255), width=pixel_block // 2)
-    d.line([rx - pixel_block, ey - pixel_block, rx + pixel_block, ey + pixel_block], fill=(220, 50, 50, 255), width=pixel_block // 2)
-    d.line([rx - pixel_block, ey + pixel_block, rx + pixel_block, ey - pixel_block], fill=(220, 50, 50, 255), width=pixel_block // 2)
+    d.rectangle([lx - 7, ey - 2, lx + 6, ey + 4], fill=skin)
+    d.rectangle([rx - 7, ey - 2, rx + 6, ey + 4], fill=skin)
+    d.line([lx - 5, ey - 2, lx + 5, ey + 3], fill=(220, 40, 50, 255), width=2)
+    d.line([lx - 5, ey + 3, lx + 5, ey - 2], fill=(220, 40, 50, 255), width=2)
+    d.line([rx - 5, ey - 2, rx + 5, ey + 3], fill=(220, 40, 50, 255), width=2)
+    d.line([rx - 5, ey + 3, rx + 5, ey - 2], fill=(220, 40, 50, 255), width=2)
     img_eyes_x.save(layers_dir / "eyes_x.png")
 
     # 3. Mouth Layers (4 pi-emote weights)
-    # talk_close: Neutral horizontal line
+    # talk_close: Empty layer (natural face closed mouth)
     img_mouth_close = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img_mouth_close)
-    d.rectangle([cx - pixel_block, my, cx + pixel_block, my + pixel_block // 2], fill=(20, 20, 25, 255))
     img_mouth_close.save(layers_dir / "mouth_close.png")
 
-    # talk_small: Small dot / compact 'o'
+    # talk_small: Small speaking dot / slit
     img_mouth_small = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_mouth_small)
-    d.rectangle([cx - pixel_block // 2, my - pixel_block // 2, cx + pixel_block // 2, my + pixel_block // 2], fill=(20, 20, 25, 255))
+    d.rectangle([cx - 4, my - 1, cx + 4, my + 3], fill=skin)
+    d.rectangle([cx - 2, my, cx + 2, my + 2], fill=(160, 30, 40, 255), outline=eyelash)
     img_mouth_small.save(layers_dir / "mouth_small.png")
 
-    # talk_mid: Medium speaking mouth
+    # talk_mid: Medium speaking curve
     img_mouth_mid = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_mouth_mid)
-    d.rectangle([cx - pixel_block, my - pixel_block // 2, cx + pixel_block, my + pixel_block], fill=(160, 30, 40, 255))
+    d.rectangle([cx - 5, my - 1, cx + 5, my + 4], fill=skin)
+    d.polygon([(cx - 3, my), (cx + 3, my), (cx, my + 4)], fill=(170, 30, 40, 255), outline=eyelash)
     img_mouth_mid.save(layers_dir / "mouth_mid.png")
 
     # talk_wide: Wide open speaking mouth
     img_mouth_wide = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_mouth_wide)
-    d.rectangle([cx - pixel_block * 2, my - pixel_block, cx + pixel_block * 2, my + pixel_block * 2], fill=(180, 20, 30, 255))
+    d.rectangle([cx - 6, my - 1, cx + 6, my + 5], fill=skin)
+    d.polygon([(cx - 5, my), (cx + 5, my), (cx, my + 6)], fill=(180, 30, 40, 255), outline=eyelash)
     img_mouth_wide.save(layers_dir / "mouth_wide.png")
 
     # 4. Props
     # prop_book (Read)
     img_book = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_book)
-    by_prop = by1 - pixel_block * 4
-    d.rectangle([cx - pixel_block * 4, by_prop, cx + pixel_block * 4, by_prop + pixel_block * 3], fill=(80, 140, 220, 255))
-    d.line([cx, by_prop, cx, by_prop + pixel_block * 3], fill=(240, 240, 240, 255), width=pixel_block // 2)
+    by_prop = by1 - 16
+    d.rectangle([cx - 16, by_prop, cx + 16, by_prop + 12], fill=(80, 140, 220, 255), outline=eyelash)
+    d.line([cx, by_prop, cx, by_prop + 12], fill=(240, 240, 240, 255), width=2)
     img_book.save(layers_dir / "prop_book.png")
 
     # prop_wrench (Tool)
     img_tool = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_tool)
-    tx = bx1 - pixel_block * 2
+    tx = bx1 - 8
     ty = by0 + int((by1 - by0) * 0.6)
-    d.line([tx - pixel_block * 3, ty + pixel_block * 3, tx + pixel_block * 2, ty - pixel_block * 2], fill=(180, 180, 190, 255), width=pixel_block)
+    d.line([tx - 12, ty + 12, tx + 6, ty - 6], fill=(180, 180, 190, 255), width=3)
     img_tool.save(layers_dir / "prop_wrench.png")
 
     # prop_sweat (Failure / Think Hard)
     img_sweat = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img_sweat)
-    sx = bx1 - pixel_block * 3
-    sy = by0 + pixel_block * 2
-    d.rectangle([sx, sy, sx + pixel_block, sy + pixel_block * 2], fill=(60, 180, 240, 255))
+    sx = bx1 - 12
+    sy = by0 + 8
+    d.polygon([(sx, sy), (sx - 3, sy + 6), (sx + 3, sy + 6)], fill=(60, 180, 240, 255), outline=eyelash)
     img_sweat.save(layers_dir / "prop_sweat.png")
 
     return {
@@ -325,7 +351,7 @@ def assemble_emote_set(layers_dir: Path, states_dir: Path, dist_dir: Path) -> Pa
     }
 
     # Compact state: Vertically squished character
-    compact_squished = base.resize((128, 96), resample=Image.Resampling.NEAREST)
+    compact_squished = base.resize((128, 96), resample=Image.Resampling.LANCZOS)
     compact_canvas = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
     compact_canvas.paste(compact_squished, (0, 32), compact_squished)
     state_frames["compact"] = {"compact.png": compact_canvas}
