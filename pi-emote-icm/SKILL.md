@@ -31,13 +31,25 @@ pi-emote-workspaces/<avatar-slug>/
 
 ## ⚡ CLI Quickstart
 
-### 1. All-in-One Build & Install
+### 1. Authentic Sprite Sheet Slicing (Recommended for Expressive Characters)
+When prompting image generation models (Gemini, Qwen-Image, etc.), request a **2x2 sprite sheet on a solid green (`#00FF00`) background**:
+- **Top-left**: Neutral / Idle (mouth closed, eyes open)
+- **Top-right**: Blink (eyes closed softly, mouth closed)
+- **Bottom-left**: Talk small (slightly open mouth, eyes open)
+- **Bottom-right**: Talk wide (expressive open talking mouth, eyes open)
+
+Then slice, defringe, assemble all 10 states, generate a showcase GIF, and install in one shot:
+```bash
+pi-emote-icm slice-sheet sprite_sheet.png --slug purple_girl --grid 2x2 --install --gif
+```
+
+### 2. All-in-One Build & Install (Single Image)
 ```bash
 # Process raw concept into full pi-emote set and install directly into pi-emote:
 pi-emote-icm build avatar_concept.png --slug cyberpunk_cat --grid 32 --install
 ```
 
-### 2. Step-by-Step ICM Workflow
+### 3. Step-by-Step ICM Workflow
 ```bash
 # Step 1: Scaffold workspace
 pi-emote-icm init cyberpunk_cat --dir ./workspaces

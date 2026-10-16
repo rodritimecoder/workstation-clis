@@ -461,6 +461,106 @@ def cmd_build(input_image: str, slug: Optional[str] = None, grid_size: int = 32,
         install_emote_set(dist_dir, avatar_slug, target=target)
 
 
+def cmd_slice_sheet(
+    sheet_path: Path,
+    slug: Optional[str] = None,
+    grid: str = "2x2",
+    install: bool = False,
+    target: str = "user",
+    gif: bool = False,
+) -> Path:
+    sheet_img = Image.open(sheet_path).convert("RGBA")
+    w, h = sheet_img.size
+    avatar_slug = slug or sheet_path.stem.lower().replace(" ", "_").replace("-", "_")
+    base_dir = Path.cwd() / "pi-emote-workspaces"
+    ws = init_workspace(avatar_slug, base_dir)
+
+    concept_dst = ws / "01_concept" / sheet_path.name
+    shutil.copy2(sheet_path, concept_dst)
+
+    if grid == "2x2":
+        hw, hh = w // 2, h // 2
+        crops = {
+            "idle": (0, 0, hw, hh),
+            "blink": (hw, 0, w, hh),
+            "talk_small": (0, hh, hw, h),
+            "talk_wide": (hw, hh, w, h),
+        }
+    else:
+        pw = w // 4
+        crops = {
+            "idle": (0, 0, pw, h),
+            "blink": (pw, 0, pw * 2, h),
+            "talk_small": (pw * 2, 0, pw * 3, h),
+            "talk_wide": (pw * 3, 0, w, h),
+        }
+
+    panels: Dict[str, Image.Image] = {}
+    for name, box in crops.items():
+        cropped = sheet_img.crop(box)
+        nobg = auto_remove_background(cropped)
+        sq = square_and_center(nobg, target_size=128)
+        panels[name] = sq
+        sq.save(ws / "02_squared_nobg" / f"panel_{name}.png")
+
+    p_idle = panels["idle"]
+    p_blink = panels["blink"]
+    p_small = panels["talk_small"]
+    p_wide = panels["talk_wide"]
+    p_mid = Image.blend(p_small, p_wide, 0.5)
+
+    dist_dir = ws / "06_dist"
+    for state in ["idle", "talk", "hi", "think", "read", "write", "tool", "success", "failure", "compact"]:
+        (dist_dir / state).mkdir(parents=True, exist_ok=True)
+
+    p_idle.save(dist_dir / "idle" / "idle.png")
+    p_blink.save(dist_dir / "idle" / "idle_blink.png")
+
+    p_idle.save(dist_dir / "talk" / "talk_close.png")
+    p_small.save(dist_dir / "talk" / "talk_small.png")
+    p_mid.save(dist_dir / "talk" / "talk_mid.png")
+    p_wide.save(dist_dir / "talk" / "talk_wide.png")
+
+    p_idle.save(dist_dir / "hi" / "hi.png")
+    p_idle.save(dist_dir / "think" / "think.png")
+    p_blink.save(dist_dir / "think" / "think_hard.png")
+    p_blink.save(dist_dir / "read" / "read.png")
+    p_blink.save(dist_dir / "write" / "write.png")
+    p_idle.save(dist_dir / "tool" / "tool.png")
+    p_wide.save(dist_dir / "success" / "success.png")
+    p_blink.save(dist_dir / "failure" / "failure.png")
+    p_blink.save(dist_dir / "compact" / "compact.png")
+
+    emotes_cfg = {
+        "format": "pi-emote-v1",
+        "avatar": avatar_slug,
+        "resolution": "128x128",
+        "states": {
+            "idle": {"frames": ["idle.png"], "blink": "idle_blink.png", "interval": 4000},
+            "talk": {"mouths": ["talk_close.png", "talk_small.png", "talk_mid.png", "talk_wide.png"], "speed": 120},
+            "hi": {"frames": ["hi.png"]},
+            "think": {"frames": ["think.png", "think_hard.png"]},
+            "read": {"frames": ["read.png"]},
+            "write": {"frames": ["write.png"]},
+            "tool": {"frames": ["tool.png"]},
+            "success": {"frames": ["success.png"]},
+            "failure": {"frames": ["failure.png"]},
+            "compact": {"frames": ["compact.png"]},
+        }
+    }
+    with open(dist_dir / "emotes.json", "w", encoding="utf-8") as f:
+        json.dump(emotes_cfg, f, indent=2)
+
+    print(f"✅ Sliced and assembled genuine sprite sheet -> {dist_dir}")
+
+    if install:
+        install_emote_set(dist_dir, avatar_slug, target=target)
+    if gif:
+        create_showcase_gif(dist_dir, dist_dir / "showcase.gif", scale=2)
+
+    return dist_dir
+
+
 def create_showcase_gif(dist_dir: Path, out_path: Path, scale: int = 2) -> Path:
     """Assembles all emote states and talk variations into a single looping showcase GIF."""
     sequence = [
@@ -560,6 +660,15 @@ def main():
     p_bld.add_argument("--target", choices=["user", "project"], default="user", help="Install target")
     p_bld.add_argument("--gif", action="store_true", help="Generate showcase animated GIF in dist folder")
 
+    # 8. slice-sheet (authentic multi-expression grid)
+    p_slc = sub.add_parser("slice-sheet", help="Slice and compile authentic 2x2 or 1x4 expression sprite sheet")
+    p_slc.add_argument("sheet", help="Path to expression sprite sheet (PNG/JPG)")
+    p_slc.add_argument("--slug", "-s", help="Avatar slug name (default: filename)")
+    p_slc.add_argument("--grid", choices=["2x2", "1x4"], default="2x2", help="Sprite sheet layout grid")
+    p_slc.add_argument("--install", "-i", action="store_true", help="Install into pi-emote emotes directory")
+    p_slc.add_argument("--target", choices=["user", "project"], default="user", help="Install target")
+    p_slc.add_argument("--gif", action="store_true", help="Generate showcase animated GIF in dist folder")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -585,6 +694,8 @@ def main():
         if args.gif:
             dist_p = Path.cwd() / "pi-emote-workspaces" / (args.slug or Path(args.image).stem.lower().replace(" ", "_")) / "06_dist"
             create_showcase_gif(dist_p, dist_p / "showcase.gif", scale=2)
+    elif args.command == "slice-sheet":
+        cmd_slice_sheet(Path(args.sheet).resolve(), slug=args.slug, grid=args.grid, install=args.install, target=args.target, gif=args.gif)
     else:
         parser.print_help()
 
