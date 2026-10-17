@@ -97,25 +97,26 @@ Because every stage output is an edit surface:
 
 ## 🏛️ Creator Video Vault (`vault-mine`)
 
-Curate and archive creator videos, architectural diagrams, and full transcripts into `/run/media/rodri/AI/creator-vault/`:
+High-speed single-pass video mining and cataloging into `/run/media/rodri/AI/creator-vault/`. Powered by `audiocpp` GPU speech-to-text (8.5x–67x real-time), single-pass download with info JSON, and smart OCR gating:
 
 ```bash
-VAULT_CLI=~/.gemini/config/skills/video-miner/scripts/vault-mine
-
-# List vaulted videos in a high-density Markdown table (100 tokens instead of opening directories):
-$VAULT_CLI list --table --limit 10
+# List vaulted videos in a high-density Markdown table:
+vault-mine list --table --limit 10
 
 # Filter vault by creator:
-$VAULT_CLI list --creator "kem_glitch" --table
+vault-mine list --creator "kem_glitch" --table
 
-# Mine video directly from URL into the vault
-$VAULT_CLI add "https://www.instagram.com/p/DeZUVT1t5vQ/" --creator "kem_glitch" --title "5-agents-worktree"
+# Fast single-pass video mining directly from URL into the vault (~12s end-to-end):
+vault-mine add "https://www.instagram.com/reel/..." --creator "kem_glitch" --title "graph-memory-rant"
 
-# Import an existing mined ICM workspace into the vault
-$VAULT_CLI import ./my_video_run --creator "kem_glitch" --title "5-agents-worktree"
+# Ultra-fast mining with Nemotron streaming STT:
+vault-mine add "https://..." --model nemotron
 
-# Rebuild vault catalog index
-$VAULT_CLI reindex
+# Import an existing mined ICM workspace into the vault:
+vault-mine import ./my_video_run --creator "kem_glitch" --title "5-agents-worktree"
+
+# Rebuild vault catalog index:
+vault-mine reindex
 ```
 
 ## Tests

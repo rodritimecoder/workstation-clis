@@ -55,7 +55,17 @@ LIGHTON_PORT = int(os.environ.get("LIGHTON_PORT", "8085"))
 LIGHTON_URL = os.environ.get("LIGHTON_URL", f"http://127.0.0.1:{LIGHTON_PORT}/v1/chat/completions")
 
 
-def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False) -> list[str]:
+def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, words_out: Path | None = None) -> list[str]:
+    audiocpp_cli = shutil.which("audiocpp") or "/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"
+    if shutil.which("audiocpp") or Path(audiocpp_cli).is_file():
+        cmd = ["audiocpp" if shutil.which("audiocpp") else sys.executable]
+        if not shutil.which("audiocpp"):
+            cmd.append(audiocpp_cli)
+        cmd.extend(["transcribe", str(audio_wav), "--metrics"])
+        if words_out:
+            cmd.extend(["--words-out", str(words_out)])
+        return cmd
+
     local_hub = shutil.which("local-hub")
     if local_hub:
         cmd = [local_hub, "asr", "transcribe", str(audio_wav)]
@@ -78,7 +88,7 @@ def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False) ->
             if details:
                 cmd.append("--details")
             return cmd
-    raise FileNotFoundError("Could not locate local-hub or asr.py on the system.")
+    raise FileNotFoundError("Could not locate audiocpp, local-hub or asr.py on the system.")
 
 
 
@@ -315,6 +325,31 @@ def parse_asr_segments(raw: Any) -> list[dict]:
         elif "text" in raw:
             return [{"start": 0.0, "end": 0.0, "text": raw["text"]}]
     elif isinstance(raw, list):
+        if raw and isinstance(raw[0], dict) and "start_sample" in raw[0]:
+            cur_words = []
+            seg_start = raw[0].get("start_sample", 0) / 16000.0
+            last_end = seg_start
+            for w in raw:
+                w_text = w.get("word", "")
+                w_start = w.get("start_sample", 0) / 16000.0
+                w_end = w.get("end_sample", 0) / 16000.0
+                if cur_words and ((w_start - last_end > 1.2) or (" ".join(cur_words).strip().endswith((".", "!", "?")))):
+                    segments.append({
+                        "start": seg_start,
+                        "end": last_end,
+                        "text": " ".join(cur_words).strip()
+                    })
+                    cur_words = []
+                    seg_start = w_start
+                cur_words.append(w_text)
+                last_end = w_end
+            if cur_words:
+                segments.append({
+                    "start": seg_start,
+                    "end": last_end,
+                    "text": " ".join(cur_words).strip()
+                })
+            return segments
         return raw
     return []
 
@@ -328,27 +363,26 @@ def run_stage_02_audio_asr(workspace: Path) -> None:
     if not audio_wav.exists():
         raise FileNotFoundError(f"Missing upstream audio: {audio_wav}")
 
-    print("[02_audio_asr] Transcribing speech with Nemotron ASR (local-hub asr)...")
+    print("[02_audio_asr] Transcribing speech with hardware-accelerated ASR (audiocpp / local-hub)...")
     
-    # Try server mode first, fall back to offline CLI
-    res = None
-    try:
-        cmd_srv = get_asr_cmd(audio_wav, details=True, offline=False)
-        res = subprocess.run(cmd_srv, capture_output=True, text=True)
-    except Exception:
-        res = None
-
-    if not res or res.returncode != 0:
-        print("  [02_audio_asr] Server not responsive. Using offline CLI engine...")
-        cmd_cli = get_asr_cmd(audio_wav, details=True, offline=True)
-        res = subprocess.run(cmd_cli, capture_output=True, text=True, check=True)
+    words_json = out_dir / "words.json"
+    cmd = get_asr_cmd(audio_wav, details=True, offline=True, words_out=words_json)
+    res = subprocess.run(cmd, capture_output=True, text=True)
 
     segments = []
-    try:
-        raw = json.loads(res.stdout)
-        segments = parse_asr_segments(raw)
-    except Exception:
-        segments = [{"start": 0.0, "end": 0.0, "text": res.stdout.strip()}]
+    if words_json.is_file():
+        try:
+            raw_words = json.loads(words_json.read_text(encoding="utf-8"))
+            segments = parse_asr_segments(raw_words)
+        except Exception:
+            pass
+
+    if not segments:
+        try:
+            raw = json.loads(res.stdout)
+            segments = parse_asr_segments(raw)
+        except Exception:
+            segments = [{"start": 0.0, "end": 0.0, "text": res.stdout.strip()}]
 
     transcript_json = out_dir / "transcript.json"
     transcript_md = out_dir / "transcript.md"
