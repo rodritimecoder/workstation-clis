@@ -4,28 +4,68 @@
   "port_range": [8080, 8090],
   "models": {
     "8080": {
-      "alias": "local-coder-primary",
+      "alias": "local-coder-genesis",
       "vram_mb": 22000,
       "pinned": true,
-      "cmd": "llama-server --host 0.0.0.0 --port 8080 -m ~/models/qwen-coder-35b-q4_k_m.gguf -ngl 99 -c 32768"
+      "name": "Qwen3.6-35B-A3B Uncensored Genesis",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/luffy_thinking.sh",
+      "role": "#1 Coder & System Brain"
     },
     "8081": {
-      "alias": "local-general-heavy",
-      "vram_mb": 18000,
+      "alias": "local-audio-nemotron",
+      "vram_mb": 2500,
       "pinned": false,
-      "cmd": "llama-server --host 0.0.0.0 --port 8081 -m ~/models/gemma-4-26b-q4_k_m.gguf -ngl 99 -c 16384"
+      "name": "audio.cpp Nemotron ASR & Kokoro TTS",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/mic-asr.sh",
+      "role": "Real-time speech transcription & synthesis"
     },
     "8082": {
-      "alias": "local-classifier-jev",
-      "vram_mb": 3500,
+      "alias": "local-embed-gemma2",
+      "vram_mb": 1500,
       "pinned": false,
-      "cmd": "llama-server --host 0.0.0.0 --port 8082 -m ~/models/jpt-4b-q8_0.gguf -ngl 99 -c 8192"
+      "name": "EmbeddingGemma-2 768d Multimodal",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/embeddinggemma-2.sh",
+      "role": "Fast dense vector representations & RRF search"
     },
     "8083": {
-      "alias": "local-ocr-vision",
-      "vram_mb": 4000,
+      "alias": "local-decide-onejev",
+      "vram_mb": 3500,
       "pinned": false,
-      "cmd": "llama-server --host 0.0.0.0 --port 8083 -m ~/models/glm-ocr.gguf -ngl 99"
+      "name": "OneJev1.5-4B Calibrated Decision Engine",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/imajev-4b.sh",
+      "role": "Fast calibrated classification (bool/choice/score)"
+    },
+    "8084": {
+      "alias": "local-ocr-crispembed",
+      "vram_mb": 1200,
+      "pinned": false,
+      "name": "CrispEmbed Scene Text OCR",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/crispembed-ocr.sh",
+      "role": "Spatial 2D bounding boxes and scene-text detection"
+    },
+    "8085": {
+      "alias": "local-ocr-lighton",
+      "vram_mb": 1500,
+      "pinned": false,
+      "name": "LightOnOCR-3-1B Flagship Document OCR",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/lighton-ocr.sh",
+      "role": "#1 Document, slide, and table text extraction"
+    },
+    "8088": {
+      "alias": "local-ground-deskforge",
+      "vram_mb": 3500,
+      "pinned": false,
+      "name": "DeskForge Visual GUI Grounding",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/deskforge-qwen.sh",
+      "role": "Computer-use visual coordinates"
+    },
+    "8090": {
+      "alias": "local-decide-jpt",
+      "vram_mb": 3500,
+      "pinned": false,
+      "name": "JPT-4B Decision Engine",
+      "cmd": "python3 /run/media/rodri/AI/skills/launchers/jpt-4b/server.py",
+      "role": "Multimodal System One gating & decision routing"
     }
   }
 }

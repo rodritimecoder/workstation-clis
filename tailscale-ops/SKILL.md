@@ -26,7 +26,7 @@ tailscale-ops check-port <hostname-or-ip> <port>
 ```
 
 ### 3. Expose Entire Workstation AI Inference Matrix (`serve-mesh`)
-Expose all 11 local models/servers (Genesis 35B, LiteLLM, audio.cpp, OCR, Imajev, etc.) over private Tailscale HTTPS simultaneously with 1 command:
+Expose all 12 local inference endpoints and fast-CDP browser DevTools (`:8080–:8090`, `:9222`, `:3010`, `:4000`, `:8000`) over private Tailscale HTTPS simultaneously with 1 command:
 ```bash
 tailscale-ops serve-mesh
 ```
@@ -36,7 +36,13 @@ View active tunnels and full URL registry:
 tailscale-ops mesh-status
 ```
 
-### 4. Expose a Single Local Port Privately (`serve-on`)
+### 4. Diagnostic Health Check (`doctor`)
+Inspect daemon state, local IP, DNS, and connected peers:
+```bash
+tailscale-ops doctor
+```
+
+### 5. Expose a Single Local Port Privately (`serve-on`)
 Expose a single dev server or LiteLLM gateway (`localhost:3000` or `localhost:4000`) with automatic HTTPS strictly inside the tailnet:
 ```bash
 tailscale-ops serve-on 4000

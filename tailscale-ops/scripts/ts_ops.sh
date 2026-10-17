@@ -107,12 +107,13 @@ except Exception as e:
       "8000:llama-swap Controller"
       "8080:Genesis 35B Primary LLM"
       "8081:audio.cpp Nemotron ASR & Kokoro TTS"
-      "8082:bge-small Embeddings"
-      "8083:Imajev-4B Decision Gating"
+      "8082:EmbeddingGemma-2 768d Multimodal"
+      "8083:OneJev1.5-4B Calibrated Decisions"
       "8084:CrispEmbed Scene-Text OCR"
       "8085:LightOnOCR Flagship Document OCR"
       "8088:DeskForge Visual GUI Grounding"
       "8090:JPT-4B Decision Engine"
+      "9222:Chromium CDP DevTools (fast-cdp)"
       "3010:KasmVNC Browser Web Desktop"
     )
 
@@ -141,6 +142,40 @@ except Exception as e:
     tailscale serve status
     ;;
 
+  doctor)
+    check_tailscale
+    echo "🩺 [tailscale-ops] Diagnostic Health Check:"
+    python3 -c '
+import json, subprocess, sys
+try:
+    res = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, check=True)
+    data = json.loads(res.stdout)
+    self_node = data.get("Self", {})
+    hostname = self_node.get("HostName", "unknown")
+    dns = self_node.get("DNSName", "").rstrip(".")
+    ip = (self_node.get("TailscaleIPs") or ["unknown"])[0]
+    backend = data.get("BackendState", "unknown")
+    print(f"  • Backend State:    {backend}")
+    print(f"  • Self Hostname:    {hostname}")
+    print(f"  • Tailscale IP:     {ip}")
+    print(f"  • Tailnet DNS:      {dns}")
+
+    peers = data.get("Peer") or {}
+    online_peers = [p for p in peers.values() if p.get("Online", False)]
+    print(f"  • Online Peers:     {len(online_peers)} detected")
+    for p in online_peers:
+        p_name = p.get("HostName")
+        p_ip = (p.get("TailscaleIPs") or [""])[0]
+        p_os = p.get("OS")
+        print(f"    - {p_name} ({p_os}) @ {p_ip}")
+except Exception as e:
+    print(f"  ❌ Error querying tailscale status: {e}")
+'
+    echo ""
+    echo "  • Active Serve Tunnels:"
+    tailscale serve status 2>/dev/null || echo "    None active."
+    ;;
+
   send-file)
     check_tailscale
     FILE_PATH="${1:?File path required}"
@@ -151,15 +186,16 @@ except Exception as e:
     ;;
 
   *)
-    echo "Usage: $0 {peers|check-port|serve-mesh|mesh-status|serve-on|funnel-on|reset-tunnels|send-file}" >&2
-    echo "  peers"
-    echo "  check-port <hostname-or-ip> <port>"
-    echo "  serve-mesh             # Expose all 11 workstation inference services over Tailscale HTTPS"
+    echo "Usage: $0 {peers|check-port|serve-mesh|mesh-status|serve-on|funnel-on|reset-tunnels|send-file|doctor}" >&2
+    echo "  peers                  # List online tailnet peers"
+    echo "  doctor                 # Diagnostic check of tailscale status and active tunnels"
+    echo "  check-port <host> <p>  # Probe reachable port on peer"
+    echo "  serve-mesh             # Expose all 12 workstation inference & CDP services over Tailscale HTTPS"
     echo "  mesh-status            # View active Tailscale serve configurations"
     echo "  serve-on <port>        # Expose single port privately on tailnet"
     echo "  funnel-on <port>       # Expose single port publicly via funnel"
     echo "  reset-tunnels          # Tear down all serve and funnel tunnels"
-    echo "  send-file <file-path> <target-node:>"
+    echo "  send-file <file> <tgt> # Transfer file to peer via tailscale file cp"
     exit 1
     ;;
 esac

@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+
+def parse_markdown_links(text: str) -> list[str]:
+    matches = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", text)
+    links = []
+    for _, href in matches:
+        if href.startswith(("http://", "https://", "mailto:", "#")):
+            continue
+        clean_href = href.split("#")[0].strip()
+        if clean_href:
+            links.append(clean_href)
+    return links
+
+
+def cmd_init(ws_path: Path, name: str, stages: list[str], form: str = "pipeline", as_json: bool = False):
+    ws_path = ws_path.resolve()
+    ws_path.mkdir(parents=True, exist_ok=True)
+
+    shared_dir = ws_path / "_shared"
+    archive_dir = ws_path / "_archive"
+    shared_dir.mkdir(exist_ok=True)
+    archive_dir.mkdir(exist_ok=True)
+
+    (shared_dir / "rules.md").write_text(
+        "# Shared Workspace Constraints\n\n"
+        "Global rules, voice constraints, and schemas applicable across all pipeline stages.\n",
+        encoding="utf-8",
+    )
+    (archive_dir / ".gitkeep").touch()
+
+    agents_content = [
+        f"# AGENTS.md — {name}",
+        "",
+        f"**Workspace Form**: {form.capitalize()}",
+        f"**Methodology**: Interpretable Context Methodology (ICM; arXiv:2603.16021)",
+        "",
+        "## Hierarchy & Control Map",
+        "| Layer | File / Directory | Scope & Role |",
+        "|---|---|---|",
+        "| **L0** | `AGENTS.md` | Root workspace routing & identity |",
+        "| **L1** | `CONTEXT.md` | Stage pipeline index & execution order |",
+        "| **L2** | `NN_*/CONTEXT.md` | Stage contracts (Inputs, Process, Outputs, Human Check) |",
+        "| **L3** | `_shared/`, `references/` | Immutable guidelines, constraints, and schemas |",
+        "| **L4** | `NN_*/output/` | Per-run editable product artifacts |",
+        "",
+        "## Stage Pipeline",
+    ]
+
+    context_content = [
+        f"# {name} — Stage Pipeline Index",
+        "",
+        "Sequential stage execution order:",
+        "",
+    ]
+
+    for idx, st in enumerate(stages, start=1):
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "-", st.lower().strip())
+        stage_dir_name = f"{idx:02d}_{slug}"
+        agents_content.append(f"- [{stage_dir_name}]({stage_dir_name}/CONTEXT.md): Stage {idx} contract and artifacts")
+        context_content.append(f"{idx}. [{stage_dir_name}]({stage_dir_name}/CONTEXT.md)")
+
+        s_dir = ws_path / stage_dir_name
+        s_dir.mkdir(exist_ok=True)
+        out_dir = s_dir / "output"
+        out_dir.mkdir(exist_ok=True)
+        (out_dir / ".gitkeep").touch()
+
+        prev_input = f"../{idx-1:02d}_{re.sub(r'[^a-zA-Z0-9_-]', '-', stages[idx-2].lower().strip())}/output/" if idx > 1 else "External input / prompt"
+
+        s_contract = f"""# {stage_dir_name} — {st.capitalize()} Stage
+
+One job: Execute {slug} according to workspace constraints.
+
+## Inputs
+- Working (this run): {prev_input}
+- Reference (every run): ../_shared/rules.md
+
+## Process
+1. Inspect input artifacts from preceding layer.
+2. Transform according to shared constraints in `_shared/rules.md`.
+3. Emit structured deliverables to `output/`.
+
+## Outputs
+- `output/result.md`: Primary deliverable for stage {idx}
+
+## Human check
+Inspect `output/result.md` before advancing to the next stage. Edit in place; downstream stages consume this directory.
+"""
+        (s_dir / "CONTEXT.md").write_text(s_contract, encoding="utf-8")
+
+    agents_content.extend([
+        "",
+        "## Reference Integrity",
+        "Before renaming or moving any file, run `icm-architect validate .` to prevent broken relative links.",
+    ])
+
+    (ws_path / "AGENTS.md").write_text("\n".join(agents_content) + "\n", encoding="utf-8")
+    (ws_path / "CONTEXT.md").write_text("\n".join(context_content) + "\n", encoding="utf-8")
+
+    result = {
+        "workspace": str(ws_path),
+        "name": name,
+        "form": form,
+        "stages": [f"{i:02d}_{re.sub(r'[^a-zA-Z0-9_-]', '-', s.lower().strip())}" for i, s in enumerate(stages, 1)],
+        "status": "scaffolded",
+    }
+
+    if as_json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"✅ Initialized ICM workspace at: {ws_path}")
+        print(f"   Root Entry: {ws_path / 'AGENTS.md'}")
+        print(f"   Stages:     {', '.join(result['stages'])}")
+
+
+def cmd_validate(target_dir: Path, as_json: bool = False) -> int:
+    target_dir = target_dir.resolve()
+    errors = []
+    warnings = []
+    checks_passed = 0
+
+    agents_md = target_dir / "AGENTS.md"
+    if not agents_md.is_file():
+        errors.append("Missing root L0 entry file 'AGENTS.md'")
+    else:
+        checks_passed += 1
+
+    root_context = target_dir / "CONTEXT.md"
+    if not root_context.is_file():
+        warnings.append("Missing root L1 index file 'CONTEXT.md'")
+    else:
+        checks_passed += 1
+
+    stage_dirs = sorted([d for d in target_dir.iterdir() if d.is_dir() and re.match(r"^\d{2}_", d.name)])
+    if not stage_dirs:
+        warnings.append("No numbered stage folders (format: NN_name) found in workspace root.")
+    else:
+        checks_passed += 1
+
+    for s in stage_dirs:
+        s_context = s / "CONTEXT.md"
+        if not s_context.is_file():
+            errors.append(f"Stage '{s.name}' missing required L2 contract 'CONTEXT.md'")
+            continue
+
+        checks_passed += 1
+        content = s_context.read_text(encoding="utf-8", errors="replace")
+        for sec in ["## Inputs", "## Process", "## Outputs", "## Human check"]:
+            if sec not in content:
+                errors.append(f"Stage '{s.name}/CONTEXT.md' missing required section: '{sec}'")
+            else:
+                checks_passed += 1
+
+        out_dir = s / "output"
+        if not out_dir.is_dir():
+            warnings.append(f"Stage '{s.name}' missing 'output/' directory")
+
+    md_files = list(target_dir.rglob("*.md"))
+    broken_links = []
+    for mf in md_files:
+        if ".git" in mf.parts or "node_modules" in mf.parts or ".venv" in mf.parts:
+            continue
+        txt = mf.read_text(encoding="utf-8", errors="replace")
+        links = parse_markdown_links(txt)
+        for link in links:
+            dest = (mf.parent / link).resolve()
+            if not dest.exists():
+                broken_links.append({"source": str(mf.relative_to(target_dir)), "target": link})
+
+    if broken_links:
+        for bl in broken_links:
+            errors.append(f"Broken link in '{bl['source']}': target '{bl['target']}' does not exist")
+    else:
+        checks_passed += 1
+
+    status_ok = len(errors) == 0
+
+    if as_json:
+        report = {
+            "workspace": str(target_dir),
+            "status": "PASS" if status_ok else "FAIL",
+            "passed_checks": checks_passed,
+            "errors": errors,
+            "warnings": warnings,
+            "stage_count": len(stage_dirs),
+            "markdown_files_inspected": len(md_files),
+        }
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"\n🔬 [ICM Reference Integrity Validator] Workspace: {target_dir}")
+        print(f"   Stage Folders: {len(stage_dirs)} | Markdown Files: {len(md_files)}")
+        print("   " + "─" * 60)
+        if status_ok:
+            print(f"   ✅ ALL {checks_passed} STRUCTURAL CHECKS PASSED")
+            if warnings:
+                print("\n   ⚠️  Warnings:")
+                for w in warnings:
+                    print(f"      • {w}")
+        else:
+            print(f"   ❌ INTEGRITY FAILED ({len(errors)} error(s), {len(warnings)} warning(s)):")
+            for err in errors:
+                print(f"      • ❌ {err}")
+            for w in warnings:
+                print(f"      • ⚠️  {w}")
+
+    return 0 if status_ok else 1
+
+
+def cmd_map(target_dir: Path, mermaid: bool = False):
+    target_dir = target_dir.resolve()
+    stage_dirs = sorted([d for d in target_dir.iterdir() if d.is_dir() and re.match(r"^\d{2}_", d.name)])
+
+    if not stage_dirs:
+        sys.exit("❌ Error: No stage folders (NN_name) found to map.")
+
+    if mermaid:
+        print("```mermaid")
+        print("flowchart LR")
+        for idx, s in enumerate(stage_dirs):
+            clean_name = s.name.replace("_", " ").title()
+            print(f"    S{idx}[\"{clean_name}\"]")
+            if idx > 0:
+                print(f"    S{idx-1} --> S{idx}")
+        print("```")
+        return
+
+    print(f"\n🗺️  [ICM Stage Pipeline Map] {target_dir.name}\n")
+    for idx, s in enumerate(stage_dirs, start=1):
+        s_context = s / "CONTEXT.md"
+        inputs, outputs = "None specified", "None specified"
+        if s_context.is_file():
+            text = s_context.read_text(encoding="utf-8", errors="replace")
+            in_m = re.search(r"## Inputs\s*\n(.*?)(?=\n## |\Z)", text, re.DOTALL)
+            if in_m:
+                inputs = ", ".join([line.strip("- *") for line in in_m.group(1).strip().splitlines() if line.strip()][:2])
+            out_m = re.search(r"## Outputs\s*\n(.*?)(?=\n## |\Z)", text, re.DOTALL)
+            if out_m:
+                outputs = ", ".join([line.strip("- *") for line in out_m.group(1).strip().splitlines() if line.strip()][:2])
+
+        arrow = "──▶" if idx < len(stage_dirs) else "   "
+        print(f"  [{s.name}]")
+        print(f"    ├─ In:  {inputs}")
+        print(f"    └─ Out: {outputs}")
+        if idx < len(stage_dirs):
+            print(f"       │\n       ▼")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="icm-architect",
+        description="Autonomous Interpretable Context Methodology (ICM) Workspace Architect & Validator",
+    )
+    sub = parser.add_subparsers(dest="action", required=True)
+
+    p_init = sub.add_parser("init", aliases=["scaffold"], help="Scaffold a new production ICM workspace")
+    p_init.add_argument("path", help="Target directory for workspace")
+    p_init.add_argument("--name", default=None, help="Workspace human-readable name")
+    p_init.add_argument("--stages", default="plan,extract,synthesize,verify", help="Comma-separated stage names")
+    p_init.add_argument("--form", choices=["pipeline", "library", "map"], default="pipeline", help="ICM architectural form")
+    p_init.add_argument("--json", action="store_true", help="Output as JSON")
+
+    p_val = sub.add_parser("validate", aliases=["check"], help="Validate reference integrity & ICM hierarchy")
+    p_val.add_argument("path", nargs="?", default=".", help="Target workspace directory (default: current)")
+    p_val.add_argument("--json", action="store_true", help="Output as JSON")
+
+    p_map = sub.add_parser("map", help="Render stage pipeline topology")
+    p_map.add_argument("path", nargs="?", default=".", help="Target workspace directory (default: current)")
+    p_map.add_argument("--mermaid", action="store_true", help="Output as Mermaid flowchart")
+
+    p_doc = sub.add_parser("doctor", help="Run diagnostic health checks on workspace")
+    p_doc.add_argument("path", nargs="?", default=".", help="Target workspace directory (default: current)")
+    p_doc.add_argument("--json", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args()
+
+    if args.action in ("init", "scaffold"):
+        p = Path(args.path)
+        name = args.name or p.name.replace("-", " ").title()
+        stages = [s.strip() for s in args.stages.split(",") if s.strip()]
+        cmd_init(p, name, stages, form=args.form, as_json=args.json)
+    elif args.action in ("validate", "check", "doctor"):
+        ret = cmd_validate(Path(args.path), as_json=args.json)
+        sys.exit(ret)
+    elif args.action == "map":
+        cmd_map(Path(args.path), mermaid=args.mermaid)
+
+
+if __name__ == "__main__":
+    main()

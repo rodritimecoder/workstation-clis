@@ -222,11 +222,22 @@ def cmd_status():
         state = active.get(p_str)
         report["ports_8080_8090"][p_str] = {
             "alias": meta.get("alias"),
+            "name": meta.get("name", meta.get("alias")),
             "pinned": meta.get("pinned", False),
             "est_vram_mb": meta.get("vram_mb"),
             "status": "RUNNING" if state else "STOPPED",
             "pid": state.get("pid") if state else None,
         }
+    for p_str, state in active.items():
+        if p_str not in report["ports_8080_8090"]:
+            report["ports_8080_8090"][p_str] = {
+                "alias": f"untracked-port-{p_str}",
+                "name": f"Unknown service on :{p_str}",
+                "pinned": False,
+                "est_vram_mb": None,
+                "status": "RUNNING",
+                "pid": state.get("pid"),
+            }
     print(json.dumps(report, indent=2))
 
 
