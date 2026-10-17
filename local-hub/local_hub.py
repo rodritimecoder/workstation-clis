@@ -67,63 +67,97 @@ def exec_internal_script(script_name: str, args: list[str]):
     sys.exit(result.returncode)
 
 
-def load_all_skills():
+def _parse_skill_entry(item: Path, skill_md: Path, status: str = "active") -> dict:
+    content = skill_md.read_text(encoding="utf-8", errors="replace")
+    name = item.name
+    desc = "No description provided."
+    match = re.search(r"^---\s*\n(.*?)\n---", content, re.DOTALL | re.MULTILINE)
+    if match:
+        fm = match.group(1)
+        name_m = re.search(r"^name:\s*([^\n]+)", fm, re.MULTILINE)
+        if name_m:
+            name = name_m.group(1).strip()
+        desc_m = re.search(r"^description:\s*([^\n]+(?:\n\s+[^\n]+)*)", fm, re.MULTILINE)
+        if desc_m:
+            raw_desc = desc_m.group(1).strip()
+            raw_desc = re.sub(r"^[>|]-?\s*", "", raw_desc)
+            desc = " ".join(raw_desc.split()).strip('"\'')
+
+    scripts_dir = item / "scripts"
+    scripts = []
+    if scripts_dir.is_dir():
+        for sf in scripts_dir.iterdir():
+            if sf.is_file() and (sf.suffix in (".py", ".sh") or os.access(sf, os.X_OK)):
+                scripts.append(sf.name)
+
+    return {
+        "name": name,
+        "dir_name": item.name,
+        "path": str(item),
+        "md_path": str(skill_md),
+        "description": desc,
+        "scripts": scripts,
+        "status": status,
+    }
+
+
+def load_all_skills(include_sidelined: bool = False):
     root = resolve_skills_dir()
     skills = {}
     if not root.is_dir():
         return skills
 
     for item in sorted(root.iterdir()):
+        if item.name in ("glitch-cat", "archived", "docs", "launchers"):
+            continue
         skill_md = item / "SKILL.md"
         if item.is_dir() and skill_md.is_file():
-            content = skill_md.read_text(encoding="utf-8", errors="replace")
-            name = item.name
-            desc = "No description provided."
-            match = re.search(r"^---\s*\n(.*?)\n---", content, re.DOTALL | re.MULTILINE)
-            if match:
-                fm = match.group(1)
-                name_m = re.search(r"^name:\s*([^\n]+)", fm, re.MULTILINE)
-                if name_m:
-                    name = name_m.group(1).strip()
-                desc_m = re.search(r"^description:\s*([^\n]+(?:\n\s+[^\n]+)*)", fm, re.MULTILINE)
-                if desc_m:
-                    raw_desc = desc_m.group(1).strip()
-                    raw_desc = re.sub(r"^[>|]-?\s*", "", raw_desc)
-                    desc = " ".join(raw_desc.split()).strip('"\'')
+            s = _parse_skill_entry(item, skill_md, status="active")
+            skills[s["name"]] = s
 
-            scripts_dir = item / "scripts"
-            scripts = []
-            if scripts_dir.is_dir():
-                for sf in scripts_dir.iterdir():
-                    if sf.is_file() and (sf.suffix in (".py", ".sh") or os.access(sf, os.X_OK)):
-                        scripts.append(sf.name)
-
-            skills[name] = {
-                "name": name,
-                "dir_name": item.name,
-                "path": str(item),
-                "md_path": str(skill_md),
-                "description": desc,
-                "scripts": scripts,
-            }
+    if include_sidelined:
+        for sub in ("glitch-cat", "archived"):
+            subdir = root / sub
+            if subdir.is_dir():
+                for item in sorted(subdir.iterdir()):
+                    skill_md = item / "SKILL.md"
+                    if item.is_dir() and skill_md.is_file():
+                        s = _parse_skill_entry(item, skill_md, status=sub)
+                        if s["name"] not in skills and item.name not in skills:
+                            skills[s["name"]] = s
     return skills
 
 
-def cmd_list(as_json: bool = False):
-    skills = load_all_skills()
+def cmd_list(as_json: bool = False, show_all: bool = False):
+    skills = load_all_skills(include_sidelined=show_all)
     if as_json:
         print(json.dumps(list(skills.values()), indent=2))
         return
 
-    print(f"\n📦 [Local Hub Registry] Found {len(skills)} Registered Skills:\n")
-    for name, s in sorted(skills.items()):
+    active = {k: v for k, v in skills.items() if v.get("status") == "active"}
+    dormant = {k: v for k, v in skills.items() if v.get("status") != "active"}
+
+    print(f"\n📦 [Local Hub Registry] Found {len(active)} Active Skills:\n")
+    for name, s in sorted(active.items()):
         scripts_info = f" ({len(s['scripts'])} scripts)" if s['scripts'] else ""
         print(f"  • {name:<30} {scripts_info}")
         print(f"    {s['description'][:100]}...\n")
 
+    if show_all and dormant:
+        print(f"📦 [Sidelined & Archived Registry] Found {len(dormant)} Dormant Skills:\n")
+        for name, s in sorted(dormant.items()):
+            scripts_info = f" ({len(s['scripts'])} scripts)" if s['scripts'] else ""
+            status_tag = f"[{s.get('status').upper()}]"
+            print(f"  • {name:<30} {status_tag} {scripts_info}")
+            print(f"    {s['description'][:100]}...\n")
+    elif not show_all:
+        dormant_count = len(load_all_skills(include_sidelined=True)) - len(active)
+        if dormant_count > 0:
+            print(f"💡 Tip: {dormant_count} skills are currently sidelined. Run 'local-hub list --all' to inspect them.\n")
 
-def cmd_search(query: str, as_json: bool = False):
-    skills = load_all_skills()
+
+def cmd_search(query: str, as_json: bool = False, search_all: bool = False):
+    skills = load_all_skills(include_sidelined=search_all)
     q_tokens = query.lower().split()
     scored = []
 
@@ -152,11 +186,40 @@ def cmd_search(query: str, as_json: bool = False):
 
     print(f"\n🔍 [Uber Protocol Search] Intent: '{query}'\n")
     if not scored:
-        print("  No matching skills found.")
+        # Check if query matches dormant skills
+        dormant_skills = load_all_skills(include_sidelined=True)
+        dormant_scored = []
+        for name, s in dormant_skills.items():
+            if s.get("status") == "active":
+                continue
+            sc = 0
+            md_content = Path(s["md_path"]).read_text(encoding="utf-8", errors="replace").lower()
+            desc = s["description"].lower()
+            n = name.lower()
+            for t in q_tokens:
+                if t in n:
+                    sc += 10
+                if t in desc:
+                    sc += 5
+                sc += min(md_content.count(t), 10)
+            if sc > 0:
+                dormant_scored.append((sc, s))
+
+        if dormant_scored:
+            dormant_scored.sort(key=lambda x: x[0], reverse=True)
+            print("  No active skills matched, but found matching sidelined skills:")
+            for sc, s in dormant_scored[:5]:
+                print(f"  • 💤 {s['name']} (relevance: {sc}) [{s.get('status').upper()}]")
+                print(f"    {s['description']}")
+                print(f"    Path: {s['path']}")
+                print(f"    Reactivate: ln -s {s['path']} /run/media/rodri/AI/skills/{s['dir_name']}\n")
+        else:
+            print("  No matching skills found.")
         return
 
     for score, s in scored[:6]:
-        print(f"  • 🎯 {s['name']} (relevance: {score})")
+        status_tag = f" [{s.get('status').upper()}]" if s.get("status") != "active" else ""
+        print(f"  • 🎯 {s['name']}{status_tag} (relevance: {score})")
         print(f"    {s['description']}")
         if s["scripts"]:
             print(f"    Tools/Scripts: {', '.join(s['scripts'])}")
@@ -164,7 +227,7 @@ def cmd_search(query: str, as_json: bool = False):
 
 
 def cmd_tools(skill_name: str):
-    skills = load_all_skills()
+    skills = load_all_skills(include_sidelined=True)
     target = None
     for name, s in skills.items():
         if name == skill_name or s["dir_name"] == skill_name:
@@ -174,7 +237,8 @@ def cmd_tools(skill_name: str):
     if not target:
         sys.exit(f"❌ Error: Skill '{skill_name}' not found.")
 
-    print(f"\n🛠️  [Available Tools] Skill: {target['name']}")
+    status_tag = f" [{target.get('status').upper()}]" if target.get("status") != "active" else ""
+    print(f"\n🛠️  [Available Tools] Skill: {target['name']}{status_tag}")
     print(f"   Directory: {target['path']}\n")
     if not target["scripts"]:
         print("   No executable scripts found in scripts/.")
@@ -186,7 +250,7 @@ def cmd_tools(skill_name: str):
 
 
 def cmd_inspect(skill_name: str):
-    skills = load_all_skills()
+    skills = load_all_skills(include_sidelined=True)
     target = None
     for name, s in skills.items():
         if name == skill_name or s["dir_name"] == skill_name:
@@ -196,7 +260,12 @@ def cmd_inspect(skill_name: str):
     if not target:
         sys.exit(f"❌ Error: Skill '{skill_name}' not found.")
 
-    print(f"\n📖 [Uber Schema & Contract] {target['name']}\n")
+    status_tag = f" [{target.get('status').upper()}]" if target.get("status") != "active" else ""
+    print(f"\n📖 [Uber Schema & Contract] {target['name']}{status_tag}\n")
+    if target.get("status") != "active":
+        print(f"ℹ️  Status: Currently {target.get('status').upper()} (sidelined to minimize prompt tokens).")
+        print(f"   Path: {target['path']}")
+        print(f"   Reactivate anytime with: ln -s {target['path']} /run/media/rodri/AI/skills/{target['dir_name']}\n")
     content = Path(target["md_path"]).read_text(encoding="utf-8")
     clean_content = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL)
     print(clean_content)
@@ -243,7 +312,7 @@ def cmd_run(skill_name: str, extra_args: list, out_path: str = None, project_fie
     elif skill_name in ("asr", "audiocpp-asr"):
         exec_internal_script("asr.py", extra_args)
 
-    skills = load_all_skills()
+    skills = load_all_skills(include_sidelined=True)
     target = None
     for name, s in skills.items():
         if name == skill_name or s["dir_name"] == skill_name:
@@ -435,9 +504,11 @@ def main():
     p_search = sub.add_parser("search", help="Search skills by intent across full body content")
     p_search.add_argument("query", help="Intent query")
     p_search.add_argument("--json", action="store_true", help="Output as JSON")
+    p_search.add_argument("--all", action="store_true", help="Search across both active and sidelined/archived skills")
 
     p_list = sub.add_parser("list", help="List all registered skills in the vault")
     p_list.add_argument("--json", action="store_true", help="Output as JSON")
+    p_list.add_argument("--all", action="store_true", help="Include sidelined (glitch-cat) and archived skills")
 
     p_tools = sub.add_parser("tools", help="List executable scripts/tools inside a skill")
     p_tools.add_argument("skill", help="Name of skill")
@@ -471,9 +542,9 @@ def main():
     elif args.action == "mesh":
         cmd_status(as_json=args.json)
     elif args.action == "search":
-        cmd_search(args.query, as_json=args.json)
+        cmd_search(args.query, as_json=args.json, search_all=args.all)
     elif args.action == "list":
-        cmd_list(as_json=args.json)
+        cmd_list(as_json=args.json, show_all=args.all)
     elif args.action == "tools":
         cmd_tools(args.skill)
     elif args.action == "inspect":
