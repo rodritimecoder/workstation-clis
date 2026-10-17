@@ -1,6 +1,15 @@
 ---
 name: agentic-engineering
-description: "Autonomous production engineering pipeline implementing Kem's (Glitch Cat Club) 7-step architecture: target-local Markdown Kanban boards (.kanban/), event-driven Listeners, Fresh-Context Unbiased Judges, Task Splitters, and multi-model parallel sandboxes."
+description: >
+  Autonomous production engineering pipeline implementing Kem's 7-step software factory (Glitch Cat Club;
+  Reel DehIT3lNgHC). Operates target-local Markdown Kanban boards (.kanban/), event-driven Listeners,
+  Fresh-Context Unbiased Judges, Task Splitters, and multi-model parallel sandboxes.
+metadata:
+  creator: kem_glitch
+  source_reel:
+    id: DehIT3lNgHC
+    url: https://www.instagram.com/reel/DehIT3lNgHC/
+    vault_note: kem_glitch/2026-10-16_agentic_engineering_7_step_loop/notes.md
 ---
 
 # `agentic-engineering` (`agentic`)

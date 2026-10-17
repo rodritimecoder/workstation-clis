@@ -1,11 +1,17 @@
 ---
 name: guard-hooks
 description: >
-  Deterministic pre-execution guardrails and immutable file protections (Kem Glitch / Glitch Cat Club
-  architecture). Enforces Kem's Law: 'A skill is instructions the model may follow; a hook is code
+  Deterministic pre-execution guardrails and immutable file protections (Glitch Cat Club;
+  Reel DeMSV1jNYem). Enforces Kem's Law: 'A skill is instructions the model may follow; a hook is code
   that ALWAYS runs.' Halts destructive commands (rm -rf, force push, drop table) and blocks unauthorized
   deletion or mutation of protected files (KeepMD, STATE.md, .env, secrets) in code before execution,
   regardless of model persuasion or user insistence.
+metadata:
+  creator: kem_glitch
+  source_reel:
+    id: DeMSV1jNYem
+    url: https://www.instagram.com/reel/DeMSV1jNYem/
+    vault_note: kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md
 ---
 
 # Guard Hooks — Deterministic Invariant Enforcement

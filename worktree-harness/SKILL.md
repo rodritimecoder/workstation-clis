@@ -1,11 +1,17 @@
 ---
 name: worktree-harness
 description: >
-  Autonomous multi-agent Git worktree orchestration and quality gate harness (Glitch Cat Club /
-  Kem & Anthropic parallel worktree pattern). Spawns N parallel subagents into isolated git
-  worktrees on dedicated branches, enforces pre-write section claims, validates deterministic code
-  quality gates (code decides wherever it can), automates merge conflict arbitration with Jev,
-  and maintains an immutable time-indexed event log.
+  Autonomous multi-agent Git worktree orchestration and quality gate harness (Glitch Cat Club;
+  Reel DeZUVT1t5vQ). Spawns N parallel subagents into isolated git worktrees on dedicated branches,
+  enforces pre-write section claims (claims.json), validates deterministic code quality gates
+  (code decides wherever it can), automates merge conflict arbitration with Jev, and maintains
+  an immutable time-indexed event log.
+metadata:
+  creator: kem_glitch
+  source_reel:
+    id: DeZUVT1t5vQ
+    url: https://www.instagram.com/reel/DeZUVT1t5vQ/
+    vault_note: kem_glitch/2026-10-16_5_agents_writing_same_file_worktree/notes.md
 ---
 
 # Worktree Harness — Multi-Agent Parallel Orchestration (`worktree-harness`)

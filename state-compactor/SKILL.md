@@ -2,10 +2,19 @@
 name: state-compactor
 description: >
   Autonomous state-file compaction harness and context-rot shield for long agent loops,
-  subagent handoffs, and gated code retrieval (Kem Glitch / Glitch Cat Club architecture).
+  subagent handoffs, and gated code retrieval (Glitch Cat Club; Reels DdyqnietB8C & DdME5hsNRju).
   Combines active structured state ledgers (.agent_state.json and STATE.md) with cgate
   (context-gated AST reader & JPT-4B query projection), preserving 100% of facts across
   660,000+ token sessions without context poisoning.
+metadata:
+  creator: kem_glitch
+  source_reels:
+    - id: DdyqnietB8C
+      url: https://www.instagram.com/reel/DdyqnietB8C/
+      vault_note: kem_glitch/2026-10-16_autonomous_state_file_compaction/notes.md
+    - id: DdME5hsNRju
+      url: https://www.instagram.com/reel/DdME5hsNRju/
+      vault_note: kem_glitch/2026-10-17_memory_context_management_sessions/notes.md
 ---
 
 # State Compactor & Context Rot Shield — Zero-Degradation Long Context Protocol

@@ -2,10 +2,16 @@
 name: eval-router
 description: >
   Self-calibrating request router with speculative shadow evaluation and failure harvesting
-  (Kem Glitch / Glitch Cat Club architecture). Classifies prompt complexity (Easy/Moderate/Hard)
+  (Glitch Cat Club; Reel DdWLJa2tjq6). Classifies prompt complexity (Easy/Moderate/Hard)
   using local Imajev-4B (:8083) and pure-Python learned weights, dispatches to local zero-cost models
   or free tiers, verifies output quality asynchronously or blocking with automated frontier fallback,
   and continuously harvests failures into training evaluations for 30-40% token cost reduction.
+metadata:
+  creator: kem_glitch
+  source_reel:
+    id: DdWLJa2tjq6
+    url: https://www.instagram.com/reel/DdWLJa2tjq6/
+    vault_note: kem_glitch/2026-10-17_self_calibrating_eval_router_and_shadow_verifier/notes.md
 ---
 
 # Eval Router — Self-Calibrating Router & Speculative Evaluation Harness

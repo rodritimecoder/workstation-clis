@@ -1,10 +1,16 @@
 ---
 name: parallel-test-lane
 description: >
-  AI blast radius containment and parallel test runner (Kem Glitch / Glitch Cat Club architecture).
+  AI blast radius containment and parallel test runner (Glitch Cat Club; Reel DbSgqTXt-3c).
   Partitions test suites into sequential-isolated vs independent parallel worker lanes across CPU cores,
   slashing 40-60 minute regression suites down to 7-8 minutes with clean non-interleaved output buffering
   and aggregated pass/fail reporting.
+metadata:
+  creator: kem_glitch
+  source_reel:
+    id: DbSgqTXt-3c
+    url: https://www.instagram.com/reel/DbSgqTXt-3c/
+    vault_note: kem_glitch/2026-10-17_regression_test_suite_parallel_lanes/notes.md
 ---
 
 # Parallel Test Lane — AI Blast Radius Containment
