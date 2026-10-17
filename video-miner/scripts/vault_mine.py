@@ -224,6 +224,8 @@ def fast_mine_video(
                     pass
 
         creator_name = creator_name or "creator"
+        if "glitch" in creator_name.lower() or "kem" in creator_name.lower():
+            creator_name = "kem_glitch"
         title_name = title_name or "video"
 
         # Resolve destination path
