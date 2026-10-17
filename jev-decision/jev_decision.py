@@ -10,6 +10,7 @@ from jev_engine import JevEngine
 
 def main():
     parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument("--host", default=None, help="OneJev host (default: $JEV_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
     parent_parser.add_argument("--port", type=int, default=8083, help="Local JEV/OneJev service port (default: 8083)")
     parent_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
@@ -54,7 +55,7 @@ def main():
     p_uat.add_argument("--image", default=None, help="Optional UI screenshot for visual UAT")
 
     args = parser.parse_args()
-    engine = JevEngine(port=args.port)
+    engine = JevEngine(host=args.host, port=args.port)
 
     if args.command == "bool":
         res = engine.decide_bool(args.context, args.question, image=args.image)

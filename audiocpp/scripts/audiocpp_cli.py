@@ -3,9 +3,14 @@ import argparse
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
+import uuid
+import wave
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -125,6 +130,235 @@ def run_audiocpp_raw(args_list: List[str]) -> subprocess.CompletedProcess:
         sys.exit(f"❌ Error: audio.cpp CLI binary not found at {CLI_BIN}")
     cmd = [str(CLI_BIN)] + args_list
     return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def cmd_transcribe_http(
+    host: str,
+    port: int,
+    scheme: str,
+    ssl_ctx: ssl.SSLContext,
+    audio_path: str,
+    model_key: str = "crisperwhisper",
+    language: str = "en",
+    mode: str = "verbatim",
+    out_file: Optional[str] = None,
+    words_out: Optional[str] = None,
+    metrics: bool = False,
+    json_mode: bool = False,
+    quiet: bool = False,
+) -> Dict[str, Any]:
+    p = Path(audio_path).resolve()
+    if not p.is_file():
+        sys.exit(f"❌ Error: Audio file not found: {audio_path}")
+
+    audio_bytes = p.read_bytes()
+    boundary = "----WebKitFormBoundary" + uuid.uuid4().hex
+    body_parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model_key}\r\n".encode("utf-8"),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{language}\r\n".encode("utf-8"),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{p.name}\"\r\nContent-Type: audio/wav\r\n\r\n".encode("utf-8"),
+        audio_bytes,
+        f"\r\n--{boundary}--\r\n".encode("utf-8")
+    ]
+    full_body = b"".join(body_parts)
+
+    endpoint = f"{scheme}://{host}:{port}/v1/audio/transcriptions"
+    req = urllib.request.Request(
+        endpoint,
+        data=full_body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    )
+
+    t0 = time.time()
+    ctx = ssl_ctx if scheme == "https" else None
+    try:
+        with urllib.request.urlopen(req, timeout=60.0, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        sys.exit(f"❌ Transcription over HTTP failed: {e}")
+
+    wall_ms = round((time.time() - t0) * 1000.0, 1)
+    text = data.get("text", "").strip()
+    timing = data.get("timing", {})
+    dur_s = round(timing.get("audio_duration_ms", 0) / 1000.0, 3)
+    if dur_s == 0.0:
+        try:
+            with wave.open(str(p), "rb") as wf:
+                dur_s = round(wf.getnframes() / float(wf.getframerate()), 3)
+        except Exception:
+            pass
+
+    rtf = round(timing.get("rtf", (wall_ms / 1000.0) / dur_s if dur_s > 0 else 0.0), 4)
+
+    if out_file:
+        Path(out_file).resolve().write_text(text, encoding="utf-8")
+
+    if json_mode:
+        payload = {
+            "task": "asr",
+            "model": model_key,
+            "text": text,
+            "duration_s": dur_s,
+            "wall_ms": wall_ms,
+            "rtf": rtf,
+            "words": [],
+            "remote": True,
+            "host": f"{scheme}://{host}:{port}"
+        }
+        print(json.dumps(payload, indent=2))
+        return payload
+
+    if metrics and not quiet:
+        x_rt = round(dur_s / (wall_ms / 1000.0), 1) if wall_ms > 0 else 0.0
+        sys.stderr.write(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)\n")
+
+    if not out_file:
+        print(text)
+
+    return {
+        "text": text,
+        "audio_duration_ms": int(dur_s * 1000),
+        "wall_ms": wall_ms,
+        "rtf": rtf
+    }
+
+
+def cmd_speak_http(
+    host: str,
+    port: int,
+    scheme: str,
+    ssl_ctx: ssl.SSLContext,
+    text: str,
+    model_key: str = "supertonic",
+    voice_id: Optional[str] = None,
+    voice_ref: Optional[str] = None,
+    out_file: str = "output.wav",
+    metrics: bool = False,
+    json_mode: bool = False,
+    quiet: bool = False,
+) -> Dict[str, Any]:
+    meta = MODEL_REGISTRY.get(model_key, {})
+    v_id = voice_id or meta.get("default_voice")
+    if not v_id and model_key == "kokoro":
+        v_id = "af_bella"
+
+    payload: Dict[str, Any] = {
+        "model": model_key,
+        "input": text,
+    }
+    if v_id:
+        payload["voice"] = v_id
+
+    out_p = Path(out_file).resolve()
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+
+    endpoint = f"{scheme}://{host}:{port}/v1/audio/speech"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(endpoint, data=data, headers={"Content-Type": "application/json"})
+
+    t0 = time.time()
+    ctx = ssl_ctx if scheme == "https" else None
+    try:
+        with urllib.request.urlopen(req, timeout=60.0, context=ctx) as resp:
+            audio_bytes = resp.read()
+    except Exception as e:
+        sys.exit(f"❌ Speech synthesis over HTTP failed: {e}")
+
+    wall_ms = round((time.time() - t0) * 1000.0, 1)
+    out_p.write_bytes(audio_bytes)
+
+    dur_s = 0.0
+    try:
+        with wave.open(str(out_p), "rb") as wf:
+            dur_s = round(wf.getnframes() / float(wf.getframerate()), 3)
+    except Exception:
+        pass
+
+    rtf = round((wall_ms / 1000.0) / dur_s, 4) if dur_s > 0 else 0.0
+
+    if json_mode:
+        res = {
+            "task": "tts",
+            "status": "ok",
+            "audio_file": str(out_p),
+            "model": model_key,
+            "voice": v_id or "default",
+            "duration_s": dur_s,
+            "wall_ms": wall_ms,
+            "rtf": rtf,
+            "remote": True,
+            "host": f"{scheme}://{host}:{port}"
+        }
+        print(json.dumps(res, indent=2))
+        return res
+
+    if metrics and not quiet:
+        x_rt = round(dur_s / (wall_ms / 1000.0), 1) if wall_ms > 0 else 0.0
+        sys.stderr.write(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)\n")
+
+    if not quiet:
+        print(f"[audiocpp] Generated {dur_s}s audio -> {out_p}")
+
+    return {
+        "text": text,
+        "audio_out": str(out_p),
+        "wall_ms": wall_ms,
+        "audio_duration_ms": int(dur_s * 1000),
+        "rtf": rtf
+    }
+
+
+def cmd_models_http(host: str, port: int, scheme: str, ssl_ctx: ssl.SSLContext, json_mode: bool = False):
+    endpoint = f"{scheme}://{host}:{port}/v1/models"
+    ctx = ssl_ctx if scheme == "https" else None
+    try:
+        req = urllib.request.Request(endpoint)
+        with urllib.request.urlopen(req, timeout=5.0, context=ctx) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        sys.exit(f"❌ Server at {scheme}://{host}:{port} unreachable: {e}")
+
+    models_list = raw.get("data", [])
+    if json_mode:
+        print(json.dumps(models_list, indent=2))
+        return
+
+    print(f"{'MODEL ID':<18} {'FAMILY':<22} {'TASK':<8} {'LOADED':<10} {'MODE'}")
+    print("-" * 75)
+    for m in models_list:
+        loaded_str = "Loaded" if m.get("loaded") else "Standby"
+        print(f"{m.get('id', ''):<18} {m.get('family', ''):<22} {m.get('task', ''):<8} {loaded_str:<10} {m.get('mode', '')}")
+
+
+def cmd_doctor_http(host: str, port: int, scheme: str, ssl_ctx: ssl.SSLContext, json_mode: bool = False):
+    endpoint = f"{scheme}://{host}:{port}/health"
+    ctx = ssl_ctx if scheme == "https" else None
+    try:
+        req = urllib.request.Request(endpoint)
+        with urllib.request.urlopen(req, timeout=3.0, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        if json_mode:
+            print(json.dumps({"status": "offline", "error": str(e), "host": f"{scheme}://{host}:{port}"}))
+            return
+        sys.exit(f"❌ Server at {scheme}://{host}:{port} unreachable: {e}")
+
+    if json_mode:
+        doc = {
+            "status": "online",
+            "remote": True,
+            "host": f"{scheme}://{host}:{port}",
+            "backend": data.get("backend", "vulkan"),
+            "models_total": data.get("models", 15),
+            "vulkan_ready": data.get("backend") == "vulkan",
+        }
+        print(json.dumps(doc, indent=2))
+        return
+
+    print(f"🔍 [audiocpp] Remote Diagnostic Health Check ({scheme}://{host}:{port})")
+    print(f"  Status:       🟢 ONLINE")
+    print(f"  Backend:      {data.get('backend', 'vulkan')}")
+    print(f"  Models Total: {data.get('models', 15)} registered models")
 
 
 def cmd_transcribe(
@@ -441,6 +675,8 @@ def main():
     parent_parser.add_argument("--json", action="store_true", help="Output machine-readable JSON format")
     parent_parser.add_argument("--metrics", action="store_true", help="Print RTF and performance metrics (to stderr in non-JSON mode)")
     parent_parser.add_argument("--quiet", "-q", action="store_true", help="Suppress console status messages")
+    parent_parser.add_argument("--host", default=None, help="audio.cpp host (default: $AUDIOCPP_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
+    parent_parser.add_argument("--port", type=int, default=8081, help="audio.cpp port (default: $AUDIOCPP_PORT or 8081)")
 
     parser = argparse.ArgumentParser(
         description="audiocpp — Unified Local Audio Engineering Hub (Vulkan / Dual-GPU)",
@@ -483,29 +719,68 @@ def main():
 
     args = parser.parse_args()
 
+    env_host = os.environ.get("AUDIOCPP_HOST")
+    target_host = args.host or env_host
+    is_remote = bool(target_host or not CLI_BIN.is_file())
+
+    if is_remote:
+        host = target_host or "127.0.0.1"
+        port = int(os.environ.get("AUDIOCPP_PORT", args.port))
+        scheme = "https" if (".ts.net" in host or os.environ.get("AUDIOCPP_SCHEME") == "https") else "http"
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+
     if args.command in ("asr", "transcribe", "stt"):
-        cmd_transcribe(
-            args.audio,
-            model_key=args.model,
-            language=args.language,
-            mode=args.mode,
-            out_file=args.out,
-            words_out=args.words_out,
-            metrics=args.metrics,
-            json_mode=args.json,
-            quiet=args.quiet,
-        )
+        if is_remote:
+            cmd_transcribe_http(
+                host, port, scheme, ssl_ctx,
+                args.audio,
+                model_key=args.model,
+                language=args.language,
+                mode=args.mode,
+                out_file=args.out,
+                words_out=args.words_out,
+                metrics=args.metrics,
+                json_mode=args.json,
+                quiet=args.quiet,
+            )
+        else:
+            cmd_transcribe(
+                args.audio,
+                model_key=args.model,
+                language=args.language,
+                mode=args.mode,
+                out_file=args.out,
+                words_out=args.words_out,
+                metrics=args.metrics,
+                json_mode=args.json,
+                quiet=args.quiet,
+            )
     elif args.command in ("tts", "speak"):
-        cmd_speak(
-            args.text,
-            model_key=args.model,
-            voice_id=args.voice_id,
-            voice_ref=args.voice_ref,
-            out_file=args.out,
-            metrics=args.metrics,
-            json_mode=args.json,
-            quiet=args.quiet,
-        )
+        if is_remote:
+            cmd_speak_http(
+                host, port, scheme, ssl_ctx,
+                args.text,
+                model_key=args.model,
+                voice_id=args.voice_id,
+                voice_ref=args.voice_ref,
+                out_file=args.out,
+                metrics=args.metrics,
+                json_mode=args.json,
+                quiet=args.quiet,
+            )
+        else:
+            cmd_speak(
+                args.text,
+                model_key=args.model,
+                voice_id=args.voice_id,
+                voice_ref=args.voice_ref,
+                out_file=args.out,
+                metrics=args.metrics,
+                json_mode=args.json,
+                quiet=args.quiet,
+            )
     elif args.command == "align":
         cmd_align(
             args.audio,
@@ -517,9 +792,15 @@ def main():
             quiet=args.quiet,
         )
     elif args.command == "models":
-        cmd_models(json_mode=args.json)
+        if is_remote:
+            cmd_models_http(host, port, scheme, ssl_ctx, json_mode=args.json)
+        else:
+            cmd_models(json_mode=args.json)
     elif args.command == "doctor":
-        cmd_doctor(json_mode=args.json)
+        if is_remote:
+            cmd_doctor_http(host, port, scheme, ssl_ctx, json_mode=args.json)
+        else:
+            cmd_doctor(json_mode=args.json)
     elif args.command == "benchmark":
         cmd_benchmark(json_mode=args.json)
     else:

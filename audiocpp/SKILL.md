@@ -102,6 +102,17 @@ audiocpp models [--json]
 audiocpp benchmark [--json]
 ```
 
+### 5. Remote Fleet & Tailscale Execution
+When running from a laptop (e.g. MacBook Air) over Tailscale HTTPS without local GPU/binaries:
+```bash
+# Set host once in environment:
+export AUDIOCPP_HOST="rodri-x870-taichi-creator.tail2975a8.ts.net"
+
+# Or pass --host directly:
+audiocpp doctor --host rodri-x870-taichi-creator.tail2975a8.ts.net
+audiocpp tts "Synthesizing from laptop over Tailscale" --model kokoro -o speech.wav
+audiocpp asr speech.wav --model crisperwhisper
+```
 
 ---
 

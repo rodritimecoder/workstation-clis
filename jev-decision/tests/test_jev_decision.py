@@ -79,6 +79,17 @@ class TestJevDecision(unittest.TestCase):
         self.assertIn("confidence", res)
         print(f"  ✓ vision decision ({res['source']}) · verified")
 
+    def test_08_remote_tailscale_decision(self):
+        remote_engine = JevEngine(host="rodri-x870-taichi-creator.tail2975a8.ts.net", port=8083)
+        if not remote_engine.is_online():
+            print("  ⚠️ Remote OneJev host offline, skipping")
+            return
+        res = remote_engine.decide_bool("Tailscale cluster state verification.", "Is cluster network operational?")
+        self.assertIn("decision", res)
+        self.assertIn("confidence", res)
+        self.assertEqual(res["source"], "onejev_1.5_4b_server")
+        print(f"  ✓ remote tailscale bool decision ({res['decision']}, conf={res['confidence']*100:.1f}%) · verified")
+
 
 if __name__ == "__main__":
     print("\n🧪 Running OneJev1.5-4B Multimodal Decision Test Suite:")

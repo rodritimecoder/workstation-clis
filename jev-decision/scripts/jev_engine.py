@@ -2,8 +2,10 @@
 import base64
 import json
 import math
+import os
 from pathlib import Path
 import re
+import ssl
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional, Union
@@ -24,19 +26,26 @@ def _concentration(probs: List[float]) -> float:
     ent = -math.fsum(p * math.log(p) for p in probs if p > 0)
     return min(1.0, max(0.0, 1 - ent / math.log(k)))
 
-
 class JevEngine:
-    def __init__(self, host: str = "127.0.0.1", port: int = 8083, timeout: float = 5.0):
-        self.host = host
+    def __init__(self, host: Optional[str] = None, port: int = 8083, timeout: float = 5.0):
+        env_host = os.environ.get("JEV_HOST") or os.environ.get("ONEJEV_HOST")
+        self.host = host or env_host or "127.0.0.1"
         self.port = port
         self.timeout = timeout
-        self.endpoint = f"http://{self.host}:{self.port}/completion"
-        self.health_url = f"http://{self.host}:{self.port}/health"
+
+        self.scheme = "https" if (".ts.net" in self.host or os.environ.get("JEV_SCHEME") == "https") else "http"
+        self.ssl_ctx = ssl.create_default_context()
+        self.ssl_ctx.check_hostname = False
+        self.ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        self.endpoint = f"{self.scheme}://{self.host}:{self.port}/completion"
+        self.health_url = f"{self.scheme}://{self.host}:{self.port}/health"
 
     def is_online(self) -> bool:
         try:
             req = urllib.request.Request(self.health_url)
-            with urllib.request.urlopen(req, timeout=0.3) as resp:
+            ctx = self.ssl_ctx if self.scheme == "https" else None
+            with urllib.request.urlopen(req, timeout=0.8, context=ctx) as resp:
                 return resp.status == 200
         except Exception:
             return False
@@ -98,7 +107,8 @@ class JevEngine:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            ctx = self.ssl_ctx if self.scheme == "https" else None
+            with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
                 if resp.status != 200:
                     return None
                 data = json.loads(resp.read().decode("utf-8"))

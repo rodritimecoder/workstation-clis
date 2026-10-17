@@ -72,4 +72,10 @@ $JEV clean-context --claims-file claims.json
 
 # 7. Frontend Visual UAT Action Selection (<500ms)
 $JEV uat --intent "Click the checkout button" --dom-file dom_elements.json --image screen.png
+
+# 8. Remote Fleet & Tailscale Execution
+# Automatic Base64 inlining for images; works from laptop over Tailscale HTTPS:
+export JEV_HOST="rodri-x870-taichi-creator.tail2975a8.ts.net"
+jev-decision bool --context "Cluster health check" --question "Is network healthy?"
+jev-decision bool --context "Inspection" --question "Is banner visible?" --image /path/to/local/screenshot.png
 ```

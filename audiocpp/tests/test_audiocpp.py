@@ -76,6 +76,35 @@ class TestAudiocppDeterministic(unittest.TestCase):
         self.assertGreater(data["models_installed"], 5)
         print(f"  ✓ doctor health check ({data['models_installed']}/{data['models_total']} models) · verified")
 
+    def test_07_remote_tailscale(self):
+        host = "rodri-x870-taichi-creator.tail2975a8.ts.net"
+        cmd_doc = ["python3", AUDIOCPP_PY, "doctor", "--host", host, "--json"]
+        res_doc = subprocess.run(cmd_doc, capture_output=True, text=True)
+        if res_doc.returncode != 0:
+            print("  ⚠️ Tailscale remote host offline or inaccessible, skipping")
+            return
+        doc_data = json.loads(res_doc.stdout)
+        self.assertEqual(doc_data["status"], "online")
+        self.assertTrue(doc_data["remote"])
+
+        remote_wav = "/tmp/test_audiocpp_remote.wav"
+        cmd_tts = ["python3", AUDIOCPP_PY, "tts", "Remote Tailscale verified.", "--host", host, "--model", "kokoro", "--out", remote_wav, "--json"]
+        res_tts = subprocess.run(cmd_tts, capture_output=True, text=True)
+        self.assertEqual(res_tts.returncode, 0, f"Remote TTS failed: {res_tts.stderr}")
+        tts_data = json.loads(res_tts.stdout)
+        self.assertEqual(tts_data["status"], "ok")
+        self.assertTrue(tts_data["remote"])
+
+        cmd_asr = ["python3", AUDIOCPP_PY, "asr", remote_wav, "--host", host, "--model", "crisperwhisper", "--json"]
+        res_asr = subprocess.run(cmd_asr, capture_output=True, text=True)
+        self.assertEqual(res_asr.returncode, 0, f"Remote ASR failed: {res_asr.stderr}")
+        asr_data = json.loads(res_asr.stdout)
+        self.assertTrue(asr_data["remote"])
+        self.assertGreater(len(asr_data["text"]), 0)
+        if Path(remote_wav).exists():
+            Path(remote_wav).unlink()
+        print(f"  ✓ remote tailscale https roundtrip (TTS + ASR: '{asr_data['text']}') · verified")
+
 
 if __name__ == "__main__":
     print("\n🧪 Running audiocpp Deterministic Test Suite:")
