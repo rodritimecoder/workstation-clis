@@ -38,14 +38,15 @@ DETAILS_URL = f"{BASE}/v1/audio/transcriptions/details"
 LIVE_URL = f"{BASE}/v1/audio/transcriptions/live"
 HEALTH_URL = f"{BASE}/health"
 
-MODEL = os.environ.get("AUDIOCPP_ASR_MODEL", "nemotron-asr")
-FAMILY = os.environ.get("AUDIOCPP_ASR_FAMILY", "nemotron_asr")
-LANGUAGE = os.environ.get("AUDIOCPP_ASR_LANGUAGE", "en-US")
+MODEL = os.environ.get("AUDIOCPP_ASR_MODEL", "crisperwhisper")
+FAMILY = os.environ.get("AUDIOCPP_ASR_FAMILY", "crisperwhisper")
+LANGUAGE = os.environ.get("AUDIOCPP_ASR_LANGUAGE", "en")
 # audiocpp_cli lives beside server.json; it needs no server and runs offline mode.
-# audio.cpp 0.9.0 layout: audiocpp_cli / server.json / model_specs/ sit together
-# in ~/audio-v0.9.0-<backend>. Newest install wins; older ones stay as fallbacks.
+# audio.cpp v0.9.2 layout: audiocpp_cli / server.json / model_specs/ sit together
 _APP_CANDIDATES = [
     os.environ.get("AUDIOCPP_APP_DIR"),
+    "/run/media/rodri/AI/audio.cpp",
+    "/run/media/rodri/AI/audio-v0.9.2-bin-ubuntu-x64-vulkan",
     "/run/media/rodri/AI/audio-v0.9.0-bin-ubuntu-x64-vulkan",
     "~/audio-v0.9.0-cpu",
     "~/Desktop/audio-v0.8.2-audio8-perf-hotfix-bin-ubuntu-x64-vulkan",
@@ -56,7 +57,7 @@ def _pick_app_dir():
     for cand in _APP_CANDIDATES:
         if cand and (Path(cand).expanduser() / "audiocpp_cli").exists():
             return Path(cand).expanduser()
-    return Path("/run/media/rodri/AI/audio-v0.9.0-bin-ubuntu-x64-vulkan").expanduser()
+    return Path("/run/media/rodri/AI/audio.cpp").expanduser()
 
 
 APP_DIR = _pick_app_dir()
@@ -65,7 +66,7 @@ AUDIO_DIR = Path(os.environ.get(
     "AUDIOCPP_GGUF_DIR", "/run/media/rodri/AI/models/audio-cpp/audio.cpp-gguf"))
 DEFAULT_MODEL_PATH = os.environ.get(
     "AUDIOCPP_ASR_MODEL_PATH",
-    str(AUDIO_DIR / "nemotron-3.5-asr-streaming-0.6b-f16.gguf"))
+    str(AUDIO_DIR / "crisperwhisper-2-large-q4_k.gguf"))
 MODEL_SPECS = Path(os.environ.get("AUDIOCPP_MODEL_SPECS", str(APP_DIR / "model_specs")))
 LAUNCHER = Path(os.environ.get(
     "AUDIOCPP_LAUNCHER", "/home/rodri/Desktop/audio.cpp-server.desktop"))
@@ -234,10 +235,14 @@ def transcribe_cli(wav: Path, ns) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         text_out = Path(tmp) / "transcript.txt"
         cli_mode = getattr(ns, "cli_mode", "streaming")
+        if ns.family == "crisperwhisper":
+            cli_mode = "offline"
         cmd = [str(cli), "--task", "asr", "--family", ns.family,
                "--model", ns.model_path, "--backend", ns.backend,
                "--mode", cli_mode, "--audio", str(wav), "--text-out", str(text_out)]
-        if ns.language:
+        if ns.family == "crisperwhisper":
+            cmd += ["--request-option", f"language={ns.language or 'en'}"]
+        elif ns.language:
             cmd += ["--language", ns.language]
         if ns.prompt:
             cmd += ["--request-option", f"prompt={ns.prompt}"]
