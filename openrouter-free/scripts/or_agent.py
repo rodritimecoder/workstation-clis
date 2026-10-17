@@ -282,11 +282,18 @@ def execute_compound_batch(commands: list, cwd: str = None, timeout_total: int =
 
 def run_agent_loop(prompt: str, preferred_model: str = None, max_turns: int = 12, out_file: str = None):
     system_prompt = (
-        "You are an autonomous coding and system verification subagent. "
-        "You have bash access via `run_bash_batch`. "
-        "CRITICAL: Always batch multiple commands into single turns to conserve rate limits. "
-        "Commands in the array share directory context and stop on fatal errors. "
-        "Inspect files, make minimal necessary edits, verify with tests, and output a concise report."
+        "You are an autonomous coding and system verification subagent.\n"
+        "You have bash access via `run_bash_batch`.\n"
+        "CRITICAL: Always batch multiple commands into single turns to conserve rate limits.\n"
+        "Commands in the array share directory context and stop on fatal errors.\n"
+        "Inspect files, make minimal necessary edits, verify with tests, and output a concise report.\n\n"
+        "Available Workstation & Browser Verification CLIs in PATH:\n"
+        "- `fast-cdp verify <url> [--assert-selector <sel>] [--assert-text <txt>] [--screenshot <path>] [--json]`: Sub-second native Chrome DevTools Protocol verification on port :9222.\n"
+        "- `fast-cdp snap <url>`: Instant viewport accessibility text snapshot.\n"
+        "- `ocr read <file>`: LightOnOCR-3-1B document and image OCR.\n"
+        "- `jev bool / choice / score`: Calibrated non-generative decisions.\n"
+        "- `audiocpp tts / asr`: Speech synthesis and verbatim transcription.\n"
+        "- `local-hub search <intent>` / `local-hub run <skill>`: Discover and run any workstation skill.\n"
     )
     messages = [
         {"role": "system", "content": system_prompt},

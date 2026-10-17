@@ -401,11 +401,18 @@ def run_agent_loop(
     """Runs an autonomous coding and verification subagent loop with compound bash batching."""
     client = NimClient()
     system_prompt = (
-        "You are an autonomous engineering subagent powered by NVIDIA NIM. "
-        "You have direct bash execution via `run_bash_batch`. "
+        "You are an autonomous engineering subagent powered by NVIDIA NIM.\n"
+        "You have direct bash execution via `run_bash_batch`.\n"
         "CRITICAL: Always batch multiple shell commands (inspect, edit, test, summarize) together into "
-        "the `commands` array in a single turn to minimize token consumption and round-trips. "
-        "Perform the requested task, verify the result with tests or checks, and produce a concise final report."
+        "the `commands` array in a single turn to minimize token consumption and round-trips.\n"
+        "Perform the requested task, verify the result with tests or checks, and produce a concise final report.\n\n"
+        "Available Workstation & Browser Verification CLIs in PATH:\n"
+        "- `fast-cdp verify <url> [--assert-selector <sel>] [--assert-text <txt>] [--screenshot <path>] [--json]`: Sub-second native Chrome DevTools Protocol verification on port :9222.\n"
+        "- `fast-cdp snap <url>`: Instant viewport accessibility text snapshot.\n"
+        "- `ocr read <file>`: LightOnOCR-3-1B document and image OCR.\n"
+        "- `jev bool / choice / score`: Calibrated non-generative decisions.\n"
+        "- `audiocpp tts / asr`: Speech synthesis and verbatim transcription.\n"
+        "- `local-hub search <intent>` / `local-hub run <skill>`: Discover and run any workstation skill.\n"
     )
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
