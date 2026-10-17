@@ -334,8 +334,8 @@ def cmd_status(as_json: bool = False):
         {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper (<32GB VRAM)"},
         {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU Flagship Coder (:8080)"},
         {"port": 8081, "name": "audio.cpp Nemotron ASR & TTS", "role": "Streaming speech-to-text / TTS"},
-        {"port": 8082, "name": "bge-small 384d Embeddings", "role": "Local vector search"},
-        {"port": 8083, "name": "Imajev-4B Decision Gating", "role": "Calibrated multimodal decisions"},
+        {"port": 8082, "name": "EmbeddingGemma-2 768d Embeddings", "role": "Multimodal text & image vector search"},
+        {"port": 8083, "name": "OneJev1.5-4B Decision Gating", "role": "Premier calibrated multimodal decisions"},
         {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection"},
         {"port": 8085, "name": "LightOnOCR Flagship Document OCR", "role": "#1 document and slide OCR"},
         {"port": 8088, "name": "DeskForge Visual GUI Grounding", "role": "Computer-use visual coordinates"},
@@ -404,8 +404,8 @@ def main():
     p_ocr = sub.add_parser("ocr", help="Local vision OCR for slides, PDFs, and images on :8085")
     p_ocr.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to ocr engine")
 
-    # 3. Native Local Decision (:8083 Imajev-4B / :8090 JPT-4B)
-    p_decide = sub.add_parser("decide", help="Calibrated probability decisions via Imajev-4B on :8083")
+    # 3. Native Local Decision (:8083 OneJev1.5-4B / :8090 JPT-4B)
+    p_decide = sub.add_parser("decide", help="Premier calibrated decisions via OneJev1.5-4B on :8083")
     p_decide.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to decide engine")
 
     # Also alias 'jev' to 'decide'

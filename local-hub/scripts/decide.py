@@ -35,13 +35,12 @@ JEV_DIR = pathlib.Path(os.environ.get("JEV_DIR", "/home/rodri/build/jev-env"))
 DEFAULT_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 ENGINE_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 
-# ---- Imajev-4B decision backend -------------------------------------------
-# Served by the stock upstream llama.cpp build on IMAJEV_PORT (sh/imajev-4b.sh).
-# Imajev has no /v1/systemone endpoint: the readout is client-side. We present
-# the options as letters, prefill the assistant turn with "Answer:" so the next
-# token IS the choice, read the letter logits off completion_probabilities,
-# divide by the calibration temperature, then softmax. The temperature is not
-# stored in the GGUF - it comes from calibration.json in the model dir.
+# ---- OneJev1.5-4B / Imajev-4B decision backend -------------------------------
+# Served by the stock upstream llama.cpp build on IMAJEV_PORT (sh/onejev-4b.sh or sh/imajev-4b.sh).
+# OneJev1.5-4B is the premier vision + decision model for calibrated routing.
+# The readout is client-side. We present the options as letters, prefill the
+# assistant turn with "Answer:" so the next token IS the choice, read the letter
+# logits off completion_probabilities, divide by calibration temperature, then softmax.
 IMAJEV_PORT = int(os.environ.get("IMAJEV_PORT", "8083"))
 IMAJEV_BASE = f"http://127.0.0.1:{IMAJEV_PORT}"
 IMAJEV_TEMPERATURE = float(os.environ.get("IMAJEV_TEMPERATURE", "1.3051569717552742"))
@@ -165,9 +164,11 @@ def _logaddexp(a, b):
 def ensure_imajev(port=IMAJEV_PORT, timeout=10):
     if _health(f"{IMAJEV_BASE}/health"):
         return
-    launcher = pathlib.Path("/run/media/rodri/AI/sh/imajev-4b.sh")
+    launcher = pathlib.Path("/run/media/rodri/AI/sh/onejev-4b.sh")
     if not launcher.exists():
-        raise SystemExit(f"imajev launcher missing: {launcher}")
+        launcher = pathlib.Path("/run/media/rodri/AI/sh/imajev-4b.sh")
+    if not launcher.exists():
+        raise SystemExit(f"decision launcher missing: {launcher}")
     subprocess.Popen([str(launcher)], stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True)
     deadline = time.time() + timeout
@@ -175,7 +176,7 @@ def ensure_imajev(port=IMAJEV_PORT, timeout=10):
         if _health(f"{IMAJEV_BASE}/health"):
             return
         time.sleep(1.0)
-    raise SystemExit(f"imajev-4b did not come up on :{port} - start sh/imajev-4b.sh")
+    raise SystemExit(f"decision server did not come up on :{port} - start sh/onejev-4b.sh")
 
 
 def _letters_for(opts, typ):
@@ -252,7 +253,7 @@ def ask_imajev(state, question, opts, typ, port=IMAJEV_PORT, timeout=180):
         return {"type": "score", "probabilities": probs,
                 "score": sum(float(k) * probs[k] for k in levels)}
     best = max(probs, key=probs.get)
-    conf = round(1.0 - ent / math.log(len(probs)), 4) if len(probs) > 1 else 1.0
+    conf = round(_concentration(list(probs.values())), 4)
     return {"type": "choice", "answer": best, "probabilities": probs,
             "confidence": conf}
 
@@ -401,7 +402,7 @@ def _run_one(model, state, question, opts, typ, a):
     """Dispatch one model -> flattened {answer, p, confidence}. Shared by the
     primary run and by --cross-check so both go through identical code."""
     port = a.port
-    if model == "imajev":
+    if model in ("onejev", "imajev"):
         ensure_imajev(IMAJEV_PORT, a.timeout)
         port = IMAJEV_PORT if a.port is None else a.port
         raw = ask_imajev(state, question, opts, typ, port=port, timeout=a.timeout)
@@ -428,10 +429,11 @@ def main():
     ap.add_argument("--state", help="same as the first positional")
     ap.add_argument("--question", help="same as the second positional")
     ap.add_argument("--options", help="same as the third positional")
-    ap.add_argument("--model", default=os.environ.get("JEV_CLI_MODEL", "imajev"),
-                    choices=["imajev", "jev", "jpt"],
-                    help="imajev=4B vision+text on :8083 (default), "
-                         "jev=Jev-Style-2B on :8085, jpt=JPT-4B System One on :8084")
+    ap.add_argument("--model", default=os.environ.get("JEV_CLI_MODEL", "onejev"),
+                    choices=["onejev", "imajev", "jev", "jpt"],
+                    help="onejev=OneJev1.5-4B premier vision+decision on :8083 (default), "
+                         "imajev=Imajev-4B alias on :8083, "
+                         "jev=Jev-Style-2B on :8085, jpt=JPT-4B System One on :8090")
     ap.add_argument("--state-file", help="read the state from a file")
     ap.add_argument("--type", default="auto", choices=["auto", "choice", "score", "noul"])
     ap.add_argument("--port", type=int, default=None,
@@ -498,12 +500,12 @@ def main():
         q["criteria"] = opts
 
     if a.port is None:
-        a.port = {"imajev": IMAJEV_PORT, "jev": JEVSTYLE_PORT}.get(a.model, DEFAULT_PORT)
+        a.port = {"onejev": IMAJEV_PORT, "imajev": IMAJEV_PORT, "jev": JEVSTYLE_PORT}.get(a.model, DEFAULT_PORT)
 
     if a.model == "jpt":
         ensure_jpt(a.port, a.timeout)
         ans = ask_jpt(a.port, state, question, opts, typ)
-    elif a.model == "imajev":
+    elif a.model in ("onejev", "imajev"):
         ensure_imajev(a.port, a.timeout)
         ans = ask_imajev(state, question, opts, typ, port=a.port, timeout=a.timeout)
     elif a.model == "jev":
