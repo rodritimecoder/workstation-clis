@@ -136,7 +136,16 @@ def run_audiocpp_raw(args_list: List[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def cmd_transcribe(audio_path: str, model_key: str = "nemotron", out_file: Optional[str] = None, metrics: bool = False, quiet: bool = False):
+def cmd_transcribe(
+    audio_path: str,
+    model_key: str = "crisperwhisper",
+    language: str = "en",
+    mode: str = "verbatim",
+    out_file: Optional[str] = None,
+    words_out: Optional[str] = None,
+    metrics: bool = False,
+    quiet: bool = False,
+):
     meta = MODEL_REGISTRY.get(model_key)
     if not meta or meta["task"] != "asr":
         sys.exit(f"❌ Error: Model '{model_key}' is not a registered ASR model.")
@@ -152,6 +161,14 @@ def cmd_transcribe(audio_path: str, model_key: str = "nemotron", out_file: Optio
         "--audio", str(Path(audio_path).resolve()),
         "--metrics",
     ]
+
+    if meta["family"] == "crisperwhisper":
+        args.extend(["--request-option", f"language={language}"])
+        if mode != "verbatim":
+            args.extend(["--request-option", f"transcription_mode={mode}"])
+        if words_out:
+            args.extend(["--words-out", str(Path(words_out).resolve())])
+
     res = run_audiocpp_raw(args)
     if res.returncode != 0:
         sys.exit(f"❌ Transcription failed:\n{res.stderr.strip()}")
@@ -357,7 +374,10 @@ def main():
     # 1. transcribe / asr
     p_asr = sub.add_parser("transcribe", aliases=["asr"], help="Transcribe speech audio to text")
     p_asr.add_argument("audio", help="Path to input audio file (.wav)")
-    p_asr.add_argument("--model", "-m", default="nemotron", help="ASR model slug (nemotron, crisperwhisper)")
+    p_asr.add_argument("--model", "-m", default="crisperwhisper", help="ASR model slug (crisperwhisper [default], nemotron, nemotron-f16)")
+    p_asr.add_argument("--language", "-l", default="en", help="Language code (default: en)")
+    p_asr.add_argument("--mode", choices=["verbatim", "intended"], default="verbatim", help="Transcription mode (verbatim [default] or intended)")
+    p_asr.add_argument("--words-out", help="Save word timestamps to JSON file")
     p_asr.add_argument("--out", "-o", help="Save transcript to text/markdown file")
     p_asr.add_argument("--metrics", action="store_true", help="Print RTF and performance metrics")
 
@@ -390,7 +410,15 @@ def main():
     args = parser.parse_args()
 
     if args.command in ("transcribe", "asr"):
-        cmd_transcribe(args.audio, model_key=args.model, out_file=args.out, metrics=args.metrics)
+        cmd_transcribe(
+            args.audio,
+            model_key=args.model,
+            language=args.language,
+            mode=args.mode,
+            out_file=args.out,
+            words_out=args.words_out,
+            metrics=args.metrics,
+        )
     elif args.command in ("speak", "tts"):
         cmd_speak(args.text, model_key=args.model, voice_id=args.voice_id, voice_ref=args.voice_ref, out_file=args.out, metrics=args.metrics)
     elif args.command == "align":

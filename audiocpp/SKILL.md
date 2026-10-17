@@ -36,11 +36,17 @@ The canonical executable is located at `~/.local/bin/audiocpp` (symlinked from `
 
 ### 1. Speech-to-Text (ASR)
 ```bash
-# Ultra-fast transcription with Nemotron (67x real-time)
-audiocpp transcribe recording.wav
+# Premier default transcription with CrisperWhisper 2.0 (8.5x real-time, verbatim accuracy)
+audiocpp transcribe lecture.wav --out transcript.txt --metrics
 
-# Exact verbatim transcription with CrisperWhisper (8.5x real-time)
-audiocpp transcribe lecture.wav --model crisperwhisper --out transcript.txt --metrics
+# Save millisecond word-level timestamps directly from CrisperWhisper
+audiocpp transcribe speech.wav --words-out words.json
+
+# Intended speech mode (normalizes filler words and stutters)
+audiocpp transcribe speech.wav --mode intended
+
+# Ultra-fast transcription with Nemotron (67x real-time streaming)
+audiocpp transcribe recording.wav --model nemotron
 ```
 
 ### 2. Text-to-Speech (TTS)
