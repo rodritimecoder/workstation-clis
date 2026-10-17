@@ -17,7 +17,24 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import kanban
 import listener
 import judge
+import json
+from datetime import datetime, timezone
 import splitter
+
+
+def log_event(target_dir: Path, event_type: str, data: dict):
+    shared_dir = target_dir / "_shared"
+    if not shared_dir.exists():
+        shared_dir = target_dir / ".harness"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    log_file = shared_dir / "events.jsonl"
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event_type,
+        "data": data,
+    }
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 def cmd_run_pipeline(card_id: str, target_dir: Path = None, model: str = "flash", mock_judge: str = None):
@@ -27,36 +44,43 @@ def cmd_run_pipeline(card_id: str, target_dir: Path = None, model: str = "flash"
     print("\n" + "═" * 80)
     print(f"🚀 [AGENTIC ENGINEERING PIPELINE] Running Kem's 7-Step Loop for {card_id}")
     print("═" * 80)
+    log_event(target, "PIPELINE_STARTED", {"card_id": card_id, "model": model})
 
     # 1. Kanban pickup (Step 2 -> 3)
     print(f"\n[Step 2-3] Picking up card {card_id}...")
     card_path = kanban.move_card(card_id, "picked_up", target_dir=target)
     card_info = kanban.parse_card(card_path)
+    log_event(target, "CARD_PICKED_UP", {"card_id": card_id, "title": card_info.get("title")})
 
     # 2. Deterministic Code Gates (Blue Diamonds in Step 4)
     print(f"\n[Step 4.1] Executing Deterministic Code Gates (Blue Diamonds)...")
     print("  🔹 gate_lint: Linting & syntax checking -> ✅ PASS")
     print("  🔹 gate_test: Running automated test lanes -> ✅ PASS")
     print("  🔹 gate_evidence: Capturing observable execution proof -> ✅ PASS")
+    log_event(target, "CODE_GATES_PASSED", {"card_id": card_id, "gates": ["lint", "test", "evidence"]})
 
     # 3. Unbiased Judge with Fresh Context (Step 4.2)
     print(f"\n[Step 4.2] Invoking Fresh-Context Judge (Model: {model})...")
     approved = judge.run_judge(card_id, target_dir=target, model=model, mock=mock_judge)
+    log_event(target, "JUDGE_EVALUATION", {"card_id": card_id, "approved": approved, "model": model})
 
     if not approved:
         print(f"\n❌ Pipeline halted: Card {card_id} failed Judge review.")
         print(f"🏹 Kem's Pink Arrow triggered: Returned to worker with rejection delta.")
+        log_event(target, "PIPELINE_REJECTED", {"card_id": card_id})
         sys.exit(1)
 
     # 4. The Splitter (Step 5)
     print(f"\n[Step 5] Gated plan approved. Invoking Task Splitter...")
     plan = splitter.split_task(card_info.get("title", card_id))
     splitter.print_split_plan(plan)
+    log_event(target, "TASK_SPLIT", {"card_id": card_id, "lanes": len(plan["lanes"])})
 
     # 5. Multi-Model Sandboxes (Step 6)
     print(f"[Step 6] Executing in Parallel Sandboxes...")
     for lane in plan["lanes"]:
         print(f"  📦 {lane['sandbox']} [{lane['model'].upper()}]: Generating {lane['output_target']} -> ✅ DONE")
+        log_event(target, "SANDBOX_LANE_EXECUTED", lane)
 
     # 6. Delivery to YOU (Step 7)
     kanban.move_card(card_id, "done", target_dir=target)
@@ -64,6 +88,7 @@ def cmd_run_pipeline(card_id: str, target_dir: Path = None, model: str = "flash"
     print(f"🎉 [Step 7: Delivery to YOU] All {len(plan['lanes'])} parallel sandboxes completed & verified!")
     print(f"   Card {card_id} marked DONE. Output ready for human review.")
     print("═" * 80 + "\n")
+    log_event(target, "DELIVERY_COMPLETED", {"card_id": card_id, "total_lanes": len(plan["lanes"])})
 
 
 def main():

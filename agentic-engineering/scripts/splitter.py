@@ -11,9 +11,11 @@ import sys
 from pathlib import Path
 
 DEFAULT_TIERS = [
-    {"sandbox": "sandbox-1", "model": "opus", "role": "Deep Architecture & Complex State"},
-    {"sandbox": "sandbox-2", "model": "sonnet", "role": "Fast Component & UI Scaffolding"},
-    {"sandbox": "sandbox-3", "model": "flash", "role": "Adversarial Quality Check & Regressions"}
+    {"sandbox": "lane-1-agy", "model": "agy-subagent", "role": "Deep Architecture, AST Refactor & Orchestration"},
+    {"sandbox": "lane-2-nim-glm", "model": "glm-5.3-lite", "role": "Fast Component Scaffolding, UI & DOM Layout"},
+    {"sandbox": "lane-3-nim-deepseek", "model": "deepseek-r1", "role": "Complex Algorithmic Reasoning & Graph Physics"},
+    {"sandbox": "lane-4-gemini", "model": "gemini-2.5-flash", "role": "API Schema Integration, Notes & Data Synthesis"},
+    {"sandbox": "lane-5-openrouter", "model": "openrouter-free", "role": "Adversarial Test Lanes & Boundary Regressions"}
 ]
 
 
