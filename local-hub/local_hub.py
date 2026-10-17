@@ -340,6 +340,7 @@ def cmd_status(as_json: bool = False):
         {"port": 8085, "name": "LightOnOCR Flagship Document OCR", "role": "#1 document and slide OCR"},
         {"port": 8088, "name": "DeskForge Visual GUI Grounding", "role": "Computer-use visual coordinates"},
         {"port": 8090, "name": "JPT-4B Decision Engine", "role": "System One gating with vision"},
+        {"port": 9222, "name": "Chromium CDP DevTools", "role": "Direct WebSocket/CDP for fast-cdp"},
         {"port": 3010, "name": "KasmVNC Browser Web Desktop", "role": "Headless browser sandbox"},
     ]
 
@@ -385,6 +386,10 @@ def main():
             exec_internal_script("decide.py", sys.argv[2:])
         elif subcmd == "asr":
             exec_internal_script("asr.py", sys.argv[2:])
+        elif subcmd in ("cdp", "browser"):
+            fast_cdp = shutil.which("fast-cdp") or "/run/media/rodri/AI/skills/hybrid-browser/scripts/fast-cdp"
+            res = subprocess.run([fast_cdp] + sys.argv[2:])
+            sys.exit(res.returncode)
 
     prog_name = Path(sys.argv[0]).name
     if prog_name not in ("local-hub", "skills-hub"):
@@ -416,7 +421,11 @@ def main():
     p_asr = sub.add_parser("asr", help="Local speech-to-text via audio.cpp Nemotron on :8081")
     p_asr.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to asr engine")
 
-    # 5. Status / Health Check
+    # 5. Native Fast-CDP Browser Automation (:9222)
+    p_cdp = sub.add_parser("cdp", aliases=["browser"], help="Direct sub-second browser verification via fast-cdp on :9222")
+    p_cdp.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to fast-cdp")
+
+    # 6. Status / Health Check
     sub.add_parser("status", help="Live health check of all local inference endpoints (:8080–:8090)")
     sub.add_parser("health", help="Alias for status")
     p_mesh = sub.add_parser("mesh", help="View status and Tailscale routing endpoints")
@@ -453,6 +462,10 @@ def main():
         exec_internal_script("decide.py", args.args)
     elif args.action == "asr":
         exec_internal_script("asr.py", args.args)
+    elif args.action in ("cdp", "browser"):
+        fast_cdp = shutil.which("fast-cdp") or "/run/media/rodri/AI/skills/hybrid-browser/scripts/fast-cdp"
+        res = subprocess.run([fast_cdp] + args.args)
+        sys.exit(res.returncode)
     elif args.action in ("status", "health"):
         cmd_status(as_json=False)
     elif args.action == "mesh":
