@@ -30,54 +30,78 @@ All 12 local GGUF models run faster than real-time (`RTF < 1.0`):
 
 ---
 
-## 🛠️ CLI Quickstart
+## 🛠️ Deterministic CLI Quickstart
 
 The canonical executable is located at `~/.local/bin/audiocpp` (symlinked from `/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py`).
 
-### 1. Speech-to-Text (ASR)
+### 1. Speech-to-Text (`asr`) — Audio in $\rightarrow$ Text out
 ```bash
-# Premier default transcription with CrisperWhisper 2.0 (8.5x real-time, verbatim accuracy)
-audiocpp transcribe lecture.wav --out transcript.txt --metrics
-
-# Save millisecond word-level timestamps directly from CrisperWhisper
-audiocpp transcribe speech.wav --words-out words.json
-
-# Intended speech mode (normalizes filler words and stutters)
-audiocpp transcribe speech.wav --mode intended
+# Clean UNIX stdout: returns only transcript text for direct piping
+audiocpp asr recording.wav > transcript.txt
 
 # Ultra-fast transcription with Nemotron (67x real-time streaming)
-audiocpp transcribe recording.wav --model nemotron
+audiocpp asr recording.wav --model nemotron
+
+# High-precision verbatim ASR with CrisperWhisper 2.0
+audiocpp asr speech.wav --model crisperwhisper
+
+# Machine-readable typed JSON output (--json)
+audiocpp asr speech.wav --json
+# Output:
+# {
+#   "task": "asr",
+#   "model": "crisperwhisper",
+#   "text": "System diagnostic complete.",
+#   "duration_s": 2.45,
+#   "wall_ms": 78.4,
+#   "rtf": 0.032,
+#   "words": [...]
+# }
 ```
 
-### 2. Text-to-Speech (TTS)
+### 2. Text-to-Speech (`tts`) — Text in $\rightarrow$ `.wav` Audio out
 ```bash
 # Ultra-fast narration with Supertonic (38x real-time)
-audiocpp speak "System diagnostic complete. All parameters nominal." --model supertonic --out notice.wav
+audiocpp tts "System diagnostic complete. All parameters nominal." --out notice.wav
 
 # Studio narration with Kokoro voice ID (17x real-time)
-audiocpp speak "Welcome back, Rodrigo." --model kokoro --voice-id af_bella --out welcome.wav
+audiocpp tts "Welcome back, Rodrigo." --model kokoro --voice af_bella --out welcome.wav
 
 # Zero-shot voice cloning with Fish Audio or Audio8
-audiocpp speak "This is a cloned voice sample." --model fish --voice-ref /run/media/rodri/AI/voice/maomao.wav --out clone.wav
+audiocpp tts "Cloned voice sample." --model fish --voice-ref /run/media/rodri/AI/voice/maomao.wav --out clone.wav
+
+# Machine-readable typed JSON output (--json)
+audiocpp tts "Processing completed." --json
+# Output:
+# {
+#   "task": "tts",
+#   "status": "ok",
+#   "audio_file": "/run/media/rodri/AI/output.wav",
+#   "model": "supertonic",
+#   "duration_s": 1.82,
+#   "wall_ms": 94.2,
+#   "rtf": 0.051
+# }
 ```
 
-### 3. Forced Alignment (Word Timestamps)
+### 3. Forced Alignment (`align`) — Word Timestamps
 ```bash
 # Extract exact millisecond sample boundaries for animation / subtitles (91x real-time)
-audiocpp align audio.wav "Exact transcript of the speech." --language en --out-json words.json --metrics
+audiocpp align audio.wav "Exact transcript of the speech." --json
 ```
 
 ### 4. Hardware Health & Benchmarks
 ```bash
 # Inspect Vulkan GPU device status and model availability
-audiocpp doctor
+audiocpp doctor [--json]
 
 # List all 12 installed models
-audiocpp models
+audiocpp models [--json]
 
 # Run the live RTF benchmark suite across all models
-audiocpp benchmark
+audiocpp benchmark [--json]
 ```
+
 
 ---
 

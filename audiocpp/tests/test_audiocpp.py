@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import subprocess
+import unittest
+
+AUDIOCPP_PY = str(Path(__file__).resolve().parent.parent / "scripts" / "audiocpp_cli.py")
+TMP_WAV = "/tmp/test_audiocpp_grounded.wav"
+
+
+class TestAudiocppDeterministic(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        p = Path(TMP_WAV)
+        if p.exists():
+            p.unlink()
+
+    def test_01_tts_synthesis(self):
+        text = "Audio intelligence test."
+        cmd = ["python3", AUDIOCPP_PY, "tts", text, "--model", "supertonic", "--out", TMP_WAV, "--quiet"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"TTS synthesis failed: {res.stderr}")
+        self.assertTrue(Path(TMP_WAV).is_file())
+        self.assertGreater(Path(TMP_WAV).stat().st_size, 44)
+        print("  ✓ tts synthesis · verified")
+
+    def test_02_tts_json_contract(self):
+        text = "Grounded TTS verification."
+        cmd = ["python3", AUDIOCPP_PY, "tts", text, "--model", "supertonic", "--out", TMP_WAV, "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"TTS --json failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data["task"], "tts")
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("duration_s", data)
+        self.assertIn("rtf", data)
+        self.assertGreater(data["duration_s"], 0)
+        print(f"  ✓ tts json contract ({data['duration_s']}s audio, RTF={data['rtf']}) · verified")
+
+    def test_03_asr_transcription(self):
+        cmd = ["python3", AUDIOCPP_PY, "asr", TMP_WAV, "--model", "nemotron", "--quiet"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"ASR transcription failed: {res.stderr}")
+        transcript = res.stdout.strip()
+        self.assertGreater(len(transcript), 0)
+        print(f"  ✓ asr text transcript ('{transcript}') · verified")
+
+    def test_04_asr_json_contract(self):
+        cmd = ["python3", AUDIOCPP_PY, "asr", TMP_WAV, "--model", "nemotron", "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"ASR --json failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data["task"], "asr")
+        self.assertEqual(data["model"], "nemotron")
+        self.assertIn("text", data)
+        self.assertIn("duration_s", data)
+        self.assertIn("rtf", data)
+        print(f"  ✓ asr json contract (RTF={data['rtf']}) · verified")
+
+    def test_05_forced_alignment(self):
+        transcript = "Grounded TTS verification."
+        cmd = ["python3", AUDIOCPP_PY, "align", TMP_WAV, transcript, "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Alignment failed: {res.stderr}")
+        words = json.loads(res.stdout)
+        self.assertIsInstance(words, list)
+        print(f"  ✓ forced alignment ({len(words)} tokens) · verified")
+
+    def test_06_doctor(self):
+        cmd = ["python3", AUDIOCPP_PY, "doctor", "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Doctor failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertTrue(data["vulkan_ready"])
+        self.assertGreater(data["models_installed"], 5)
+        print(f"  ✓ doctor health check ({data['models_installed']}/{data['models_total']} models) · verified")
+
+
+if __name__ == "__main__":
+    print("\n🧪 Running audiocpp Deterministic Test Suite:")
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestAudiocppDeterministic)
+    runner = unittest.TextTestRunner(verbosity=0)
+    result = runner.run(suite)
+    exit(0 if result.wasSuccessful() else 1)

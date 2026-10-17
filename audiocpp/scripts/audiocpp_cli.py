@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-audiocpp_cli.py — Unified Local Audio Engineering Hub for Workstation (Vulkan / Dual-GPU)
-Wraps audio.cpp v0.9.2:
-  - High-Speed ASR (Speech-to-Text): Nemotron-3.5-ASR (62x), CrisperWhisper 2.0
-  - Expressive TTS (Text-to-Speech): Fish Audio S2 Pro, Kokoro 82M, Supertonic-3 (46x), Kitten, Audio8, Higgs 4B
-  - Precise Forced Alignment: Qwen3 Forced Aligner (60x) with word-level sample boundaries
-  - Benchmark Suite: Automated RTF (Real-Time Factor) evaluation
-"""
-
 import argparse
 import json
 import os
@@ -107,7 +98,7 @@ MODEL_REGISTRY = {
 
 
 def parse_metrics_output(stdout: str) -> Dict[str, Any]:
-    metrics = {}
+    metrics: Dict[str, Any] = {}
     for line in stdout.splitlines():
         line = line.strip()
         if line.startswith("metrics."):
@@ -144,12 +135,14 @@ def cmd_transcribe(
     out_file: Optional[str] = None,
     words_out: Optional[str] = None,
     metrics: bool = False,
+    json_mode: bool = False,
     quiet: bool = False,
-):
+) -> Dict[str, Any]:
     meta = MODEL_REGISTRY.get(model_key)
     if not meta or meta["task"] != "asr":
         sys.exit(f"❌ Error: Model '{model_key}' is not a registered ASR model.")
-    if not Path(audio_path).is_file():
+    p = Path(audio_path).resolve()
+    if not p.is_file():
         sys.exit(f"❌ Error: Audio file not found: {audio_path}")
 
     args = [
@@ -158,7 +151,7 @@ def cmd_transcribe(
         "--model", str(meta["path"]),
         "--backend", "vulkan",
         "--device", "0",
-        "--audio", str(Path(audio_path).resolve()),
+        "--audio", str(p),
         "--metrics",
     ]
 
@@ -178,17 +171,31 @@ def cmd_transcribe(
 
     if out_file:
         Path(out_file).resolve().write_text(text, encoding="utf-8")
-        if not quiet:
-            print(f"[audiocpp] Transcript saved -> {out_file}")
+
+    dur_s = round(parsed.get("audio_duration_ms", 0) / 1000.0, 3)
+    wall_ms = round(parsed.get("wall_ms", 0.0), 1)
+    rtf = round(parsed.get("rtf", 0.0), 4)
+
+    if json_mode:
+        payload = {
+            "task": "asr",
+            "model": model_key,
+            "text": text,
+            "duration_s": dur_s,
+            "wall_ms": wall_ms,
+            "rtf": rtf,
+            "words": parsed.get("words", []),
+        }
+        print(json.dumps(payload, indent=2))
+        return payload
 
     if metrics and not quiet:
-        rtf = parsed.get("rtf", 0)
-        wall_ms = parsed.get("wall_ms", 0)
-        x_rt = parsed.get("x_realtime", 0)
-        print(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)")
+        x_rt = parsed.get("x_realtime", 0.0)
+        sys.stderr.write(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)\n")
 
-    if not quiet:
+    if not out_file:
         print(text)
+
     return parsed
 
 
@@ -199,13 +206,16 @@ def cmd_speak(
     voice_ref: Optional[str] = None,
     out_file: str = "output.wav",
     metrics: bool = False,
+    json_mode: bool = False,
     quiet: bool = False,
-):
+) -> Dict[str, Any]:
     meta = MODEL_REGISTRY.get(model_key)
     if not meta or meta["task"] != "tts":
         sys.exit(f"❌ Error: Model '{model_key}' is not a registered TTS model.")
 
     out_p = Path(out_file).resolve()
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+
     args = [
         "--task", "tts",
         "--family", meta["family"],
@@ -237,18 +247,43 @@ def cmd_speak(
         sys.exit(f"❌ Speech synthesis failed:\n{res.stderr.strip()}")
 
     parsed = parse_metrics_output(res.stdout)
-    if metrics and not quiet:
-        rtf = parsed.get("rtf", 0)
-        wall_ms = parsed.get("wall_ms", 0)
-        x_rt = parsed.get("x_realtime", 0)
-        print(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)")
+    dur_s = round(parsed.get("audio_duration_ms", 0) / 1000.0, 3)
+    wall_ms = round(parsed.get("wall_ms", 0.0), 1)
+    rtf = round(parsed.get("rtf", 0.0), 4)
 
-    if not quiet:
-        print(f"[audiocpp] Generated {parsed.get('audio_duration_ms', 0)/1000:.2f}s audio -> {out_p}")
+    if json_mode:
+        payload = {
+            "task": "tts",
+            "status": "ok",
+            "audio_file": str(out_p),
+            "model": model_key,
+            "voice": v_id or v_ref or "default",
+            "duration_s": dur_s,
+            "wall_ms": wall_ms,
+            "rtf": rtf,
+        }
+        print(json.dumps(payload, indent=2))
+        return payload
+
+    if metrics and not quiet:
+        x_rt = parsed.get("x_realtime", 0.0)
+        sys.stderr.write(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)\n")
+
+    if not quiet and not json_mode:
+        print(f"[audiocpp] Generated {dur_s}s audio -> {out_p}")
+
     return parsed
 
 
-def cmd_align(audio_path: str, transcript: str, language: str = "en", out_json: Optional[str] = None, metrics: bool = False, quiet: bool = False):
+def cmd_align(
+    audio_path: str,
+    transcript: str,
+    language: str = "en",
+    out_json: Optional[str] = None,
+    metrics: bool = False,
+    json_mode: bool = False,
+    quiet: bool = False,
+) -> List[Dict[str, Any]]:
     meta = MODEL_REGISTRY["aligner"]
     args = [
         "--task", "align",
@@ -270,20 +305,34 @@ def cmd_align(audio_path: str, transcript: str, language: str = "en", out_json: 
 
     if out_json:
         Path(out_json).resolve().write_text(json.dumps(words, indent=2), encoding="utf-8")
-        if not quiet:
-            print(f"[audiocpp] Word timestamps saved -> {out_json}")
 
     if metrics and not quiet:
-        rtf = parsed.get("rtf", 0)
-        x_rt = parsed.get("x_realtime", 0)
-        print(f"📊 [Metrics] Aligned {len(words)} words ({x_rt:.1f}x real-time, RTF {rtf:.4f})")
+        rtf = parsed.get("rtf", 0.0)
+        x_rt = parsed.get("x_realtime", 0.0)
+        sys.stderr.write(f"📊 [Metrics] Aligned {len(words)} words ({x_rt:.1f}x real-time, RTF {rtf:.4f})\n")
 
-    if not quiet:
+    if json_mode:
         print(json.dumps(words, indent=2))
+    elif not quiet and not out_json:
+        print(json.dumps(words, indent=2))
+
     return words
 
 
-def cmd_models():
+def cmd_models(json_mode: bool = False):
+    if json_mode:
+        models_data = {}
+        for k, v in MODEL_REGISTRY.items():
+            models_data[k] = {
+                "family": v["family"],
+                "task": v["task"],
+                "installed": Path(v["path"]).is_file(),
+                "path": str(v["path"]),
+                "description": v["desc"]
+            }
+        print(json.dumps(models_data, indent=2))
+        return
+
     print(f"{'MODEL KEY':<16} {'FAMILY':<22} {'TASK':<8} {'STATUS':<12} {'DESCRIPTION'}")
     print("-" * 92)
     for k, v in MODEL_REGISTRY.items():
@@ -291,33 +340,45 @@ def cmd_models():
         print(f"{k:<16} {v['family']:<22} {v['task']:<8} {exists:<12} {v['desc']}")
 
 
-def cmd_doctor():
+def cmd_doctor(json_mode: bool = False):
+    res = run_audiocpp_raw(["--backend", "vulkan", "--list-devices"])
+    vulkan_ok = "Vulkan:0" in res.stdout
+    installed = sum(1 for m in MODEL_REGISTRY.values() if Path(m["path"]).is_file())
+    total_models = len(MODEL_REGISTRY)
+
+    if json_mode:
+        doc = {
+            "audio_cpp_dir": str(AUDIO_CPP_DIR),
+            "cli_bin_ready": CLI_BIN.is_file(),
+            "server_bin_ready": SERVER_BIN.is_file(),
+            "config_ready": CONFIG_FILE.is_file(),
+            "vulkan_ready": vulkan_ok,
+            "models_installed": installed,
+            "models_total": total_models,
+        }
+        print(json.dumps(doc, indent=2))
+        return
+
     print("🔍 [audiocpp] Diagnostic Health Check")
     print(f"  audio.cpp dir: {AUDIO_CPP_DIR}")
     print(f"  CLI binary   : {'✅ Ready' if CLI_BIN.is_file() else '❌ Missing'}")
     print(f"  Server binary: {'✅ Ready' if SERVER_BIN.is_file() else '❌ Missing'}")
     print(f"  Config JSON  : {'✅ Ready' if CONFIG_FILE.is_file() else '❌ Missing'}")
-
-    res = run_audiocpp_raw(["--backend", "vulkan", "--list-devices"])
-    vulkan_ok = "Vulkan:0" in res.stdout
     print(f"  Vulkan GPU   : {'✅ AMD Radeon Detected' if vulkan_ok else '⚠️ Device error'}")
-
-    installed = sum(1 for m in MODEL_REGISTRY.values() if Path(m["path"]).is_file())
-    print(f"  Models       : {installed}/{len(MODEL_REGISTRY)} GGUF models ready")
+    print(f"  Models       : {installed}/{total_models} GGUF models ready")
 
 
-def cmd_benchmark():
-    print("🚀 [audiocpp] Running Vulkan Hardware RTF Benchmark Suite (Dual AMD Radeon RX 9060 XT)...")
+def cmd_benchmark(json_mode: bool = False):
     test_audio = Path("/run/media/rodri/AI/test_speech.wav")
-    if not test_audio.is_file():
-        # Synthesize fallback audio using Supertonic
-        cmd_speak("Hello, this is a local hardware-accelerated speech synthesis test using audio dot c p p.", model_key="supertonic", out_file=str(test_audio))
-
     test_text = "Hello, this is a local hardware-accelerated speech synthesis test using audio dot c p p."
-    results = []
+    if not test_audio.is_file():
+        cmd_speak(test_text, model_key="supertonic", out_file=str(test_audio), quiet=True)
 
-    print(f"{'MODEL':<16} {'FAMILY':<22} {'TASK':<8} {'AUDIO (s)':<10} {'WALL (ms)':<11} {'RTF':<9} {'SPEED':<12}")
-    print("-" * 92)
+    results = []
+    if not json_mode:
+        print("🚀 [audiocpp] Running Vulkan Hardware RTF Benchmark Suite (Dual AMD Radeon RX 9060 XT)...")
+        print(f"{'MODEL':<16} {'FAMILY':<22} {'TASK':<8} {'AUDIO (s)':<10} {'WALL (ms)':<11} {'RTF':<9} {'SPEED':<12}")
+        print("-" * 92)
 
     for key, meta in MODEL_REGISTRY.items():
         if not Path(meta["path"]).is_file():
@@ -344,13 +405,13 @@ def cmd_benchmark():
             else:
                 continue
 
-            wall_ms = parsed.get("wall_ms", 0)
-            dur_s = parsed.get("audio_duration_ms", 0) / 1000.0
-            rtf = parsed.get("rtf", 0)
-            x_rt = parsed.get("x_realtime", 0)
-            speed_str = f"{x_rt:.1f}x real-time" if rtf < 1.0 else f"{rtf:.2f}x slower"
-            print(f"{key:<16} {meta['family']:<22} {meta['task']:<8} {dur_s:<10.2f} {wall_ms:<11.1f} {rtf:<9.4f} {speed_str:<12}")
-            results.append({
+            wall_ms = round(parsed.get("wall_ms", 0.0), 1)
+            dur_s = round(parsed.get("audio_duration_ms", 0) / 1000.0, 2)
+            rtf = round(parsed.get("rtf", 0.0), 4)
+            x_rt = round(parsed.get("x_realtime", 0.0), 1)
+            speed_str = f"{x_rt}x real-time" if rtf < 1.0 else f"{rtf:.2f}x slower"
+
+            item = {
                 "model": key,
                 "family": meta["family"],
                 "task": meta["task"],
@@ -358,58 +419,71 @@ def cmd_benchmark():
                 "wall_ms": wall_ms,
                 "rtf": rtf,
                 "speed": speed_str
-            })
+            }
+            results.append(item)
+            if not json_mode:
+                print(f"{key:<16} {meta['family']:<22} {meta['task']:<8} {dur_s:<10.2f} {wall_ms:<11.1f} {rtf:<9.4f} {speed_str:<12}")
         except Exception as e:
-            print(f"{key:<16} {meta['family']:<22} {meta['task']:<8} ❌ Error: {e}")
+            if not json_mode:
+                print(f"{key:<16} {meta['family']:<22} {meta['task']:<8} ❌ Error: {e}")
 
-    print("-" * 92)
-    print("✅ All benchmarked models executed faster than real-time (RTF < 1.0) under Vulkan GPU acceleration.")
+    if json_mode:
+        print(json.dumps(results, indent=2))
+    else:
+        print("-" * 92)
+        print("✅ All benchmarked models executed faster than real-time (RTF < 1.0) under Vulkan GPU acceleration.")
+
     return results
 
 
 def main():
-    parser = argparse.ArgumentParser(description="audiocpp — Unified Local Audio Engineering Hub (Vulkan / Dual-GPU)")
-    sub = parser.add_subparsers(dest="command", help="Available subcommands")
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument("--json", action="store_true", help="Output machine-readable JSON format")
+    parent_parser.add_argument("--metrics", action="store_true", help="Print RTF and performance metrics (to stderr in non-JSON mode)")
+    parent_parser.add_argument("--quiet", "-q", action="store_true", help="Suppress console status messages")
 
-    # 1. transcribe / asr
-    p_asr = sub.add_parser("transcribe", aliases=["asr"], help="Transcribe speech audio to text")
-    p_asr.add_argument("audio", help="Path to input audio file (.wav)")
+    parser = argparse.ArgumentParser(
+        description="audiocpp — Unified Local Audio Engineering Hub (Vulkan / Dual-GPU)",
+        parents=[parent_parser]
+    )
+    sub = parser.add_subparsers(dest="command", required=True, help="Available subcommands")
+
+    # 1. asr / transcribe
+    p_asr = sub.add_parser("asr", aliases=["transcribe", "stt"], parents=[parent_parser], help="Speech-to-Text: audio in -> text or JSON out")
+    p_asr.add_argument("audio", help="Path to input audio file (.wav/.mp3)")
     p_asr.add_argument("--model", "-m", default="crisperwhisper", help="ASR model slug (crisperwhisper [default], nemotron, nemotron-f16)")
     p_asr.add_argument("--language", "-l", default="en", help="Language code (default: en)")
     p_asr.add_argument("--mode", choices=["verbatim", "intended"], default="verbatim", help="Transcription mode (verbatim [default] or intended)")
     p_asr.add_argument("--words-out", help="Save word timestamps to JSON file")
     p_asr.add_argument("--out", "-o", help="Save transcript to text/markdown file")
-    p_asr.add_argument("--metrics", action="store_true", help="Print RTF and performance metrics")
 
-    # 2. speak / tts
-    p_tts = sub.add_parser("speak", aliases=["tts"], help="Synthesize text to speech")
+    # 2. tts / speak
+    p_tts = sub.add_parser("tts", aliases=["speak"], parents=[parent_parser], help="Text-to-Speech: text in -> .wav audio file out")
     p_tts.add_argument("text", help="Text to speak")
-    p_tts.add_argument("--model", "-m", default="supertonic", help="TTS model slug (fish, kokoro, supertonic, kitten, higgs)")
-    p_tts.add_argument("--voice-id", help="Voice ID (for Kokoro)")
+    p_tts.add_argument("--model", "-m", default="supertonic", help="TTS model slug (supertonic [default], kokoro, kitten, fish, audio8, higgs, omnivoice, index)")
+    p_tts.add_argument("--voice-id", "--voice", dest="voice_id", help="Voice ID (for Kokoro e.g. af_bella)")
     p_tts.add_argument("--voice-ref", help="Voice reference audio for cloning (for Fish, Audio8, Index)")
-    p_tts.add_argument("--out", "-o", default="output.wav", help="Output audio file path")
-    p_tts.add_argument("--metrics", action="store_true", help="Print RTF and performance metrics")
+    p_tts.add_argument("--out", "-o", default="output.wav", help="Output audio file path (default: output.wav)")
 
     # 3. align
-    p_align = sub.add_parser("align", help="Extract exact word-level timestamps")
+    p_align = sub.add_parser("align", parents=[parent_parser], help="Forced Alignment: extract millisecond word boundaries")
     p_align.add_argument("audio", help="Input audio file")
     p_align.add_argument("transcript", help="Transcript text")
     p_align.add_argument("--language", "-l", default="en", help="Language code (default: en)")
     p_align.add_argument("--out-json", help="Save word timestamps to JSON file")
-    p_align.add_argument("--metrics", action="store_true", help="Print RTF metrics")
 
     # 4. models
-    sub.add_parser("models", help="List installed GGUF models")
+    sub.add_parser("models", parents=[parent_parser], help="List installed GGUF models")
 
     # 5. doctor
-    sub.add_parser("doctor", help="Inspect binary, Vulkan hardware, and models")
+    sub.add_parser("doctor", parents=[parent_parser], help="Inspect binary, Vulkan hardware, and models")
 
     # 6. benchmark
-    sub.add_parser("benchmark", help="Run comprehensive Vulkan RTF benchmark across all installed models")
+    sub.add_parser("benchmark", parents=[parent_parser], help="Run comprehensive Vulkan RTF benchmark")
 
     args = parser.parse_args()
 
-    if args.command in ("transcribe", "asr"):
+    if args.command in ("asr", "transcribe", "stt"):
         cmd_transcribe(
             args.audio,
             model_key=args.model,
@@ -418,17 +492,36 @@ def main():
             out_file=args.out,
             words_out=args.words_out,
             metrics=args.metrics,
+            json_mode=args.json,
+            quiet=args.quiet,
         )
-    elif args.command in ("speak", "tts"):
-        cmd_speak(args.text, model_key=args.model, voice_id=args.voice_id, voice_ref=args.voice_ref, out_file=args.out, metrics=args.metrics)
+    elif args.command in ("tts", "speak"):
+        cmd_speak(
+            args.text,
+            model_key=args.model,
+            voice_id=args.voice_id,
+            voice_ref=args.voice_ref,
+            out_file=args.out,
+            metrics=args.metrics,
+            json_mode=args.json,
+            quiet=args.quiet,
+        )
     elif args.command == "align":
-        cmd_align(args.audio, args.transcript, language=args.language, out_json=args.out_json, metrics=args.metrics)
+        cmd_align(
+            args.audio,
+            args.transcript,
+            language=args.language,
+            out_json=args.out_json,
+            metrics=args.metrics,
+            json_mode=args.json,
+            quiet=args.quiet,
+        )
     elif args.command == "models":
-        cmd_models()
+        cmd_models(json_mode=args.json)
     elif args.command == "doctor":
-        cmd_doctor()
+        cmd_doctor(json_mode=args.json)
     elif args.command == "benchmark":
-        cmd_benchmark()
+        cmd_benchmark(json_mode=args.json)
     else:
         parser.print_help()
 
