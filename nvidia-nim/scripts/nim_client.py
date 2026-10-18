@@ -28,6 +28,7 @@ DEFAULT_CHAT_MODEL = "z-ai/glm-5.3-flash"
 DEFAULT_EMBED_MODEL = "nvidia/llama-nemotron-embed-vl-1b-v2"
 
 POPULAR_MODELS = [
+    {"id": "deepseek-ai/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (Frontier Speed)", "type": "chat/reasoning"},
     {"id": "z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash (Fast Reasoning)", "type": "chat/reasoning"},
     {"id": "z-ai/glm-5.3", "name": "GLM 5.3 (Heavy Reasoning)", "type": "chat/reasoning"},
     {"id": "deepseek-ai/deepseek-r1", "name": "DeepSeek R1 (Reasoning)", "type": "reasoning"},
