@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
-"""
-or_agent.py — Consolidated OpenRouter Free Multimodal & Subagent Runner
-Implements the Uber OmniMCP / aifx "Code Mode" protocol:
-  - Validated OpenRouter Free slugs (Nemotron Ultra, Nemotron Lightning, Mercury Decide, Fish TTS, LFM Embed)
-  - Compound batch script execution (run_bash_batch) with directory state and error persistence
-  - Response projection & disk buffering (--out, --project) to keep LLM context lean
-  - 4-Tier failover: Local Homelab -> Free High-Reasoning -> Dynamic Free -> Gemini
-"""
-
 import argparse
 import base64
 import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -48,7 +41,6 @@ def _load_env_fallbacks():
 
 _load_env_fallbacks()
 
-# --- VALIDATED MODEL SLUGS ---
 
 CHAT_CASCADE = [
     {
@@ -132,8 +124,6 @@ TTS_CASCADE = [
     "fish-audio/s2.1-pro-free:free",
 ]
 
-# --- BATCHED TOOL SCHEMA ---
-
 TOOLS = [
     {
         "type": "function",
@@ -141,7 +131,7 @@ TOOLS = [
             "name": "run_bash_batch",
             "description": (
                 "Execute an ordered sequence of shell commands inside a single compound bash environment. "
-                "Commands share working directory (e.g. `cd dir` affects subsequent commands). "
+                "Commands share working directory context (e.g. `cd dir` affects subsequent commands). "
                 "CRITICAL: Always batch reconnaissance, file inspection, edits, and test runs together "
                 "in the `commands` array to minimize API turn consumption."
             ),
@@ -159,6 +149,45 @@ TOOLS = [
         },
     }
 ]
+
+
+def check_tcp_port(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def apply_response_projection(raw_output: str, project_fields: str = None, jq_expr: str = None) -> str:
+    if not raw_output.strip():
+        return raw_output
+
+    if jq_expr and shutil.which("jq"):
+        try:
+            p = subprocess.run(["jq", jq_expr], input=raw_output, text=True, capture_output=True)
+            if p.returncode == 0:
+                return p.stdout.strip()
+        except Exception:
+            pass
+
+    if project_fields:
+        fields = [f.strip() for f in project_fields.split(",") if f.strip()]
+        try:
+            data = json.loads(raw_output)
+            if isinstance(data, dict):
+                filtered = {k: v for k, v in data.items() if k in fields}
+                return json.dumps(filtered, indent=2)
+            elif isinstance(data, list):
+                filtered = [
+                    {k: v for k, v in item.items() if k in fields} if isinstance(item, dict) else item
+                    for item in data
+                ]
+                return json.dumps(filtered, indent=2)
+        except Exception:
+            pass
+
+    return raw_output
 
 
 def _http_post_json(url: str, payload: dict, api_key: str, timeout: int = 90) -> dict:
@@ -224,14 +253,30 @@ def call_llm_with_cascade(messages: list, preferred_model: str = None, enable_to
         try:
             timeout_s = 5 if target["provider"] == "homelab" else 90
             data = _http_post_json(target["url"], payload, api_key, timeout=timeout_s)
+            if "error" in data:
+                err_msg = data["error"].get("message", str(data["error"]))
+                sys.stderr.write(f"[openrouter-free] {target['model']} API Error: {err_msg[:200]}\n")
+                last_err = err_msg
+                continue
+
+            if "choices" not in data or not data["choices"]:
+                sys.stderr.write(f"[openrouter-free] {target['model']} unexpected response: {data}\n")
+                last_err = "No choices in response"
+                continue
+
             choice = data["choices"][0]["message"]
             if not choice.get("content") and choice.get("reasoning"):
                 choice["content"] = choice["reasoning"]
             return choice, target["model"]
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
-            sys.stderr.write(f"[openrouter-free] {target['model']} HTTP {e.code}: {err_body[:200]}\n")
-            last_err = f"HTTP {e.code}: {err_body[:100]}"
+            try:
+                err_json = json.loads(err_body)
+                err_msg = err_json.get("error", {}).get("message", err_body)
+            except Exception:
+                err_msg = err_body
+            sys.stderr.write(f"[openrouter-free] {target['model']} HTTP {e.code}: {err_msg[:200]}\n")
+            last_err = f"HTTP {e.code}: {err_msg[:100]}"
             if e.code in (429, 503):
                 time.sleep(2)
                 continue
@@ -243,14 +288,9 @@ def call_llm_with_cascade(messages: list, preferred_model: str = None, enable_to
 
 
 def execute_compound_batch(commands: list, cwd: str = None, timeout_total: int = 180) -> str:
-    """
-    Executes a list of commands in a single bash script.
-    Maintains environment and working directory across commands while stopping early on failure.
-    """
     if isinstance(commands, str):
         commands = [commands]
 
-    # Build compound script that prints markers and runs with set -e
     script_lines = [
         "#!/usr/bin/env bash",
         "set -eo pipefail",
@@ -340,26 +380,23 @@ def run_agent_loop(prompt: str, preferred_model: str = None, max_turns: int = 12
     return final_content or (messages[-1].get("content") if messages else "")
 
 
-
 def run_single_chat(prompt: str, preferred_model: str = None, out_file: str = None):
     messages = [{"role": "user", "content": prompt}]
     msg, used_model = call_llm_with_cascade(messages, preferred_model=preferred_model, enable_tools=False)
     content = msg.get("content", "")
-    res = {"model": used_model, "content": content}
+    res = {"status": "success", "model": used_model, "content": content}
     if out_file:
         Path(out_file).write_text(content, encoding="utf-8")
     return res
 
 
 def run_decide(query: str, options: list = None, preferred_model: str = None):
-    """Calibrated probability / discrete triage using OpenRouter decisions API or LLM cascade."""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is required for decide mode.")
 
     model = preferred_model or DECIDE_CASCADE[0]
 
-    # Native OpenRouter decisions API for inception/mercury-decide
     if "inception" in model or "decide" in model:
         try:
             if options:
@@ -374,7 +411,7 @@ def run_decide(query: str, options: list = None, preferred_model: str = None):
             else:
                 questions = {
                     "decision": {
-                        "type": "noul",
+                        "type": "bool",
                         "instructions": query,
                     }
                 }
@@ -387,17 +424,16 @@ def run_decide(query: str, options: list = None, preferred_model: str = None):
             res = _http_post_json("https://openrouter.ai/api/alpha/decisions", dec_payload, api_key, timeout=45)
             ans = res.get("answers", {}).get("decision", {})
             return {
+                "status": "success",
                 "model": res.get("model", model),
                 "verdict": ans.get("choice") or ans.get("verdict") or ans.get("decision"),
                 "probabilities": ans.get("probabilities", {}),
                 "confidence": ans.get("confidence"),
                 "raw": ans,
             }
-        except Exception as e:
-            # Fall back to next model in cascade
+        except Exception:
             pass
 
-    # Fallback to chat completions with prompt-based triage
     prompt_text = query
     if options:
         opts_formatted = "\n".join(f"- {o}" for o in options)
@@ -413,12 +449,10 @@ def run_decide(query: str, options: list = None, preferred_model: str = None):
     }
     data = _http_post_json("https://openrouter.ai/api/v1/chat/completions", payload, api_key, timeout=45)
     content = data["choices"][0]["message"].get("content", "")
-    return {"model": "nvidia/nemotron-3.5-lightning:free", "verdict": content.strip()}
-
+    return {"status": "success", "model": "nvidia/nemotron-3.5-lightning:free", "verdict": content.strip()}
 
 
 def run_batched_embeddings(inputs: list, preferred_model: str = None, out_json: str = None):
-    """Embeds an array of texts or file contents in 1 single HTTP request."""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is required for embeddings.")
@@ -450,10 +484,11 @@ def run_batched_embeddings(inputs: list, preferred_model: str = None, out_json: 
                 }
                 for idx, row in enumerate(data.get("data", []))
             ]
-            result = {"model": model, "count": len(vectors), "results": vectors}
+            result = {"status": "success", "model": model, "count": len(vectors), "results": vectors}
             if out_json:
                 Path(out_json).write_text(json.dumps(result, indent=2), encoding="utf-8")
             return {
+                "status": "success",
                 "model": model,
                 "count": len(vectors),
                 "dimensions": vectors[0]["dimensions"] if vectors else 0,
@@ -468,7 +503,6 @@ def run_batched_embeddings(inputs: list, preferred_model: str = None, out_json: 
 
 
 def run_tts(text: str, out_path: str = "output.mp3", preferred_model: str = None):
-    """Generates speech audio using free OpenRouter endpoints (fish-audio/s2.1-pro-free:free)."""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is required for TTS.")
@@ -476,7 +510,6 @@ def run_tts(text: str, out_path: str = "output.mp3", preferred_model: str = None
     models = ([preferred_model] if preferred_model else []) + [m for m in TTS_CASCADE if m != preferred_model]
     last_err = None
     for model in models:
-        # Try native audio/speech endpoint first
         try:
             req = urllib.request.Request(
                 "https://openrouter.ai/api/v1/audio/speech",
@@ -492,9 +525,8 @@ def run_tts(text: str, out_path: str = "output.mp3", preferred_model: str = None
             with urllib.request.urlopen(req, timeout=60) as resp:
                 raw_bytes = resp.read()
                 Path(out_path).write_bytes(raw_bytes)
-                return {"model": model, "status": "saved", "out_path": out_path, "bytes": len(raw_bytes)}
-        except Exception as e:
-            # Fallback to chat completions audio modality
+                return {"status": "success", "model": model, "saved_path": out_path, "bytes": len(raw_bytes)}
+        except Exception:
             try:
                 payload = {
                     "model": model,
@@ -507,7 +539,7 @@ def run_tts(text: str, out_path: str = "output.mp3", preferred_model: str = None
                 audio_b64 = msg.get("audio", {}).get("data")
                 if audio_b64:
                     Path(out_path).write_bytes(base64.b64decode(audio_b64))
-                    return {"model": model, "status": "saved", "out_path": out_path}
+                    return {"status": "success", "model": model, "saved_path": out_path, "bytes": len(audio_b64)}
             except Exception as e2:
                 sys.stderr.write(f"[openrouter-free tts] {model} error: {e2}\n")
                 last_err = e2
@@ -516,83 +548,242 @@ def run_tts(text: str, out_path: str = "output.mp3", preferred_model: str = None
 
 
 def run_multi_pipeline(chat_prompt: str = None, embed_inputs: list = None, tts_text: str = None, tts_out: str = "output.mp3", model: str = None):
-    """Sequential pipeline to prevent 429 concurrency throttling while writing artifacts cleanly to disk."""
     summary = {}
     if chat_prompt:
         try:
             summary["chat"] = run_single_chat(chat_prompt, preferred_model=model)
         except Exception as e:
-            summary["chat"] = {"error": str(e)}
+            summary["chat"] = {"status": "error", "error": str(e)}
 
     if embed_inputs:
         try:
             summary["embed"] = run_batched_embeddings(embed_inputs)
         except Exception as e:
-            summary["embed"] = {"error": str(e)}
+            summary["embed"] = {"status": "error", "error": str(e)}
 
     if tts_text:
         try:
             summary["tts"] = run_tts(tts_text, out_path=tts_out)
         except Exception as e:
-            summary["tts"] = {"error": str(e)}
+            summary["tts"] = {"status": "error", "error": str(e)}
 
     return summary
 
 
-if __name__ == "__main__":
+def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
+    or_key = os.environ.get("OPENROUTER_API_KEY", "")
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    homelab_url = os.environ.get("HOMELAB_LITELLM_URL", "")
+
+    auth_info = {}
+    auth_ok = False
+    auth_error = None
+
+    if or_key:
+        try:
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/auth/key",
+                headers={
+                    "Authorization": f"Bearer {or_key}",
+                    "HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
+                    "X-Title": "openrouter-free-doctor",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                auth_info = data.get("data", {})
+                auth_ok = True
+        except Exception as e:
+            auth_error = str(e)
+    else:
+        auth_error = "OPENROUTER_API_KEY not found in environment or .agent_keys.env"
+
+    daily_reqs = auth_info.get("free_model_daily_requests", {})
+    daily_remaining = daily_reqs.get("remaining")
+    daily_limit = daily_reqs.get("limit")
+    daily_used = daily_reqs.get("used")
+
+    local_services = {
+        "genesis_35b_8080": check_tcp_port("127.0.0.1", 8080),
+        "litellm_gateway_4000": check_tcp_port("127.0.0.1", 4000),
+        "onejev_decide_8083": check_tcp_port("127.0.0.1", 8083),
+        "fast_cdp_9222": check_tcp_port("127.0.0.1", 9222),
+    }
+
+    live_results = {}
+    if live_probe and auth_ok:
+        t0 = time.time()
+        try:
+            dec_res = run_decide("Is 2+2=4?", options=["yes", "no"])
+            live_results["mercury_decide"] = {
+                "status": "online",
+                "verdict": dec_res.get("verdict"),
+                "latency_ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:
+            live_results["mercury_decide"] = {"status": "error", "error": str(e)}
+
+    status_str = "HEALTHY" if auth_ok else "UNHEALTHY"
+
+    report = {
+        "status": status_str,
+        "credentials": {
+            "openrouter_api_key": {
+                "configured": bool(or_key),
+                "valid": auth_ok,
+                "label": auth_info.get("label"),
+                "expires_at": auth_info.get("expires_at"),
+                "error": auth_error,
+            },
+            "gemini_api_key": {
+                "configured": bool(gemini_key),
+            },
+            "homelab_litellm_url": {
+                "configured": bool(homelab_url),
+                "url": homelab_url or None,
+            },
+        },
+        "free_tier_telemetry": {
+            "daily_requests_remaining": daily_remaining,
+            "daily_requests_limit": daily_limit,
+            "daily_requests_used": daily_used,
+            "rate_limit": auth_info.get("rate_limit", {}),
+        },
+        "local_homelab_fallbacks": local_services,
+        "live_probe": live_results if live_probe else "omitted (use --live to probe)",
+    }
+
+    if as_json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"\n🩺 [openrouter-free] Diagnostic Health Check")
+        print("  " + "─" * 55)
+        if auth_ok:
+            print(f"  • OpenRouter API Key:  ✅ VALID ({auth_info.get('label')})")
+            print(f"  • Daily Free Quota:    {daily_remaining}/{daily_limit} remaining (Used: {daily_used})")
+            print(f"  • Key Expiration:      {auth_info.get('expires_at')}")
+        else:
+            print(f"  • OpenRouter API Key:  ❌ INVALID / MISSING ({auth_error})")
+
+        print(f"  • Gemini Fallback:     {'✅ Configured' if gemini_key else '⚠️  Not set (optional)'}")
+        print(f"  • Homelab Fallback:    {'✅ ' + homelab_url if homelab_url else 'ℹ️  Direct local hardware priority'}")
+
+        print("\n  🖥️  Local Inference Headroom (Homelab Priority):")
+        print(f"  • Genesis 35B (:8080):  {'✅ ONLINE' if local_services['genesis_35b_8080'] else '⚪ OFFLINE'}")
+        print(f"  • LiteLLM Gate (:4000): {'✅ ONLINE' if local_services['litellm_gateway_4000'] else '⚪ OFFLINE'}")
+        print(f"  • OneJev Decide (:8083):{'✅ ONLINE' if local_services['onejev_decide_8083'] else '⚪ OFFLINE'}")
+        print(f"  • Fast-CDP (:9222):     {'✅ ONLINE' if local_services['fast_cdp_9222'] else '⚪ OFFLINE'}")
+
+        if live_probe:
+            print("\n  ⚡ Live Inference Probes:")
+            for m_name, res in live_results.items():
+                st = res.get("status", "unknown").upper()
+                lat = f" ({res.get('latency_ms')}ms)" if "latency_ms" in res else ""
+                print(f"  • {m_name:<20} {st}{lat}")
+
+        print(f"\n  Overall Status: {'✅ OPERATIONAL' if auth_ok else '❌ ACTION REQUIRED'}\n")
+
+    return 0 if auth_ok else 1
+
+
+def main():
     parser = argparse.ArgumentParser(description="OpenRouter Free Multimodal & Subagent CLI (Uber Protocol)")
     sub = parser.add_subparsers(dest="mode", required=True)
 
-    # 1. Agent Mode
     p_agent = sub.add_parser("agent", help="Run autonomous subagent loop with compound bash batching")
     p_agent.add_argument("--prompt", required=True, help="Task instructions")
     p_agent.add_argument("--model", default=None, help="Specific model override")
     p_agent.add_argument("--max-turns", type=int, default=12, help="Maximum conversation turns")
     p_agent.add_argument("--out", default=None, help="Save final subagent report to file")
 
-    # 2. Chat Mode
     p_chat = sub.add_parser("chat", help="Single-turn completion or code review")
     p_chat.add_argument("--prompt", required=True, help="Prompt text or diff")
     p_chat.add_argument("--model", default=None, help="Specific model override")
     p_chat.add_argument("--out", default=None, help="Save output to file")
+    p_chat.add_argument("--project", default=None, help="Comma-separated fields to project")
+    p_chat.add_argument("--jq", default=None, help="JQ filter expression")
 
-    # 3. Decide Mode
     p_decide = sub.add_parser("decide", help="Calibrated decision routing (Mercury Decide)")
     p_decide.add_argument("--query", required=True, help="Question or routing prompt")
     p_decide.add_argument("--options", nargs="*", default=None, help="List of candidate options")
     p_decide.add_argument("--model", default=None, help="Specific model override")
+    p_decide.add_argument("--out", default=None, help="Save output to file")
+    p_decide.add_argument("--project", default=None, help="Comma-separated fields to project")
+    p_decide.add_argument("--jq", default=None, help="JQ filter expression")
 
-    # 4. Embed Mode
     p_embed = sub.add_parser("embed", help="Batched embeddings (LFM / Nemotron Embed)")
     p_embed.add_argument("--inputs", nargs="+", required=True, help="Texts or file paths")
     p_embed.add_argument("--model", default=None, help="Specific model override")
     p_embed.add_argument("--out-json", default=None, help="Save full embedding vectors to JSON file")
+    p_embed.add_argument("--out", default=None, help="Save output summary to file")
+    p_embed.add_argument("--project", default=None, help="Comma-separated fields to project")
+    p_embed.add_argument("--jq", default=None, help="JQ filter expression")
 
-    # 5. TTS Mode
     p_tts = sub.add_parser("tts", help="Generate speech audio (Fish Audio Free)")
     p_tts.add_argument("--text", required=True, help="Text to speak")
     p_tts.add_argument("--out", default="output.mp3", help="Output MP3 path")
     p_tts.add_argument("--model", default=None, help="Specific model override")
+    p_tts.add_argument("--project", default=None, help="Comma-separated fields to project")
+    p_tts.add_argument("--jq", default=None, help="JQ filter expression")
 
-    # 6. Multi Pipeline
     p_multi = sub.add_parser("multi", help="Execute multi-modal pipeline without concurrency lock")
     p_multi.add_argument("--chat", default=None, help="Prompt for chat")
     p_multi.add_argument("--embed", nargs="*", default=None, help="Inputs to embed")
     p_multi.add_argument("--tts", default=None, help="Text to speak")
     p_multi.add_argument("--tts-out", default="output.mp3", help="Output audio file")
     p_multi.add_argument("--model", default=None, help="Chat model override")
+    p_multi.add_argument("--out", default=None, help="Save summary output to file")
+    p_multi.add_argument("--project", default=None, help="Comma-separated fields to project")
+    p_multi.add_argument("--jq", default=None, help="JQ filter expression")
+
+    p_doc = sub.add_parser("doctor", aliases=["health"], help="Diagnostic health check of OpenRouter credentials & free tiers")
+    p_doc.add_argument("--json", action="store_true", help="Output health report as JSON")
+    p_doc.add_argument("--live", action="store_true", help="Run live inference probe to verified free endpoints")
 
     args = parser.parse_args()
 
-    if args.mode == "agent":
-        run_agent_loop(args.prompt, args.model, args.max_turns, args.out)
-    elif args.mode == "chat":
-        print(json.dumps(run_single_chat(args.prompt, args.model, args.out), indent=2))
-    elif args.mode == "decide":
-        print(json.dumps(run_decide(args.query, args.options, args.model), indent=2))
-    elif args.mode == "embed":
-        print(json.dumps(run_batched_embeddings(args.inputs, args.model, args.out_json), indent=2))
-    elif args.mode == "tts":
-        print(json.dumps(run_tts(args.text, args.out, args.model), indent=2))
-    elif args.mode == "multi":
-        print(json.dumps(run_multi_pipeline(args.chat, args.embed, args.tts, args.tts_out, args.model), indent=2))
+    try:
+        if args.mode == "agent":
+            run_agent_loop(args.prompt, args.model, args.max_turns, args.out)
+            sys.exit(0)
+        elif args.mode == "chat":
+            raw = json.dumps(run_single_chat(args.prompt, args.model, args.out), indent=2)
+            out = apply_response_projection(raw, args.project, args.jq)
+            print(out)
+            sys.exit(0)
+        elif args.mode == "decide":
+            raw = json.dumps(run_decide(args.query, args.options, args.model), indent=2)
+            out = apply_response_projection(raw, args.project, args.jq)
+            if args.out:
+                Path(args.out).write_text(out, encoding="utf-8")
+            print(out)
+            sys.exit(0)
+        elif args.mode == "embed":
+            raw = json.dumps(run_batched_embeddings(args.inputs, args.model, args.out_json), indent=2)
+            out = apply_response_projection(raw, args.project, args.jq)
+            if args.out:
+                Path(args.out).write_text(out, encoding="utf-8")
+            print(out)
+            sys.exit(0)
+        elif args.mode == "tts":
+            raw = json.dumps(run_tts(args.text, args.out, args.model), indent=2)
+            out = apply_response_projection(raw, args.project, args.jq)
+            print(out)
+            sys.exit(0)
+        elif args.mode == "multi":
+            raw = json.dumps(run_multi_pipeline(args.chat, args.embed, args.tts, args.tts_out, args.model), indent=2)
+            out = apply_response_projection(raw, args.project, args.jq)
+            if args.out:
+                Path(args.out).write_text(out, encoding="utf-8")
+            print(out)
+            sys.exit(0)
+        elif args.mode in ("doctor", "health"):
+            code = run_doctor(as_json=args.json, live_probe=args.live)
+            sys.exit(code)
+    except Exception as e:
+        sys.stderr.write(f"❌ Error: {e}\n")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

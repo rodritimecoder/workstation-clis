@@ -33,49 +33,71 @@ Use this skill to delegate self-contained coding loops, multi-command bash workf
 ## The Uber Protocol: Micro-Batching & Response Projection
 
 1. **Compound Script Batching (`run_bash_batch`)**: Subagents execute ordered arrays of shell commands inside a single compound bash environment (`set -eo pipefail`). Commands share working directory context (`cd` sticks) and halt on fatal errors.
-2. **Response Projection & Disk Buffering**: Never blast large embedding vectors or verbose subagent traces into primary LLM context. Use `--out` or `--out-json` to buffer results to disk (e.g. `/tmp/`), keeping the main conversation lean.
+2. **Response Projection & Disk Buffering**: Never blast large embedding vectors or verbose subagent traces into primary LLM context. Use `--out`, `--project <fields>`, or `--jq <expr>` to buffer results to disk (e.g. `/tmp/`), keeping the main conversation lean.
+3. **Canonical Executable**: `openrouter-free` in `~/.local/bin/openrouter-free` (symlinked from `/run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py`).
 
 ---
 
 ## CLI Usage Patterns
 
-### 1. Autonomous Coding Subagent (`agent`)
+### 1. Diagnostic Health Check & Free Tier Telemetry (`doctor`)
+Inspects live API key validity, daily free quota remaining (out of 1,000 requests), and local homelab fallback readiness:
+```bash
+# Pretty-printed health report
+openrouter-free doctor
+
+# Machine-readable JSON telemetry for automated agents
+openrouter-free doctor --json
+
+# Run live sub-second inference probe to verified free endpoints
+openrouter-free doctor --live
+```
+
+### 2. Autonomous Coding Subagent (`agent`)
 Runs a multi-turn subagent with compound command batching:
 ```bash
-python3 /run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py agent \
+openrouter-free agent \
   --prompt "Inspect src/parser.ts, fix handling of empty arrays, run tests, and summarize." \
   --model "nvidia/nemotron-3.5-lightning:free" \
   --out /tmp/subagent_report.md
 ```
 
-### 2. Single-Turn Code Review or Architecture Query (`chat`)
+### 3. Single-Turn Code Review or Architecture Query (`chat`)
 Fast, tool-free completion for diffs or second opinions:
 ```bash
-python3 /run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py chat \
+openrouter-free chat \
   --prompt "Audit this git diff for memory leaks: $(git diff)" \
-  --model "nvidia/nemotron-3-ultra-550b-a55b:free"
+  --model "nvidia/nemotron-3-ultra-550b-a55b:free" \
+  --project content
 ```
 
-### 3. Calibrated Decision Routing (`decide`)
-Discrete triage and confidence scoring via Mercury Decide:
+### 4. Calibrated Decision Routing (`decide`)
+Discrete triage and confidence scoring via Mercury Decide with optional field projection:
 ```bash
-python3 /run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py decide \
+# Full response
+openrouter-free decide \
   --query "Is this pull request safe to deploy immediately?" \
   --options "deploy_now" "needs_human_review" "block_build"
+
+# Projected verdict and confidence only
+openrouter-free decide \
+  --query "Is 100 greater than 10?" \
+  --options "yes" "no" \
+  --project verdict,confidence
 ```
 
-### 4. Batched Vector Embeddings (`embed`)
-Embeds an array of strings or file contents in 1 single HTTP request:
+### 5. Batched Vector Embeddings (`embed`)
+Embeds an array of strings or file contents in 1 single HTTP request with disk buffering:
 ```bash
-python3 /run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py embed \
+openrouter-free embed \
   --inputs "First text chunk" "Second chunk" "README.md" \
   --out-json /tmp/embeddings.json
 ```
 
-### 5. Text-to-Speech Generation (`tts`)
+### 6. Text-to-Speech Generation (`tts`)
 Generates speech audio from text using Fish Audio Free:
 ```bash
-python3 /run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py tts \
+openrouter-free tts \
   --text "Subagent verification completed successfully. All tests passing." \
   --out /tmp/status.mp3
 ```
