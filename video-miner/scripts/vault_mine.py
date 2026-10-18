@@ -275,12 +275,21 @@ def fast_mine_video(
                 "--write-auto-subs",
                 "--sub-lang", "en.*,en",
                 "--sub-format", "vtt/srt",
-                "-o", str(source_mp4),
+                "--merge-output-format", "mp4",
+                "-o", str(tmp_scratch / "source.%(ext)s"),
                 url_or_path
             ]
             res = subprocess.run(dl_cmd, capture_output=True, text=True)
             if res.returncode != 0:
                 sys.exit(f"❌ Failed to download video: {res.stderr.strip()[:300]}")
+
+            # Locate downloaded video
+            potential_videos = list(tmp_scratch.glob("source.*"))
+            source_candidates = [p for p in potential_videos if p.suffix.lower() in [".mp4", ".mkv", ".webm", ".mov"]]
+            if source_candidates:
+                source_mp4 = source_candidates[0]
+            else:
+                sys.exit(f"❌ Could not find downloaded video in {tmp_scratch}")
 
             # Look for written info.json
             for p in tmp_scratch.glob("*.info.json"):
@@ -310,7 +319,8 @@ def fast_mine_video(
 
         # Move source video to vault
         dest_video = target_dir / "source.mp4"
-        shutil.move(str(source_mp4), str(dest_video))
+        shutil.copy2(str(source_mp4), str(dest_video))
+        source_mp4.unlink(missing_ok=True)
 
         # 2. Extract Transcript (Subtitles first, fallback to audiocpp ASR)
         vtt_candidates = list(tmp_scratch.glob("*.vtt")) + list(tmp_scratch.glob("*.srt"))
