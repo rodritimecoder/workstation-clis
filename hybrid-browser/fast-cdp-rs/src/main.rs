@@ -12,12 +12,17 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 const CDP_PORT: u16 = 9222;
-const CDP_URL: &str = "http://127.0.0.1:9222";
 const PID_FILE: &str = "/tmp/fast_cdp_daemon.pid";
 
 #[derive(Parser)]
-#[command(name = "fast-cdp", about = "Ultra-fast native CDP client and verification engine")]
+#[command(name = "fast-cdp", about = "Ultra-fast native CDP client and Playwright verification engine")]
 struct Cli {
+    #[arg(short = 's', long, global = true, default_value = "default")]
+    session: String,
+
+    #[arg(long, global = true, default_value_t = 9222)]
+    port: u16,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -29,6 +34,18 @@ enum Commands {
     Uat(UatArgs),
     Snap(SnapArgs),
     Nav(NavArgs),
+
+    Open(OpenArgs),
+    Attach(AttachArgs),
+    Goto(GotoArgs),
+    Snapshot(SnapshotArgs),
+    Click(ClickArgs),
+    Fill(FillArgs),
+    Type(TypeArgs),
+    Press(PressArgs),
+    Eval(EvalArgs),
+    Screenshot(ScreenshotArgs),
+    Close(CloseArgs),
 }
 
 #[derive(Args)]
@@ -103,6 +120,96 @@ struct NavArgs {
     json: bool,
 }
 
+#[derive(Args)]
+struct OpenArgs {
+    url: Option<String>,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value_t = false)]
+    no_block_media: bool,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct AttachArgs {
+    #[arg(long)]
+    cdp: Option<String>,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct GotoArgs {
+    url: String,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct SnapshotArgs {
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ClickArgs {
+    target: String,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct FillArgs {
+    target: String,
+    text: String,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct TypeArgs {
+    target: String,
+    text: String,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct PressArgs {
+    key: String,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct EvalArgs {
+    expr: String,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ScreenshotArgs {
+    path: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct CloseArgs {
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
 #[derive(Serialize)]
 struct VerifyResult {
     ok: bool,
@@ -142,28 +249,65 @@ struct TargetInfo {
     websocket_debugger_url: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct ActiveSession {
+    target_id: String,
+    ws_url: String,
+    cdp_port: u16,
+    url: String,
+}
+
+fn session_path(name: &str) -> PathBuf {
+    PathBuf::from(format!("/tmp/fast_cdp_session_{name}.json"))
+}
+
+fn save_session(name: &str, session: &ActiveSession) -> Result<(), String> {
+    let path = session_path(name);
+    let json_str = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
+    fs::write(&path, json_str).map_err(|e| format!("Failed to write session file {}: {e}", path.display()))
+}
+
+fn load_session(name: &str) -> Result<ActiveSession, String> {
+    let path = session_path(name);
+    if !path.exists() {
+        return Err(format!("No active session '{name}'. Run 'open <url>' or 'attach' first."));
+    }
+    let data = fs::read_to_string(&path).map_err(|e| format!("Failed to read session {}: {e}", path.display()))?;
+    serde_json::from_str(&data).map_err(|e| format!("Corrupted session {}: {e}", path.display()))
+}
+
+fn remove_session(name: &str) {
+    let _ = fs::remove_file(session_path(name));
+}
+
+fn resolve_target_selector(target: &str) -> String {
+    let t = target.trim();
+    if t.starts_with('e') && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_digit()) {
+        format!("[data-fast-ref=\"{t}\"]")
+    } else if let Some(stripped) = t.strip_prefix("ref=") {
+        format!("[data-fast-ref=\"{stripped}\"]")
+    } else {
+        t.to_string()
+    }
+}
+
 struct CdpClient {
     target_id: String,
     ws: WebSocket<MaybeTlsStream<TcpStream>>,
     msg_id: u64,
+    cdp_port: u16,
+    auto_close_on_drop: bool,
 }
 
 impl CdpClient {
-    fn new(block_media: bool, timeout_ms: u64) -> Result<Self, String> {
-        let resp = ureq::put(&format!("{CDP_URL}/json/new?about:blank"))
-            .timeout(Duration::from_millis(timeout_ms))
-            .call()
-            .map_err(|e| format!("Failed to create CDP target: {e}"))?;
-
-        let info: TargetInfo = resp
-            .into_json()
-            .map_err(|e| format!("Invalid target response JSON: {e}"))?;
-
-        let ws_url = info
-            .websocket_debugger_url
-            .ok_or_else(|| "Target did not expose webSocketDebuggerUrl".to_string())?;
-
-        let (mut ws, _) = tungstenite::connect(&ws_url)
+    fn connect_ws(
+        ws_url: &str,
+        target_id: String,
+        cdp_port: u16,
+        auto_close: bool,
+        timeout_ms: u64,
+    ) -> Result<Self, String> {
+        let (mut ws, _) = tungstenite::connect(ws_url)
             .map_err(|e| format!("WebSocket handshake to {ws_url} failed: {e}"))?;
 
         let stream = match ws.get_mut() {
@@ -178,14 +322,35 @@ impl CdpClient {
             .map_err(|e| format!("Failed to set socket write timeout: {e}"))?;
 
         let mut client = Self {
-            target_id: info.id,
+            target_id,
             ws,
             msg_id: 0,
+            cdp_port,
+            auto_close_on_drop: auto_close,
         };
 
         client.call("Page.enable", json!({}))?;
         client.call("Runtime.enable", json!({}))?;
         client.call("DOM.enable", json!({}))?;
+
+        Ok(client)
+    }
+
+    fn new(block_media: bool, timeout_ms: u64) -> Result<Self, String> {
+        let resp = ureq::put(&format!("http://127.0.0.1:{CDP_PORT}/json/new?about:blank"))
+            .timeout(Duration::from_millis(timeout_ms))
+            .call()
+            .map_err(|e| format!("Failed to create CDP target: {e}"))?;
+
+        let info: TargetInfo = resp
+            .into_json()
+            .map_err(|e| format!("Invalid target response JSON: {e}"))?;
+
+        let ws_url = info
+            .websocket_debugger_url
+            .ok_or_else(|| "Target did not expose webSocketDebuggerUrl".to_string())?;
+
+        let mut client = Self::connect_ws(&ws_url, info.id, CDP_PORT, true, timeout_ms)?;
 
         if block_media {
             let _ = client.call("Network.enable", json!({}));
@@ -201,6 +366,31 @@ impl CdpClient {
         }
 
         Ok(client)
+    }
+
+    fn from_session(session: &ActiveSession, timeout_ms: u64) -> Result<Self, String> {
+        let ws_url = if let Ok(resp) = ureq::get(&format!("http://127.0.0.1:{}/json/list", session.cdp_port))
+            .timeout(Duration::from_millis(1000))
+            .call()
+        {
+            if let Ok(targets) = resp.into_json::<Vec<Value>>() {
+                targets
+                    .into_iter()
+                    .find(|t| t.get("id").and_then(Value::as_str) == Some(&session.target_id))
+                    .and_then(|t| {
+                        t.get("webSocketDebuggerUrl")
+                            .and_then(Value::as_str)
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_else(|| session.ws_url.clone())
+            } else {
+                session.ws_url.clone()
+            }
+        } else {
+            session.ws_url.clone()
+        };
+
+        Self::connect_ws(&ws_url, session.target_id.clone(), session.cdp_port, false, timeout_ms)
     }
 
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
@@ -311,14 +501,19 @@ impl CdpClient {
 impl Drop for CdpClient {
     fn drop(&mut self) {
         let _ = self.ws.close(None);
-        let _ = ureq::get(&format!("{CDP_URL}/json/close/{}", self.target_id))
+        if self.auto_close_on_drop {
+            let _ = ureq::get(&format!(
+                "http://127.0.0.1:{}/json/close/{}",
+                self.cdp_port, self.target_id
+            ))
             .timeout(Duration::from_millis(500))
             .call();
+        }
     }
 }
 
-fn is_cdp_running() -> bool {
-    ureq::get(&format!("{CDP_URL}/json/version"))
+fn is_cdp_port_running(port: u16) -> bool {
+    ureq::get(&format!("http://127.0.0.1:{port}/json/version"))
         .timeout(Duration::from_millis(400))
         .call()
         .map(|r| r.status() == 200)
@@ -376,16 +571,17 @@ fn glob_binary(dir: &Path, name: &str) -> std::io::Result<Vec<PathBuf>> {
     Ok(results)
 }
 
-fn ensure_cdp_daemon() -> Result<(), String> {
-    if is_cdp_running() {
+fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
+    if is_cdp_port_running(port) {
         return Ok(());
     }
 
     let binary = find_chromium_binary()
         .ok_or_else(|| "No headless chromium or chrome-headless-shell found".to_string())?;
 
-    let child = Command::new(binary)
-        .arg(format!("--remote-debugging-port={CDP_PORT}"))
+    let child = Command::new("setsid")
+        .arg(binary)
+        .arg(format!("--remote-debugging-port={port}"))
         .arg("--no-sandbox")
         .arg("--disable-gpu")
         .arg("--disable-software-rasterizer")
@@ -394,6 +590,7 @@ fn ensure_cdp_daemon() -> Result<(), String> {
         .arg("--disable-sync")
         .arg("--no-first-run")
         .arg("--disable-default-apps")
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -404,7 +601,7 @@ fn ensure_cdp_daemon() -> Result<(), String> {
 
     for _ in 0..40 {
         std::thread::sleep(Duration::from_millis(40));
-        if is_cdp_running() {
+        if is_cdp_port_running(port) {
             return Ok(());
         }
     }
@@ -413,19 +610,524 @@ fn ensure_cdp_daemon() -> Result<(), String> {
 }
 
 fn stop_cdp_daemon() -> bool {
+    let mut killed = false;
     if let Ok(content) = fs::read_to_string(PID_FILE) {
         if let Ok(pid) = content.trim().parse::<i32>() {
             let _ = Command::new("kill").arg("-15").arg(pid.to_string()).status();
             let _ = fs::remove_file(PID_FILE);
-            return true;
+            killed = true;
         }
     }
-    false
+    let _ = Command::new("pkill")
+        .arg("-f")
+        .arg("chrome-headless-shell.*--remote-debugging-port")
+        .status();
+    killed || !is_cdp_port_running(CDP_PORT)
+}
+
+fn run_open(
+    session_name: &str,
+    port: u16,
+    args: OpenArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    ensure_cdp_daemon_on_port(port).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let target_url = args.url.as_deref().unwrap_or("about:blank");
+    let full_url = if target_url != "about:blank"
+        && !target_url.starts_with("http://")
+        && !target_url.starts_with("https://")
+        && !target_url.starts_with("file:")
+        && !target_url.starts_with("data:")
+    {
+        format!("https://{target_url}")
+    } else {
+        target_url.to_string()
+    };
+
+    let create_endpoint = format!("http://127.0.0.1:{port}/json/new?about:blank");
+    let resp = ureq::put(&create_endpoint)
+        .timeout(Duration::from_millis(args.timeout))
+        .call()
+        .map_err(|e| format!("Failed to create CDP target at port {port}: {e}"))?;
+
+    let info: TargetInfo = resp
+        .into_json()
+        .map_err(|e| format!("Invalid target response JSON: {e}"))?;
+
+    let ws_url = info
+        .websocket_debugger_url
+        .ok_or_else(|| "Target did not expose webSocketDebuggerUrl".to_string())?;
+
+    let mut client = CdpClient::connect_ws(&ws_url, info.id.clone(), port, false, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    if !args.no_block_media {
+        let _ = client.call("Network.enable", json!({}));
+        let _ = client.call(
+            "Network.setBlockedURLs",
+            json!({
+                "urls": [
+                    "*.woff*", "*.woff2", "*.ttf", "*analytics*", "*googletagmanager*"
+                ]
+            }),
+        );
+    }
+
+    if full_url != "about:blank" {
+        let _ = client.navigate(&full_url, args.timeout);
+    }
+
+    let title = client
+        .evaluate("document.title")
+        .ok()
+        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let cur_url = client
+        .evaluate("window.location.href")
+        .ok()
+        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
+        .unwrap_or_else(|| full_url.clone());
+
+    let session = ActiveSession {
+        target_id: info.id.clone(),
+        ws_url,
+        cdp_port: port,
+        url: cur_url.clone(),
+    };
+
+    save_session(session_name, &session)?;
+
+    if args.json {
+        let res = json!({
+            "status": "opened",
+            "session": session_name,
+            "target_id": info.id,
+            "url": cur_url,
+            "title": title,
+        });
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    } else {
+        println!("Opened browser session [{session_name}]: {cur_url} - {title}");
+        println!("Ready for: snapshot, click, fill, type, press, eval, screenshot, close");
+    }
+    Ok(())
+}
+
+fn run_attach(
+    session_name: &str,
+    port: u16,
+    args: AttachArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cdp_base = args
+        .cdp
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
+    let list_endpoint = format!("{cdp_base}/json/list");
+
+    let resp = ureq::get(&list_endpoint)
+        .timeout(Duration::from_millis(2000))
+        .call()
+        .map_err(|e| format!("Failed to reach CDP list at {list_endpoint}: {e}"))?;
+
+    let targets: Vec<Value> = resp
+        .into_json()
+        .map_err(|e| format!("Invalid target list JSON: {e}"))?;
+
+    let page_target = targets
+        .into_iter()
+        .find(|t| t.get("type").and_then(Value::as_str) == Some("page"))
+        .ok_or_else(|| "No page target found on CDP endpoint".to_string())?;
+
+    let target_id = page_target
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Target missing ID".to_string())?
+        .to_string();
+
+    let ws_url = page_target
+        .get("webSocketDebuggerUrl")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Target missing webSocketDebuggerUrl".to_string())?
+        .to_string();
+
+    let cur_url = page_target
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let session = ActiveSession {
+        target_id: target_id.clone(),
+        ws_url,
+        cdp_port: port,
+        url: cur_url.clone(),
+    };
+
+    save_session(session_name, &session)?;
+
+    if args.json {
+        let res = json!({
+            "status": "attached",
+            "session": session_name,
+            "target_id": target_id,
+            "url": cur_url
+        });
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    } else {
+        println!("Attached to session [{session_name}]: {cur_url} (target: {target_id})");
+    }
+    Ok(())
+}
+
+fn run_goto(session_name: &str, args: GotoArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let target_url = if !args.url.starts_with("http://")
+        && !args.url.starts_with("https://")
+        && !args.url.starts_with("file:")
+        && !args.url.starts_with("data:")
+    {
+        format!("https://{}", args.url)
+    } else {
+        args.url.clone()
+    };
+
+    client
+        .navigate(&target_url, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let title = client
+        .evaluate("document.title")
+        .ok()
+        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let cur_url = client
+        .evaluate("window.location.href")
+        .ok()
+        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
+        .unwrap_or_else(|| target_url.clone());
+
+    let mut updated_session = session;
+    updated_session.url = cur_url.clone();
+    save_session(session_name, &updated_session)?;
+
+    if args.json {
+        let res = json!({
+            "status": "navigated",
+            "session": session_name,
+            "url": cur_url,
+            "title": title
+        });
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    } else {
+        println!("Navigated [{session_name}]: {cur_url} - {title}");
+    }
+    Ok(())
+}
+
+fn run_snapshot(
+    session_name: &str,
+    args: SnapshotArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, 5000)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let snap_script = r#"
+    (() => {
+        document.querySelectorAll('[data-fast-ref]').forEach(el => el.removeAttribute('data-fast-ref'));
+        let counter = 0;
+        const elements = [];
+        const lines = [];
+
+        const isVisible = (el) => {
+            if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+            if (el.tagName === 'BODY' || el.tagName === 'HTML') return true;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            if (el.offsetWidth === 0 && el.offsetHeight === 0 && style.position !== 'fixed' && style.position !== 'absolute') return false;
+            return true;
+        };
+
+        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+        const query = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="tab"], [role="menuitem"], [tabindex="0"], h1, h2, h3, h4, h5, h6';
+        const all = document.querySelectorAll(query);
+
+        for (const el of all) {
+            if (!isVisible(el)) continue;
+            const tag = el.tagName.toLowerCase();
+            let role = el.getAttribute('role') || tag;
+            let text = clean(el.innerText);
+            const ariaLabel = clean(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || '');
+
+            if (tag.startsWith('h') && tag.length === 2 && !isNaN(tag[1])) {
+                lines.push(`- heading "${text || ariaLabel}" [level=${tag[1]}]`);
+                continue;
+            }
+
+            counter += 1;
+            const refId = 'e' + counter;
+            el.setAttribute('data-fast-ref', refId);
+
+            let desc = ariaLabel || text;
+            if (tag === 'input') {
+                const inputType = el.getAttribute('type') || 'text';
+                if (inputType === 'checkbox' || inputType === 'radio') {
+                    role = inputType;
+                    desc = `${desc || el.name || ''} ${el.checked ? '[checked]' : '[unchecked]'}`.trim();
+                } else if (inputType === 'submit' || inputType === 'button') {
+                    role = 'button';
+                    desc = el.value || desc || 'Submit';
+                } else {
+                    role = 'textbox';
+                    const val = el.value ? ` (value: "${clean(el.value)}")` : '';
+                    desc = `${desc || el.name || 'text'}${val}`;
+                }
+            } else if (tag === 'select') {
+                role = 'combobox';
+                const selected = el.selectedOptions[0] ? clean(el.selectedOptions[0].text) : '';
+                desc = `${desc} (selected: "${selected}")`.trim();
+            } else if (tag === 'a') {
+                role = 'link';
+                if (!desc) desc = el.getAttribute('href') || 'link';
+            }
+
+            elements.push({
+                ref: refId,
+                role: role,
+                text: desc,
+                tag: tag,
+                selector: `[data-fast-ref="${refId}"]`
+            });
+
+            lines.push(`- ${role} "${desc}" [ref=${refId}]`);
+        }
+
+        return {
+            url: window.location.href,
+            title: document.title,
+            text: lines.join('\n'),
+            elements: elements
+        };
+    })()
+    "#;
+
+    let res_val = client.evaluate(snap_script)?;
+    let res_obj = res_val
+        .get("value")
+        .ok_or_else(|| "Missing snapshot evaluation value".to_string())?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(res_obj)?);
+    } else {
+        let title = res_obj.get("title").and_then(Value::as_str).unwrap_or("");
+        let url = res_obj.get("url").and_then(Value::as_str).unwrap_or("");
+        let text = res_obj.get("text").and_then(Value::as_str).unwrap_or("");
+        println!("Page: {title} ({url})\n---\n{text}");
+    }
+    Ok(())
+}
+
+fn run_click(session_name: &str, args: ClickArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let sel = resolve_target_selector(&args.target);
+    let script = format!(
+        r#"(() => {{
+            const el = document.querySelector({sel_json});
+            if (!el) throw new Error("Element not found: " + {sel_json});
+            el.scrollIntoView({{ behavior: "instant", block: "center", inline: "center" }});
+            el.focus();
+            el.click();
+            return {{
+                ok: true,
+                tag: el.tagName.toLowerCase(),
+                text: (el.innerText || el.value || el.getAttribute("aria-label") || "").trim()
+            }};
+        }})()"#,
+        sel_json = json!(sel)
+    );
+
+    let res_val = client.evaluate(&script)?;
+    let res = res_val.get("value").cloned().unwrap_or(Value::Null);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    } else {
+        println!("Clicked: {} ({sel})", args.target);
+    }
+    Ok(())
+}
+
+fn run_fill(session_name: &str, args: FillArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let sel = resolve_target_selector(&args.target);
+    let script = format!(
+        r#"(() => {{
+            const el = document.querySelector({sel_json});
+            if (!el) throw new Error("Element not found: " + {sel_json});
+            el.scrollIntoView({{ behavior: "instant", block: "center", inline: "center" }});
+            el.focus();
+            el.value = {text_json};
+            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+            return {{
+                ok: true,
+                tag: el.tagName.toLowerCase(),
+                value: el.value
+            }};
+        }})()"#,
+        sel_json = json!(sel),
+        text_json = json!(args.text)
+    );
+
+    let res_val = client.evaluate(&script)?;
+    let res = res_val.get("value").cloned().unwrap_or(Value::Null);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    } else {
+        println!("Filled: {} with \"{}\"", args.target, args.text);
+    }
+    Ok(())
+}
+
+fn run_type(session_name: &str, args: TypeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    run_fill(
+        session_name,
+        FillArgs {
+            target: args.target,
+            text: args.text,
+            timeout: args.timeout,
+            json: args.json,
+        },
+    )
+}
+
+fn run_press(session_name: &str, args: PressArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, 5000)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let (key_code, win_code) = match args.key.to_lowercase().as_str() {
+        "enter" => ("Enter", 13),
+        "tab" => ("Tab", 9),
+        "escape" | "esc" => ("Escape", 27),
+        "backspace" => ("Backspace", 8),
+        "arrowdown" | "down" => ("ArrowDown", 40),
+        "arrowup" | "up" => ("ArrowUp", 38),
+        "arrowleft" | "left" => ("ArrowLeft", 37),
+        "arrowright" | "right" => ("ArrowRight", 39),
+        "space" => ("Space", 32),
+        _ => (args.key.as_str(), 0),
+    };
+
+    let _ = client.call(
+        "Input.dispatchKeyEvent",
+        json!({
+            "type": "rawKeyDown",
+            "key": key_code,
+            "code": key_code,
+            "windowsVirtualKeyCode": win_code,
+            "nativeVirtualKeyCode": win_code,
+        }),
+    )?;
+
+    let _ = client.call(
+        "Input.dispatchKeyEvent",
+        json!({
+            "type": "keyUp",
+            "key": key_code,
+            "code": key_code,
+            "windowsVirtualKeyCode": win_code,
+            "nativeVirtualKeyCode": win_code,
+        }),
+    )?;
+
+    if args.json {
+        println!("{}", json!({"status": "pressed", "key": args.key}));
+    } else {
+        println!("Pressed: {}", args.key);
+    }
+    Ok(())
+}
+
+fn run_eval(session_name: &str, args: EvalArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, 5000)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let res_val = client.evaluate(&args.expr)?;
+    let res = res_val.get("value").cloned().unwrap_or(Value::Null);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&res)?);
+    } else if let Some(s) = res.as_str() {
+        println!("{s}");
+    } else {
+        println!("{res}");
+    }
+    Ok(())
+}
+
+fn run_screenshot(
+    session_name: &str,
+    args: ScreenshotArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let session = load_session(session_name)?;
+    let mut client = CdpClient::from_session(&session, 5000)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let path = args
+        .path
+        .unwrap_or_else(|| PathBuf::from(format!("/tmp/fast_cdp_{session_name}.png")));
+    client
+        .capture_screenshot(&path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    if args.json {
+        println!(
+            "{}",
+            json!({"status": "saved", "path": path.display().to_string()})
+        );
+    } else {
+        println!("Screenshot saved: {}", path.display());
+    }
+    Ok(())
+}
+
+fn run_close(session_name: &str, args: CloseArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if let Ok(session) = load_session(session_name) {
+        let _ = ureq::get(&format!(
+            "http://127.0.0.1:{}/json/close/{}",
+            session.cdp_port, session.target_id
+        ))
+        .timeout(Duration::from_millis(500))
+        .call();
+        remove_session(session_name);
+    }
+
+    if args.json {
+        println!("{}", json!({"status": "closed", "session": session_name}));
+    } else {
+        println!("Closed session [{session_name}]");
+    }
+    Ok(())
 }
 
 fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
-    ensure_cdp_daemon().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    ensure_cdp_daemon_on_port(CDP_PORT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     let mut client = CdpClient::new(!args.no_block_media, args.timeout)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -578,7 +1280,8 @@ fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_snap(args: SnapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    ensure_cdp_daemon().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    ensure_cdp_daemon_on_port(CDP_PORT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     let mut client = CdpClient::new(true, args.timeout)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
@@ -623,7 +1326,8 @@ fn run_snap(args: SnapArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_nav(args: NavArgs) -> Result<(), Box<dyn std::error::Error>> {
-    ensure_cdp_daemon().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    ensure_cdp_daemon_on_port(CDP_PORT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     let mut client = CdpClient::new(false, args.timeout)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
@@ -668,7 +1372,8 @@ fn run_nav(args: NavArgs) -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
-    ensure_cdp_daemon().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    ensure_cdp_daemon_on_port(CDP_PORT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     let mut client = CdpClient::new(!args.no_block_media, args.timeout)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
@@ -942,13 +1647,16 @@ fn query_imajev_decision(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let session = cli.session.as_str();
+    let port = cli.port;
+
     match cli.command {
         Commands::Daemon(d) => match d.action.as_str() {
             "start" => {
-                ensure_cdp_daemon()?;
+                ensure_cdp_daemon_on_port(port)?;
                 println!(
                     "{}",
-                    json!({"status": "running", "cdp_url": CDP_URL})
+                    json!({"status": "running", "cdp_url": format!("http://127.0.0.1:{port}")})
                 );
             }
             "stop" => {
@@ -959,12 +1667,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             "status" => {
-                let running = is_cdp_running();
+                let running = is_cdp_port_running(port);
                 println!(
                     "{}",
                     json!({
                         "status": if running { "running" } else { "stopped" },
-                        "cdp_url": CDP_URL
+                        "cdp_url": format!("http://127.0.0.1:{port}")
                     })
                 );
             }
@@ -974,6 +1682,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Uat(u) => run_uat(u)?,
         Commands::Snap(s) => run_snap(s)?,
         Commands::Nav(n) => run_nav(n)?,
+
+        Commands::Open(o) => run_open(session, port, o)?,
+        Commands::Attach(a) => run_attach(session, port, a)?,
+        Commands::Goto(g) => run_goto(session, g)?,
+        Commands::Snapshot(s) => run_snapshot(session, s)?,
+        Commands::Click(c) => run_click(session, c)?,
+        Commands::Fill(f) => run_fill(session, f)?,
+        Commands::Type(t) => run_type(session, t)?,
+        Commands::Press(p) => run_press(session, p)?,
+        Commands::Eval(e) => run_eval(session, e)?,
+        Commands::Screenshot(s) => run_screenshot(session, s)?,
+        Commands::Close(c) => run_close(session, c)?,
     }
     Ok(())
 }

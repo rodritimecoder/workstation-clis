@@ -97,51 +97,75 @@ In the REPL:
 
 ---
 
-## Ultra-Fast Deterministic CDP Verification (`fast-cdp`)
+## Ultra-Fast Native Playwright CLI & CDP Verification (`playwright-rs` / `fast-cdp`)
 
-For sub-second grounded verification in agent loops, use `fast-cdp`. It is powered by a compiled native Rust binary (`fast-cdp-rs`, located at `bin/fast-cdp`) communicating directly over Chrome DevTools Protocol (`:9222`) WebSockets and HTTP targets with zero Python/Node.js process overhead (~35ms end-to-end wall clock vs ~470ms in Python).
+`hybrid-browser` includes a compiled native Rust binary (`fast-cdp-rs`, aliased as `playwright-rs` and `fast-cdp`) communicating directly over Chrome DevTools Protocol (`:9222`) WebSockets. It replaces heavyweight Node.js Playwright CLI runs (3ms cold start vs 183ms, 3ms snapshot vs 470ms).
 
-### Engine Architecture & Latency Profile
-- **Native Rust Engine**: Direct JSON-RPC over `tungstenite` WebSocket + `ureq` HTTP target management. Cold CLI start + verification in **30–45ms**.
-- **Python Fallback Engine**: Automatic fallback to Playwright sync Python if the native binary is absent.
-- **Resource Blocklist**: Pre-emptively drops images, fonts, analytics, and tracking scripts to guarantee deterministic, bandwidth-free execution.
+### 1. Interactive Session Commands (`playwright-rs`)
 
-### Daemon Management
+For stateful interactive browser navigation, DOM inspection, and form interactions across multiple CLI calls:
+
 ```bash
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp daemon start
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp daemon status
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp daemon stop
+# Open a URL (starts background headless engine or connects to :9222)
+playwright-rs open "https://example.com"
+
+# Capture accessibility snapshot with numbered ref IDs (3ms)
+playwright-rs snapshot
+
+# Click an element by its ref ID (e.g. e1) or CSS selector
+playwright-rs click e1
+
+# Fill or type into form inputs
+playwright-rs fill e2 "search query"
+playwright-rs press Enter
+
+# Run JavaScript in the page context
+playwright-rs eval "document.title"
+
+# Capture a PNG screenshot
+playwright-rs screenshot /tmp/result.png
+
+# Cleanly close the session
+playwright-rs close
 ```
 
-### Verification Commands
+### 2. Multi-Session & Container Attachment
+
 ```bash
-# Verify selector & text presence in <100ms
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp verify "http://localhost:3000" \
+# Work in a specific named session:
+playwright-rs -s work open "https://github.com"
+playwright-rs -s work snapshot
+
+# Attach directly to the running hybrid-browser Podman container (:9222 / KasmVNC :3010):
+playwright-rs attach --cdp "http://127.0.0.1:9222"
+```
+
+### 3. One-Shot Deterministic Verification (`fast-cdp verify`)
+
+```bash
+# Verify selector & text presence in <40ms
+fast-cdp verify "http://localhost:3000" \
   --assert-selector "h1" \
   --assert-text "Dashboard" \
   --json
 
 # Click and verify dynamic state update
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp verify "http://localhost:3000" \
+fast-cdp verify "http://localhost:3000" \
   --click "#submit-btn" \
   --assert-text "Saved successfully" \
   --screenshot "/tmp/verification_proof.png"
 ```
 
-### Autonomous UAT Mode (Jev / JPT-4B Driven)
+### 4. Autonomous UAT Mode (Jev / JPT-4B Driven)
+
 Autonomous goal-directed browser actions in 200–400ms without Vision model overhead:
 ```bash
 # Hand interactive elements to JPT-4B (:8090) to decide and click the checkout button:
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp uat "http://localhost:3000" \
+fast-cdp uat "http://localhost:3000" \
   --goal "Proceed to checkout" \
   --expect-text "Checkout Successful" \
   --model jpt \
   --json
-
-# Or with local Imajev-4B (:8083):
-~/.gemini/config/skills/hybrid-browser/scripts/fast-cdp uat "http://localhost:3000" \
-  --goal "Log out of the account" \
-  --model imajev
 ```
 
 
