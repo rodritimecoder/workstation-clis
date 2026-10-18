@@ -82,6 +82,74 @@ class TestICMArchitect(unittest.TestCase):
         self.assertIn("flowchart LR", res.stdout)
         self.assertIn("Stage A", res.stdout)
 
+    def test_agentic_factory_with_memory(self):
+        ws = self.tmp_dir / "software_factory"
+        res = subprocess.run(
+            ["python3", self.cli, "init", str(ws), "--name", "Glitch Factory", "--template", "agentic-factory", "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(res.stdout)
+        self.assertEqual(data["status"], "scaffolded")
+        self.assertEqual(data["template"], "agentic-factory")
+        self.assertEqual(len(data["stages"]), 7)
+        self.assertTrue(data["with_memory"])
+
+        self.assertTrue((ws / "01_inbox" / "CONTEXT.md").is_file())
+        self.assertTrue((ws / "02_plan_split" / "CONTEXT.md").is_file())
+        self.assertTrue((ws / "03_kanban" / "todo").is_dir())
+        self.assertTrue((ws / "03_kanban" / "doing").is_dir())
+        self.assertTrue((ws / "03_kanban" / "done").is_dir())
+        self.assertTrue((ws / "03_kanban" / "rejected").is_dir())
+        self.assertTrue((ws / "04_sandboxes" / "CONTEXT.md").is_file())
+        self.assertTrue((ws / "05_gates" / "CONTEXT.md").is_file())
+        self.assertTrue((ws / "06_judge" / "CONTEXT.md").is_file())
+        self.assertTrue((ws / "07_holdouts" / "CONTEXT.md").is_file())
+
+        mem_py = ws / "_memory" / "memory.py"
+        self.assertTrue((ws / "_memory" / "graph.db").is_file())
+        self.assertTrue((ws / "_memory" / "bge_config.json").is_file())
+        self.assertTrue(mem_py.is_file())
+
+        subprocess.run(
+            ["python3", str(mem_py), "add-entity", "AuthService", "--type", "SERVICE", "--desc", "Handles JWT"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["python3", str(mem_py), "add-entity", "UserDB", "--type", "DATABASE", "--desc", "User Store"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["python3", str(mem_py), "add-relation", "AuthService", "UserDB", "--predicate", "reads_from"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        hop_res = subprocess.run(
+            ["python3", str(mem_py), "k-hop", "AuthService", "--hops", "2"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        hop_data = json.loads(hop_res.stdout)
+        self.assertTrue(len(hop_data) >= 1)
+        self.assertEqual(hop_data[0]["name"], "AuthService")
+
+        val_res = subprocess.run(
+            ["python3", self.cli, "validate", str(ws), "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        val_data = json.loads(val_res.stdout)
+        self.assertEqual(val_data["status"], "PASS")
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -32,8 +32,11 @@ The canonical executable is located at `~/.local/bin/icm-architect` (symlinked f
 
 ### 1. Scaffold a New ICM Workspace
 ```bash
-# Initialize a 4-stage pipeline workspace
-icm-architect init ./my-pipeline --name "Course Video Production" --stages plan,extract,render,publish
+# Initialize Kem Glitch 7-Step Autonomous Software Factory (Reel DehIT3lNgHC) with baked-in Graph-Memory & BGE Hybrid Search:
+icm-architect init ./my-project --template agentic-factory --name "My Autonomous System"
+
+# Initialize a custom multi-stage pipeline with dual-legged Graph-Memory:
+icm-architect init ./my-pipeline --name "Course Video Production" --stages plan,extract,render,publish --with-memory
 
 # Initialize with JSON output for automated agent tooling
 icm-architect init ./agent-workspace --stages ingest,filter,distill --json
