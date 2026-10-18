@@ -146,6 +146,73 @@ def format_words_to_transcript(words_json_path: Path) -> str:
         return ""
 
 
+def parse_vtt_to_transcript(vtt_file: Path) -> str:
+    """Parse VTT/SRT subtitle file into timestamped markdown blocks grouped by ~15-25s."""
+    try:
+        if not vtt_file.is_file():
+            return ""
+        lines = vtt_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        cues: List[tuple[int, str]] = []
+        ts_pattern = re.compile(r'(?:(\d{1,2}):)?(\d{2}):(\d{2})\.\d{3}\s+-->')
+
+        cur_start_sec: Optional[int] = None
+        cur_text_lines: List[str] = []
+
+        for line in lines:
+            line_str = line.strip()
+            if not line_str or line_str.startswith(("WEBVTT", "NOTE", "Kind:", "Language:")) or line_str.isdigit():
+                continue
+            m = ts_pattern.search(line_str)
+            if m:
+                if cur_start_sec is not None and cur_text_lines:
+                    text_block = " ".join(cur_text_lines).strip()
+                    if text_block:
+                        cues.append((cur_start_sec, text_block))
+                    cur_text_lines = []
+                hours = int(m.group(1)) if m.group(1) else 0
+                mins = int(m.group(2))
+                secs = int(m.group(3))
+                cur_start_sec = hours * 3600 + mins * 60 + secs
+            else:
+                cleaned = re.sub(r'<[^>]+>', '', line_str).strip()
+                if cleaned and (not cur_text_lines or cur_text_lines[-1] != cleaned):
+                    cur_text_lines.append(cleaned)
+
+        if cur_start_sec is not None and cur_text_lines:
+            text_block = " ".join(cur_text_lines).strip()
+            if text_block:
+                cues.append((cur_start_sec, text_block))
+
+        if not cues:
+            return ""
+
+        blocks: List[str] = []
+        cur_chunk_start: Optional[int] = None
+        cur_chunk_text: List[str] = []
+
+        for start_sec, text in cues:
+            if cur_chunk_start is None:
+                cur_chunk_start = start_sec
+            cur_chunk_text.append(text)
+
+            elapsed = start_sec - cur_chunk_start
+            if (elapsed >= 15.0 and text.endswith((".", "!", "?"))) or elapsed >= 30.0:
+                m = int(cur_chunk_start // 60)
+                s = int(cur_chunk_start % 60)
+                blocks.append(f"**[{m:02d}:{s:02d}]** " + " ".join(cur_chunk_text))
+                cur_chunk_start = None
+                cur_chunk_text = []
+
+        if cur_chunk_text and cur_chunk_start is not None:
+            m = int(cur_chunk_start // 60)
+            s = int(cur_chunk_start % 60)
+            blocks.append(f"**[{m:02d}:{s:02d}]** " + " ".join(cur_chunk_text))
+
+        return "\n\n".join(blocks) + "\n"
+    except Exception:
+        return ""
+
+
 def update_vault_index(vault_dir: Path) -> None:
     index_file = vault_dir / "INDEX.md"
     rows: List[str] = []
@@ -199,11 +266,15 @@ def fast_mine_video(
             if not creator_name:
                 creator_name = "local"
         else:
-            # yt-dlp single-pass download + metadata capture
+            # yt-dlp single-pass download + metadata capture + subtitles
             dl_cmd = [
                 "yt-dlp",
                 "--no-playlist",
                 "--write-info-json",
+                "--write-subs",
+                "--write-auto-subs",
+                "--sub-lang", "en.*,en",
+                "--sub-format", "vtt/srt",
                 "-o", str(source_mp4),
                 url_or_path
             ]
@@ -241,41 +312,49 @@ def fast_mine_video(
         dest_video = target_dir / "source.mp4"
         shutil.move(str(source_mp4), str(dest_video))
 
-        # 2. Extract Audio & Run Premier STT
-        print(f"🎙️ [2/4] Extracting audio and transcribing with {asr_model}...")
-        audio_wav = tmp_scratch / "audio.wav"
-        ffmpeg_audio = [
-            "ffmpeg", "-y", "-i", str(dest_video),
-            "-vn", "-ar", "16000", "-ac", "1",
-            "-c:a", "pcm_s16le", str(audio_wav)
-        ]
-        subprocess.run(ffmpeg_audio, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-
-        words_json = tmp_scratch / "words.json"
-        transcript_raw = tmp_scratch / "transcript.txt"
-
-        audiocpp_cli = shutil.which("audiocpp") or "/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"
-        cmd_asr = [
-            "audiocpp" if shutil.which("audiocpp") else sys.executable,
-        ]
-        if not shutil.which("audiocpp"):
-            cmd_asr.append(audiocpp_cli)
-        cmd_asr.extend([
-            "transcribe", str(audio_wav),
-            "--model", asr_model,
-            "--words-out", str(words_json),
-            "--out", str(transcript_raw),
-            "--metrics"
-        ])
-
-        asr_res = subprocess.run(cmd_asr, capture_output=True, text=True)
+        # 2. Extract Transcript (Subtitles first, fallback to audiocpp ASR)
+        vtt_candidates = list(tmp_scratch.glob("*.vtt")) + list(tmp_scratch.glob("*.srt"))
         transcript_text = ""
-        if words_json.is_file():
-            formatted = format_words_to_transcript(words_json)
-            if formatted:
-                transcript_text = f"# Audio Transcript: {title_name}\n\n" + formatted
-        if not transcript_text and transcript_raw.is_file():
-            transcript_text = f"# Audio Transcript: {title_name}\n\n" + transcript_raw.read_text(encoding="utf-8")
+        if vtt_candidates:
+            print(f"📄 Found downloaded subtitles ({vtt_candidates[0].name}), parsing directly...")
+            vtt_parsed = parse_vtt_to_transcript(vtt_candidates[0])
+            if vtt_parsed:
+                transcript_text = f"# Audio Transcript: {title_name}\n\n" + vtt_parsed
+
+        if not transcript_text:
+            print(f"🎙️ [2/4] Extracting audio and transcribing with {asr_model}...")
+            audio_wav = tmp_scratch / "audio.wav"
+            ffmpeg_audio = [
+                "ffmpeg", "-y", "-i", str(dest_video),
+                "-vn", "-ar", "16000", "-ac", "1",
+                "-c:a", "pcm_s16le", str(audio_wav)
+            ]
+            subprocess.run(ffmpeg_audio, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            words_json = tmp_scratch / "words.json"
+            transcript_raw = tmp_scratch / "transcript.txt"
+
+            audiocpp_cli = shutil.which("audiocpp") or "/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"
+            cmd_asr = [
+                "audiocpp" if shutil.which("audiocpp") else sys.executable,
+            ]
+            if not shutil.which("audiocpp"):
+                cmd_asr.append(audiocpp_cli)
+            cmd_asr.extend([
+                "transcribe", str(audio_wav),
+                "--model", asr_model,
+                "--words-out", str(words_json),
+                "--out", str(transcript_raw),
+                "--metrics"
+            ])
+
+            asr_res = subprocess.run(cmd_asr, capture_output=True, text=True)
+            if words_json.is_file():
+                formatted = format_words_to_transcript(words_json)
+                if formatted:
+                    transcript_text = f"# Audio Transcript: {title_name}\n\n" + formatted
+            if not transcript_text and transcript_raw.is_file():
+                transcript_text = f"# Audio Transcript: {title_name}\n\n" + transcript_raw.read_text(encoding="utf-8")
 
         (target_dir / "transcript.md").write_text(transcript_text, encoding="utf-8")
 
