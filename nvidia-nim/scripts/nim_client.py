@@ -164,7 +164,7 @@ class NimClient:
     def is_configured(self) -> bool:
         return bool(self.rotator.keys and any(k.startswith("nvapi-") for k in self.rotator.keys))
 
-    def _post_json(self, endpoint: str, payload: dict, timeout: int = 120, max_retries: int = 3) -> urllib.request.urlopen:
+    def _post_json(self, endpoint: str, payload: dict, timeout: int = 360, max_retries: int = 3) -> urllib.request.urlopen:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         last_err = None
 
@@ -209,6 +209,7 @@ class NimClient:
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
         include_reasoning: bool = False,
+        timeout: int = 360,
     ) -> Union[Dict, Generator[Dict[str, Any], None, None]]:
         payload = {
             "model": model,
@@ -221,7 +222,7 @@ class NimClient:
         if tools:
             payload["tools"] = tools
 
-        resp = self._post_json("chat/completions", payload, timeout=120)
+        resp = self._post_json("chat/completions", payload, timeout=timeout)
         generator = self._stream_generator(resp)
 
         if stream:
