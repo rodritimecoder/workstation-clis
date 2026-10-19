@@ -24,11 +24,11 @@ models:
       - "qwen-35b"
       - "luffy"
     cmd: >
-      ${server_vulkan_rocm}
-      -m /run/media/rodri/AI/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_0_ROCMFP4.gguf
+      ${server_upstream_vulkan}
+      -m /run/media/rodri/AI/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_K_M.gguf
       --jinja
       --chat-template-file ${qwen_template}
-      --chat-template-kwargs '{"enable_thinking":false}'
+      --chat-template-kwargs '{"enable_thinking":true}'
       --no-mmap
       -np 1
       --host 127.0.0.1
@@ -44,11 +44,11 @@ models:
       -fa on
       -t 4
       -tb 4
-      --temp 0.7
-      --top-p 0.8
-      --top-k 20
+      --temp 0.8
+      --top-p 0.95
+      --top-k 40
       --min-p 0.0
-      --presence-penalty 1.5
+      --presence-penalty 0.0
     proxy: "http://127.0.0.1:${PORT}"
     ttl: 0
 
