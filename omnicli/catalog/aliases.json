@@ -10,7 +10,13 @@
       "discover a tool",
       "tool contract",
       "what can this machine do",
-      "list my tools"
+      "list my tools",
+      "llm",
+      "use the local llm",
+      "llm client",
+      "local llm completion",
+      "use the local llm to write code",
+      "local llm code generation"
     ],
     "tags": [
       "gateway",
@@ -31,7 +37,10 @@
       "local endpoints",
       "speech to text locally",
       "read text from an image locally",
-      "what is running locally"
+      "what is running locally",
+      "local llm",
+      "local llm chat completion",
+      "run the local llm"
     ],
     "tags": [
       "inference",
@@ -196,7 +205,13 @@
       "classmates answers",
       "tutor answers",
       "course forum",
-      "ask a question"
+      "ask a question",
+      "read a discussion post",
+      "reply to a thread",
+      "class forum",
+      "cloud ide workspace",
+      "course lessons",
+      "code review thread"
     ],
     "tags": [
       "education",
@@ -265,7 +280,8 @@
       "protected file",
       "stop the agent from deleting my notes",
       "make this command safe before running it",
-      "lock down a file"
+      "lock down a file",
+      "protect the state file from being edited"
     ],
     "tags": [
       "safety",
@@ -496,9 +512,16 @@
       "parallel agents",
       "branch per agent",
       "swarm",
-      "merge conflict",
+      "merge conflicts",
       "quality gate",
-      "spawn parallel coders"
+      "spawn parallel coders",
+      "isolated worktree",
+      "reserve a file range",
+      "claims json",
+      "integrate the branches that passed",
+      "several agents one repo",
+      "same repo different branches",
+      "no two agents write the same file"
     ],
     "tags": [
       "git",
@@ -540,5 +563,139 @@
       "meta"
     ],
     "index_body": false
+  },
+  "eval-pipeline": {
+    "aliases": [
+      "step risk tagging",
+      "deterministic or probabilistic step",
+      "propagation risk between steps",
+      "artifact ledger",
+      "halt downstream failures",
+      "assertion gate between steps",
+      "step ledger",
+      "which steps are risky"
+    ],
+    "tags": [
+      "risk",
+      "pipeline",
+      "provenance"
+    ]
+  },
+  "eval-router": {
+    "aliases": [
+      "route a request",
+      "route this prompt",
+      "prompt complexity tier",
+      "prompt difficulty classification",
+      "shadow verification",
+      "failure harvesting",
+      "harvest failures",
+      "dispatch to a cheaper tier",
+      "self calibrating router",
+      "which model should handle this prompt",
+      "route this prompt to the right model"
+    ],
+    "tags": [
+      "routing",
+      "cost",
+      "tier"
+    ]
+  },
+  "glitch-orchestra": {
+    "aliases": [
+      "terminal conductor",
+      "supervise concurrent sessions",
+      "dispatch to child sessions",
+      "track session progress",
+      "completion chime",
+      "claude code mods",
+      "multi session supervision"
+    ],
+    "tags": [
+      "orchestration",
+      "sessions"
+    ]
+  },
+  "parallel-test-lane": {
+    "aliases": [
+      "split the test suite",
+      "run tests in parallel workers",
+      "sequential versus parallel lanes",
+      "faster regression suite",
+      "partition tests by isolation",
+      "test lane partition",
+      "aggregate pass fail report",
+      "cpu cores for the test suite"
+    ],
+    "tags": [
+      "testing",
+      "parallelism",
+      "cpu"
+    ]
+  },
+  "projects-harness": {
+    "aliases": [
+      "three way message routing",
+      "throttled task queue",
+      "memory load cap",
+      "rule clash detection",
+      "dual provenance envelope",
+      "cap on concurrent tasks",
+      "coordinator brief versus owner instructions",
+      "atomic fact update"
+    ],
+    "tags": [
+      "coordination",
+      "multi-agent",
+      "queue"
+    ]
+  },
+  "semantic-cache": {
+    "aliases": [
+      "cache repeated questions",
+      "answer a repeat question instantly",
+      "cosine similarity cache",
+      "skip the expensive retrieval",
+      "instant repeat answer",
+      "verified response cache"
+    ],
+    "tags": [
+      "caching",
+      "rag",
+      "similarity"
+    ]
+  },
+  "state-compactor": {
+    "aliases": [
+      "context rot",
+      "compact long context",
+      "context poisoning",
+      "gated code retrieval",
+      "cgate query projection",
+      "subagent handoff context",
+      "agent state json",
+      "compaction harness"
+    ],
+    "tags": [
+      "context",
+      "compaction",
+      "ledger"
+    ]
+  },
+  "swarm-contract": {
+    "aliases": [
+      "swarm contract",
+      "token budget ceiling",
+      "stop the workers before they overspend",
+      "scorecard schema for workers",
+      "hit list goals",
+      "hard spending limit",
+      "immutable budget cap"
+    ],
+    "tags": [
+      "budget",
+      "governance",
+      "workers"
+    ]
   }
 }
