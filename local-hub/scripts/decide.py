@@ -35,9 +35,9 @@ JEV_DIR = pathlib.Path(os.environ.get("JEV_DIR", "/home/rodri/build/jev-env"))
 DEFAULT_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 ENGINE_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 
-# ---- OneJev1.5-4B / Imajev-4B decision backend -------------------------------
-# Served by the stock upstream llama.cpp build on IMAJEV_PORT (sh/onejev-4b.sh or sh/imajev-4b.sh).
-# OneJev1.5-4B is the premier vision + decision model for calibrated routing.
+# ---- vllm-d3-mini / OneJev1.5-4B / Imajev-4B decision backend -------------------------------
+# Served by the ROCmFPX llama.cpp build on IMAJEV_PORT (sh/vllm-d3-mini.sh, sh/onejev-4b.sh, or sh/imajev-4b.sh).
+# vllm-d3-mini is the premier vision + decision model for calibrated routing.
 # The readout is client-side. We present the options as letters, prefill the
 # assistant turn with "Answer:" so the next token IS the choice, read the letter
 # logits off completion_probabilities, divide by calibration temperature, then softmax.
@@ -164,7 +164,10 @@ def _logaddexp(a, b):
 def ensure_imajev(port=IMAJEV_PORT, timeout=10):
     if _health(f"{IMAJEV_BASE}/health"):
         return
-    launcher = pathlib.Path("/run/media/rodri/AI/sh/onejev-4b.sh")
+    # Try vllm-d3-mini first (premier decision model), then fall back to OneJev/Imajev
+    launcher = pathlib.Path("/run/media/rodri/AI/sh/vllm-d3-mini.sh")
+    if not launcher.exists():
+        launcher = pathlib.Path("/run/media/rodri/AI/sh/onejev-4b.sh")
     if not launcher.exists():
         launcher = pathlib.Path("/run/media/rodri/AI/sh/imajev-4b.sh")
     if not launcher.exists():
@@ -176,7 +179,7 @@ def ensure_imajev(port=IMAJEV_PORT, timeout=10):
         if _health(f"{IMAJEV_BASE}/health"):
             return
         time.sleep(1.0)
-    raise SystemExit(f"decision server did not come up on :{port} - start sh/onejev-4b.sh")
+    raise SystemExit(f"decision server did not come up on :{port} - start sh/vllm-d3-mini.sh")
 
 
 def _letters_for(opts, typ):
