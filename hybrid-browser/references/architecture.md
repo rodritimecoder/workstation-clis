@@ -1,6 +1,7 @@
 # Architecture & Ports
 
-Two tiers, split by whether the DOM can yield a selector.
+Two tiers for *acting*, split by whether the DOM can yield a selector, plus a
+separate deterministic path for *verifying*.
 
 1. **Tier 1 (Fast Path)** — native Playwright accessibility and DOM locators
    over Chrome DevTools Protocol (`:9222`). Instant, token-free clicks.
@@ -8,6 +9,10 @@ Two tiers, split by whether the DOM can yield a selector.
    dashboards, Shadow DOM, or obfuscated React widgets, take a screenshot,
    resize via Lanczos even-dimensions, and query the local
    `DeskForge-Qwen3.5-4B` (`:8088`) for normalized `(x, y)` coordinates.
+
+A third path, `fast-cdp verify`, asserts a selector and text in a single
+shot and is not a session at all — it neither needs the vision fallback nor
+leaves a browser running.
 
 | Component | Endpoint | Purpose |
 | :--- | :--- | :--- |

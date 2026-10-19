@@ -7,16 +7,15 @@ description: >
   Delivers high-throughput context de-duplication (41k decisions in 7 mins for $0.37) and frontend acceptance testing.
 metadata:
   creator: kem_glitch
-  source_reels:
-    - id: DdjOqRYNZZi
-      url: https://www.instagram.com/reel/DdjOqRYNZZi/
-      vault_note: kem_glitch/2026-10-16_jev_decision_engine/notes.md
-    - id: DeMSV1jNYem
-      url: https://www.instagram.com/reel/DeMSV1jNYem/
-      vault_note: kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md
-    - id: DeKBMCQNRXU
-      url: https://www.instagram.com/reel/DeKBMCQNRXU/
-      vault_note: kem_glitch/2026-10-16_fast_frontend_uat_with_jev/notes.md
+  source_reels_1_id: DdjOqRYNZZi
+  source_reels_1_url: https://www.instagram.com/reel/DdjOqRYNZZi/
+  source_reels_1_vault_note: kem_glitch/2026-10-16_jev_decision_engine/notes.md
+  source_reels_2_id: DeMSV1jNYem
+  source_reels_2_url: https://www.instagram.com/reel/DeMSV1jNYem/
+  source_reels_2_vault_note: kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md
+  source_reels_3_id: DeKBMCQNRXU
+  source_reels_3_url: https://www.instagram.com/reel/DeKBMCQNRXU/
+  source_reels_3_vault_note: kem_glitch/2026-10-16_fast_frontend_uat_with_jev/notes.md
 ---
 
 # JEV Decision Engine (`jev-decision`)

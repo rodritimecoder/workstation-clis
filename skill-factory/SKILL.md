@@ -6,139 +6,84 @@ description: >
   should be written from an existing CLI.
 ---
 
-# `skill-factory` — retrofit skills into the `tailscale-ops` shape
+# Skill Factory (`skill-factory`)
 
-Your collection has 27 skills. Every one of them spends more tokens than it
-needs to, and half of their section headings are prose an agent never acts
-on. This skill fixes that without deleting anything.
+A retrofit factory for this workstation's skills. It compresses a skill to the
+house shape — a concept model plus one CLI quickstart — moves its prose into
+`references/`, curates the alias set that makes it findable, and proves the
+result still routes before publishing. Nothing is deleted: the narrative is
+moved, and `omnicli` still indexes it.
 
-## The model
+---
 
-`tailscale-ops` already has the target shape. Read it once before you
-write anything:
+## 🏛️ The Retrofit Loop
 
-```bash
-cat /run/media/rodri/AI/skills/tailscale-ops/SKILL.md
-```
+| Stage | Question it answers | What it produces |
+| :--- | :--- | :--- |
+| **Interview** | What does this skill actually do? | The command list, and the prose to move |
+| **Draft** | What is the minimum that still works? | `SKILL.md` in the house shape, plus `aliases.json` |
+| **Gate** | Does it obey the rules? | A pass or fail, with the offending line |
+| **Prove** | Can it still be found? | Three phrasings returning it at #1, and no regression |
+| **Publish** | Can it go live safely? | The skill, its aliases, and a rollback path |
 
-Six rules, all derived from that file:
+---
 
-1. **H1 is the skill id**, not a prose title.
-2. **Exactly one H2**: `Commands`.
-3. **H3 per action** — numbered, imperative, the CLI subcommand in parens.
-4. **One line** of context per action, then the command.
-5. **The command is always first** in the fence.
-6. **No `Prerequisites`, no `Architecture`, no `When to use`.** The agent
-   does not install, and the description already says when to use it.
-
-## The procedure
-
-### 1. Stage the run
+## 🛠️ CLI Quickstart
 
 ```bash
-python3 scripts/scaffold.py <skill-name>
-```
+SF="/run/media/rodri/AI/skills/skill-factory/scripts"
 
-Creates a run area under `~/.cache/skill-factory/runs/` with three stages —
-`01_interview/`, `02_draft/`, `03_proof/` — each with its own `CONTEXT.md`.
-Read `01_interview/CONTEXT.md` next.
+# 1. Audit one skill against the nine rules
+python3 $SF/audit.py /run/media/rodri/AI/skills/<skill>
 
-### 2. Interview the skill, not the user
+# 2. Audit the collection and see what is reclaimable
+python3 $SF/audit.py --all --summary
 
-Read the existing `SKILL.md` and its `scripts/`. Sort every section into
-one of four buckets:
+# 3. Stage a run: interview → draft → proof
+python3 $SF/scaffold.py <skill>
 
-| Bucket | What happens |
-|---|---|
-| **Action** — a command an agent would run | Stays in the body |
-| **Narrative** — architecture, background, port tables | **Moves to `references/<topic>.md`** |
-| **Dead weight** — prerequisites, installation, "when to use" | Deleted; the description covers the last one |
-| **Broken path** — `~/.gemini/config/skills/...` | Rewritten skill-relative |
+# 4. Gate the draft
+python3 $SF/audit.py ~/.cache/skill-factory/runs/<skill>-*/02_draft --expect-name <skill>
 
-Ask the user only what you cannot read. The commands are all there.
+# 5. Prove routing, and check nothing else regressed
+python3 $SF/register.py ~/.cache/skill-factory/runs/<skill>-* --check
 
-### 3. Draft
+# 6. Publish, rolling back automatically if a gate fails
+python3 $SF/register.py ~/.cache/skill-factory/runs/<skill>-* --publish
 
-Read `02_draft/CONTEXT.md` and the references it points to. Then write
-`02_draft/SKILL.md` and curate `02_draft/aliases.json`.
-
-The narrative is **moved, not deleted** — `references/` is already a
-convention in this collection (`agent-reach` has seven files,
-`canvas-cli` has `api_endpoints.md`) and `omnicli` already indexes
-`references/*.md` as a separate kind, so the background is still findable
-by search and still available on demand.
-
-### 4. Gate
-
-```bash
-python3 scripts/audit.py <run-dir>/02_draft
-```
-
-The gate is deterministic and fast. It checks: frontmatter present and the
-name matching the directory, description within 30 words, body within 300
-words, exactly one H1, every leaf section carrying a command, no prose leaf
-over 40 words, no banned section titles, no hardcoded harness paths, and
-every command resolving to something that exists.
-
-Fix what it flags. Do not raise the budget to make it pass.
-
-### 5. Prove
-
-```bash
-python3 scripts/register.py <run-dir> --check
-```
-
-Two proofs, and a retrofit that fails either is not finished:
-
-- **Routing.** Three *different* phrasings of the same intent must return
-  the skill at position 1. One phrasing proves nothing; three prove the
-  skill is findable by intent rather than by memorised wording.
-- **Regression.** `omnicli eval` top-1 must not fall. Routing is shared —
-  lifting one skill by demoting another is a regression, not an improvement.
-
-### 6. Publish
-
-```bash
-python3 scripts/register.py <run-dir> --publish
-```
-
-Writes the skill, sets the alias set, reindexes, re-proves, and **rolls
-back automatically** if any gate fails.
-
-## The alias set is the routing surface
-
-The words a user would type that appear in **no** document. `scaffold.py`
-mines candidates — terms the body uses that the name and description do not
-— but they need curating:
-
-- Keep **5–12**. More is noise; fewer is a gap.
-- One is a domain synonym the skill *should* match on ("podcast" for audio
-  tooling, "cheat sheet" for course material).
-- One is a phrase the user would use but the docs never spell out.
-- **Never** a verbatim echo of a test query. `tests/overfit_check.py` in
-  `omnicli` audits for exactly that, and a router handed the answer key
-  measures nothing.
-
-Alias sets are curated metadata, so they live with the catalog:
-
-```bash
+# 7. Curate a skill's routing metadata
 omnicli alias <skill> --aliases "a,b,c" --tags "x,y"
-omnicli alias <skill> --remove
 ```
 
-## Audit the whole collection
+---
 
-```bash
-python3 scripts/audit.py --all
-```
+## 📐 The Rules
 
-Every skill, every rule, and what it would cost to fix. It is fast enough
-(under 50ms for 27 skills) to run in a hook.
+Nine rules, all derived from this collection's own best example rather than
+invented. The details are in `references/token-rules.md`,
+`references/routing-rules.md` and `references/path-rules.md`.
 
-## What this does not do
+**The gate measures shape, not size.** A skill passes when every leaf
+section is one of four things:
 
-- It does not write wrapper scripts for capabilities that have no CLI yet.
-- It does not run the commands it documents. The gate resolves them; it
-  does not execute them.
-- It does not touch the other skills to fix a routing miss. If a skill
-  cannot win a phrasing it should have won, the fix is its own alias set.
+| Leaf | What it is |
+| :--- | :--- |
+| **Action** | carries a command the agent can run |
+| **Concept** | a table, a numbered or bolded-lead list, or an ASCII diagram: the mental model |
+| **Contract** | a JSON or YAML block: the shape the agent has to produce |
+| **Reference** | a pointer at a file in `references/` |
+
+Anything else is unclassified, and that is the only thing the gate objects
+to. *How long* a section is not a defect — an omnicli-routed agent never
+reads the body at all, because the contract comes from the script's own
+`--help`. A word budget made the gate noisy and the work slower without
+making anything better, so it is gone.
+
+What is still checked, because each one is a real failure: frontmatter
+present and the name matching the directory; no hardcoded harness paths;
+every command resolving to something that exists; the banned section titles
+(`Prerequisites`, `Setup`, `Overview`, `When to use`); and a warning when an
+alias contains a generic word.
+
+The rules are structural, which is what lets the whole collection be audited
+in under 60 milliseconds.

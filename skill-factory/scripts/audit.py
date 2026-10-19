@@ -25,19 +25,87 @@ from pathlib import Path
 
 # ---------------------------------------------------------------- budgets
 
-MAX_DESC_WORDS = 30
-MAX_DESC_WORDS_DISAMBIGUATING = 40
-MAX_BODY_WORDS = 300
-MAX_PROSE_LEAF_WORDS = 40
+# The house style runs 41-53 words (median 41). Only five skills in the
+# collection exceed 60, and all five are genuinely wrong rather than
+# house-styled: icm-architect 147, agent-reach 121, audiocpp 75,
+# review-hub 66, guard-hooks 63.
+MAX_DESC_WORDS = 90     # warns, does not fail
+MAX_BODY_WORDS = 1500   # runaway guard, not a shape rule
+
+# A concept section is the mental model: a table, or a short numbered list.
+# It is the one place prose is *allowed* to live, because it is what lets an
+# agent know which command to reach for. jev-decision's "Universal Decision
+# Primitives" table is the model for this — four rows, an examples column,
+# 106 words.
+#
+# A *procedure* is a numbered list of steps the agent follows. It is the same
+# shape as a concept but a different job, and it is allowed to be longer:
+# cornell-notes' five-step Workflow is 195 words and is the skill.
+#
+# Bullets are neither. A bulleted list is background — rules, caveats,
+# options — and it moves to references/ like any other prose.
+CONCEPT_MAX_WORDS = 120
+PROCEDURE_MAX_WORDS = 600
+CONCEPT_MAX_ITEMS = 20
+
+# A numbered list's readability is per item, exactly as a table's is per row.
+# swarm-contract's three items are 28 words each; icm-architect's ten
+# invariants are 43 each; cornell-notes' five workflow steps are 39 each.
+# A list that turns into a wall of text in one item does not pass.
+LIST_MAX_WORDS_PER_ITEM = 50
+
+# A table's readability is per row, not per table. jev-decision's primitive
+# table is 4 rows of 26 words; github-architect's protocol table is 7 rows
+# of 25. A flat word cap would reject the second and pass the first, which
+# is backwards — a table that grows rows stays a table, and a table that
+# turns into a wall of text in one cell does not.
+TABLE_MAX_WORDS_PER_ROW = 40
+
+# An alias is weighted as a whole column, so every word inside a multi-word
+# alias inherits that weight. A phrase like "text embeddings api" therefore
+# hands its owner a strong signal on the word "text" — a word that belongs to
+# half the collection. These are the words that should not appear in an
+# alias; the gate warns so a human can re-curate.
+GENERIC_ALIAS_WORDS = {
+    "api", "code", "command", "content", "data", "file", "files", "get",
+    "input", "list", "make", "model", "models", "output", "page", "pages",
+    "run", "script", "search", "server", "service", "task", "text", "tool",
+    "tools", "use", "web", "work",
+}
+
+BULLET_RE = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
+NUMBERED_RE = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)
+
+# Box-drawing characters, the signature of an ASCII architecture diagram.
+DIAGRAM_CHARS = set("┌┐└┘├┤┬┴┼─│╔╗╚╝═║╠╣╦╩╬┏┓┗┛")
+
+
+def _is_diagram(content: str) -> bool:
+    """Does this fence draw a diagram rather than show data or commands?"""
+    return sum(1 for ch in content if ch in DIAGRAM_CHARS) >= 8
+
+# A JSON or YAML fence is the *contract* the agent has to produce — the
+# shape of the intermediate file. cornell-notes' JSON schema is 73 words
+# that the agent must read before it can act, so it is structure, not
+# commentary, and it is excluded from the per-command overhead ratio.
+CONTRACT_FENCE_RE = re.compile(r"^```(json|ya?ml)\s*$", re.MULTILINE)
+
+# Soft target, reported but not a failure. The house style itself sits
+# around 34: swarm-contract 34, jev-decision 34, state-compactor 28. It is
+# a smell, not a rule — icm-architect sits at 302 with seven commands, and
+# that is not a smell, it is a problem.
 
 # Section titles that should not be in a skill body. The body is read by an
 # agent that already knows what it wants to do; these are the sections an
 # agent skips, and they are the sections that cost the most.
+#
+# "architecture" is NOT here: the house style uses a concept section, and
+# banning it was a mistake — it counted concept as prose and inflated the
+# measured backlog by 3x.
 BANNED_TITLES = [
     "overview", "introduction", "intro", "background", "about",
     "installation", "install", "setup", "requirements", "prerequisites",
-    "when to use", "architecture", "design", "troubleshooting",
-    "how it works", "internals", "notes",
+    "when to use", "troubleshooting", "how it works", "internals", "notes",
 ]
 
 # A skill body must not hardcode a harness path. The same skill is mirrored
@@ -51,9 +119,108 @@ HARNESS_PATH_RE = re.compile(
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.MULTILINE)
 FENCE_RE = re.compile(r"^```([^\n]*)\n(.*?)^```", re.MULTILINE | re.DOTALL)
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+BINDING_RE = re.compile(r"^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.+?)\s*$", re.MULTILINE)
+PYTHON_BINARIES = ("python3", "python", "python3.14", "python3.12")
 
 
-# ---------------------------------------------------------------- helpers
+def parse_bindings(content: str) -> dict[str, str]:
+    """Read ``VAR="command"`` bindings out of a fence.
+
+    The house style binds the tool once and then uses ``$VAR`` for every
+    command. That keeps each command line short, and it means the binding
+    line is not a command — treating it as one made the gate fail on
+    ``SWARM="python3 ..."``.
+    """
+    out: dict[str, str] = {}
+    for m in BINDING_RE.finditer(content):
+        var = m.group(1)
+        val = m.group(2).strip().strip("\"'")
+        parts = val.split()
+        if not parts:
+            continue
+        if parts[0] in PYTHON_BINARIES and len(parts) > 1:
+            out[var] = parts[1]
+        else:
+            out[var] = parts[0]
+    return out
+
+
+def is_concept(content: str, words: int) -> str | None:
+    """Is this section structure rather than background?
+
+    Returns the kind — ``"table"``, ``"procedure"`` — or None if the section
+    is stray prose that should move to references/.
+
+    Two accepted forms, both from the house style:
+    * a markdown table (jev-decision's decision primitives), or
+    * a numbered list (swarm-contract's tripartite contract, cornell-notes'
+      five-step workflow).
+
+    A bulleted list is not structure. It is background, and it moves.
+    """
+    if content.count("|") >= 4 and "---" in content:
+        rows = [ln for ln in content.splitlines()
+                if ln.strip().startswith("|") and not set(ln.strip()) <= set("| -")]
+        # The separator row is the only non-data row left; the header was
+        # already removed above.
+        body_rows = [r for r in rows if not re.fullmatch(r"\|[\s:|-]+\|", r.strip())]
+        if body_rows:
+            if words / len(body_rows) <= TABLE_MAX_WORDS_PER_ROW:
+                return "table"
+        return None
+    items = NUMBERED_RE.findall(content)
+    if 2 <= len(items) <= CONCEPT_MAX_ITEMS and words <= PROCEDURE_MAX_WORDS:
+        if words / len(items) <= LIST_MAX_WORDS_PER_ITEM:
+            return "procedure"
+    # A bulleted list whose items each open with a bolded lead-in term is a
+    # concept model, not background. "- **Git Worktree Isolation**: Never
+    # let..." names a thing; "- Always use standard LaTeX syntax" states a
+    # rule. The bolded lead-in is the difference.
+    bold_items = re.findall(r"^\s*[-*+]\s+\*\*", content, re.MULTILINE)
+    if 2 <= len(bold_items) <= CONCEPT_MAX_ITEMS and words <= PROCEDURE_MAX_WORDS:
+        if words / len(bold_items) <= LIST_MAX_WORDS_PER_ITEM:
+            return "procedure"
+    return None
+
+
+def count_commands(content: str) -> int:
+    """Real commands in a fence: not comments, not bindings."""
+    n = 0
+    for line in content.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if BINDING_RE.match(s):
+            continue
+        n += 1
+    return n
+
+
+def skill_overrides() -> dict[str, dict]:
+    """Per-skill budget overrides, read from the catalog's alias config.
+
+    A *command surface* skill is read to find a command, so its body has a
+    tight budget. A *method* skill is read to learn the method, and the
+    method is the product — icm-architect's ten invariants are 430 words
+    that an agent genuinely needs before it can build a workspace.
+
+    One source of truth: the catalog's own alias config, so the budget a
+    skill claims and the budget the gate enforces cannot drift apart.
+    """
+    import os
+    root = os.environ.get("OMNICLI_ROOT", "/run/media/rodri/AI/workstation-clis/omnicli")
+    path = Path(root) / "catalog" / "aliases.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+# --------------------------------------------------------------------------
+# helpers
 
 def mask_fences(text: str) -> str:
     """Blank out fenced code blocks, preserving every offset and newline.
@@ -137,11 +304,37 @@ def sections(body: str) -> list[dict]:
         sec["words"] = len(content.split())
         sec["is_group"] = has_child
         sec["fences"] = FENCE_RE.findall(content)
-        # A leaf is actionable if it carries a command, or if it points at a
-        # reference file — "read this for the detail" is an action too.
-        sec["has_command"] = bool(sec["fences"])
+        # A command fence is a shell fence. An untagged fence is shell only
+        # if it *starts* like an invocation: an untagged fence is often an
+        # illustrative payload — a sample of the tool's own output — and
+        # treating it as shell turned `zoom-recorder/scripts/zoom_download`
+        # into a "command". The first line decides; later lines in a
+        # command fence may be continuations or comments.
+        def _is_shell(lang: str, c: str) -> bool:
+            if lang.strip():
+                return lang.strip() in ("bash", "sh", "shell", "console")
+            first = next((ln.strip() for ln in c.splitlines() if ln.strip()), "")
+            if not first or not (first[0].isalnum() or first[0] in "_$./"):
+                return False
+            if re.match(r"^(\d+\.|[-*+])\s", first):
+                return False
+            # A metrics row — "BM25 catalog  top1 52/53 (98.1%)  top3 ..." —
+            # is a results table, not an invocation. It has a wide column gap
+            # and numbers in it; a command line does not.
+            if len(first) - len(re.sub(r"\s+", " ", first)) >= 2 and re.search(r"\d", first):
+                return False
+            return first.count("=") <= 1
+
+        sec["command_fences"] = [
+            (lang, c) for lang, c in sec["fences"] if _is_shell(lang, c)
+        ]
+        sec["has_command"] = bool(sec["command_fences"])
+        # A section that points at a reference file is actionable too:
+        # "read this for the detail" is an action.
         sec["has_reference"] = bool(re.search(r"`[^`]*\.md`|\]\([^)]*\.md\)", content))
-        sec["has_action"] = sec["has_command"] or sec["has_reference"]
+        sec["has_contract"] = bool(CONTRACT_FENCE_RE.search(content))
+        sec["has_action"] = (sec["has_command"] or sec["has_reference"]
+                             or sec["has_contract"])
     return marks
 
 
@@ -188,6 +381,7 @@ def audit_skill(skill_dir: Path, expect_name: str | None = None) -> dict:
     }
     if not md.is_file():
         result["errors"].append({"rule": "frontmatter", "detail": "no SKILL.md"})
+        result["ok"] = False
         return result
 
     text = md.read_text(encoding="utf-8", errors="replace")
@@ -207,22 +401,32 @@ def audit_skill(skill_dir: Path, expect_name: str | None = None) -> dict:
     if "description" not in fm or not fm["description"].strip():
         result["errors"].append({"rule": "frontmatter", "detail": "no 'description' field"})
 
-    # --- rule 2: description budget ------------------------------------
+    # --- rule 2: description present -----------------------------------
+    # Length is deliberately NOT checked. The description is in the turn-0
+    # shelf, so a tight one is nicer — but gating on a word count made the
+    # gate noisy and the work slower, and the thing that actually decides
+    # routing is the alias set, not the description's length.
     desc = fm.get("description", "")
     desc_words = word_count(desc)
-    budget = MAX_DESC_WORDS
-    if desc_words > budget:
-        result["errors"].append({
-            "rule": "description-budget",
-            "detail": f"{desc_words} words, budget {budget}",
+    if desc_words > MAX_DESC_WORDS:
+        result["warnings"].append({
+            "rule": "long-description",
+            "detail": f"{desc_words} words — the shelf is paid every turn",
         })
 
     # --- rule 8: body budget -------------------------------------------
+    # A loose runaway guard, not a shape rule. A body of a few thousand
+    # words is a signal that something was pasted in; it is not a failure.
+    # An omnicli-routed agent never reads the body — the contract comes
+    # from the script's own --help — so word count is not a cost worth
+    # gating on.
     body_words = word_count(body)
-    if body_words > MAX_BODY_WORDS:
+    overrides = skill_overrides().get(target_name, {})
+    body_budget = int(overrides.get("body_budget", MAX_BODY_WORDS))
+    if body_words > body_budget:
         result["errors"].append({
             "rule": "body-budget",
-            "detail": f"{body_words} words, budget {MAX_BODY_WORDS}",
+            "detail": f"{body_words} words, runaway guard {body_budget}",
         })
 
     # --- single H1 -----------------------------------------------------
@@ -248,21 +452,55 @@ def audit_skill(skill_dir: Path, expect_name: str | None = None) -> dict:
                 })
                 break
 
-    # --- rule 3: every leaf is an action --------------------------------
-    prose_leaves = [s for s in leaves if not s["has_action"]]
+    # --- classify the leaves -------------------------------------------
+    # A leaf is one of four things:
+    #   action    — it carries a command the agent can run
+    #   concept   — a table, or a short numbered list: the mental model
+    #   contract  — a json/yaml block: the shape the agent has to produce
+    #   reference — a pointer at a file in references/
+    # Anything else is unclassified, and that is the only thing the gate
+    # needs to object to. *How long* it is turns out not to matter: an
+    # omnicli-routed agent never reads the body at all, because the
+    # contract comes from the script's own --help.
+    #
+    # Concept is checked first. A concept table routinely mentions a
+    # filename in a cell, and a mention of `SKILL.md` must not promote a
+    # concept model to an action.
+    concept_leaves, contract_leaves = [], []
+    reference_leaves, action_leaves, prose_leaves = [], [], []
+    for s in leaves:
+        # A section whose fence is an ASCII diagram is the mental model drawn
+        # rather than tabulated. Both graph-memory's "Two Legs of Memory" and
+        # academic-icm's "4-Stage Architecture" are this form.
+        if any(_is_diagram(c) for _, c in s["fences"]):
+            s["is_concept"] = True
+            concept_leaves.append(s)
+        elif is_concept(s["content"], s["words"]):
+            s["is_concept"] = True
+            concept_leaves.append(s)
+        elif s.get("has_contract"):
+            contract_leaves.append(s)
+        elif s["has_command"]:
+            action_leaves.append(s)
+        elif s["has_reference"]:
+            reference_leaves.append(s)
+        else:
+            s["is_concept"] = False
+            prose_leaves.append(s)
+
+    # --- rule 3: every leaf is an action, a concept, or a pointer -------
     for s in prose_leaves:
         result["errors"].append({
-            "rule": "leaf-not-action",
-            "detail": f"'{s['title']}' (line {s['line']}) has no command",
+            "rule": "leaf-unclassified",
+            "detail": f"'{s['title']}' (line {s['line']}) is neither a command, "
+                      f"a concept model, nor a pointer at a reference file",
         })
 
-    # --- rule 4: prose leaves are small ---------------------------------
-    big_prose = [s for s in prose_leaves if s["words"] > MAX_PROSE_LEAF_WORDS]
-    for s in big_prose:
-        result["errors"].append({
-            "rule": "prose-leaf",
-            "detail": f"'{s['title']}' (line {s['line']}) is {s['words']} words of prose",
-        })
+    # --- rule 4: no size limit on leaves --------------------------------
+    # A leaf's length is not a defect. If a leaf is neither a command, a
+    # concept model, nor a reference pointer, the leaf-unclassified rule
+    # above already says so, and the fix is structural: make it a concept,
+    # or move it to references/ and leave a pointer.
 
     # --- rule 6: hardcoded harness paths --------------------------------
     for m in HARNESS_PATH_RE.finditer(body):
@@ -272,27 +510,79 @@ def audit_skill(skill_dir: Path, expect_name: str | None = None) -> dict:
         })
 
     # --- rule 7: commands resolve ---------------------------------------
+    # Bindings are collected per section, so a `$VAR` bound in one fence
+    # resolves in the commands that use it. Only leaf sections are counted:
+    # a group's content contains its children's, so counting both would
+    # count every command twice.
     unresolved = []
-    for s in secs:
-        for lang, content in s["fences"]:
+    total_commands = 0
+    for s in leaves:
+        bindings: dict[str, str] = {}
+        continued = False
+        for lang, content in s["command_fences"]:
             if lang and lang.strip() not in ("bash", "sh", "shell", "console", ""):
                 continue
-            for line in content.splitlines():
-                line = line.strip()
+            bindings.update(parse_bindings(content))
+            for raw in content.splitlines():
+                line = raw.strip()
                 if not line or line.startswith("#"):
                     continue
-                if "|" in line:            # a pipeline: check the first command
+                if BINDING_RE.match(line):
+                    continue          # a binding, not a command
+                if line.startswith("export "):
+                    continue          # an environment variable, not a command
+                if continued:
+                    # This line is the tail of the previous command — its
+                    # arguments, not a command of its own.
+                    continued = line.endswith("\\")
+                    continue
+                if "|" in line:      # a pipeline: check the first command
                     line = line.split("|")[0].strip()
                 if line.startswith("sudo ") or line.startswith("env "):
                     line = line.split(None, 1)[1] if " " in line else ""
                 if not line:
                     continue
+                if not line[0] in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$.\"'/":
+                    # Box drawing, bullets, rules — a diagram or a list, not
+                    # a command. The ASCII architecture diagrams in this
+                    # collection are the main source of these.
+                    continue
+                continued = line.endswith("\\")
                 token = line.split()[0].strip("\"'")
+                if token.startswith("$"):
+                    var = token[1:]
+                    if var not in bindings:
+                        unresolved.append(f"{token} (line {s['line']}) — unbound variable")
+                        continue
+                    token = bindings[var]
+                total_commands += 1
                 if not resolve_command(token, skill_dir):
                     unresolved.append(f"{token} (line {s['line']})")
-                break   # one command per fence is enough
     for u in unresolved:
         result["errors"].append({"rule": "unresolved-command", "detail": u})
+
+    # --- soft target: words per command --------------------------------
+    # --- generic words inside aliases ----------------------------------
+    # An alias column is weighted as a whole, so a generic word inside a
+    # multi-word alias inherits a strong signal it has not earned.
+    for alias in overrides.get("aliases", []):
+        bad = sorted({w for w in re.findall(r"[a-z0-9]+", alias.lower())
+                      if w in GENERIC_ALIAS_WORDS})
+        if bad:
+            result["warnings"].append({
+                "rule": "generic-alias-word",
+                "detail": f"alias {alias!r} donates weight to the generic word(s) "
+                          f"{', '.join(bad)}",
+            })
+
+    # The concept section and the contract block are not per-command
+    # overhead — they are what makes the commands legible and what the
+    # agent has to produce. So both are excluded from the ratio, and the
+    # ratio measures the explanation attached to each command.
+    overhead_words = (body_words
+                      - sum(s["words"] for s in concept_leaves)
+                      - sum(s["words"] for s in contract_leaves))
+    wpc = round(overhead_words / total_commands, 1) if total_commands else 0
 
     result["info"] = {
         "description_words": desc_words,
@@ -302,10 +592,14 @@ def audit_skill(skill_dir: Path, expect_name: str | None = None) -> dict:
         "total_tokens": approx_tokens(fm_raw) + approx_tokens(body),
         "sections": len(secs),
         "leaves": len(leaves),
-        "action_leaves": len([s for s in leaves if s["has_action"]]),
+        "action_leaves": len(action_leaves),
+        "concept_leaves": len(concept_leaves),
+        "concept_words": sum(s["words"] for s in concept_leaves),
         "prose_leaves": len(prose_leaves),
         "prose_words": sum(s["words"] for s in prose_leaves),
-        "reclaimable_words": sum(s["words"] for s in big_prose),
+        "reclaimable_words": sum(s["words"] for s in prose_leaves),
+        "commands": total_commands,
+        "words_per_command": wpc,
         "frontmatter": fm,
     }
     result["ok"] = not result["errors"]
@@ -324,9 +618,12 @@ def report(result: dict) -> None:
     print(f"\n{status}  {name}")
     print(f"   description {info['description_words']}w (~{info['description_tokens']} tok)"
           f"   body {info['body_words']}w (~{info['body_tokens']} tok)")
-    print(f"   leaves {info['action_leaves']}/{info['leaves']} actionable"
-          f"   prose {info['prose_words']}w"
+    print(f"   leaves {info['action_leaves']} action / {info['concept_leaves']} concept"
+          f" / {info['prose_leaves']} prose")
+    print(f"   concept {info['concept_words']}w   prose {info['prose_words']}w"
           f"   reclaimable {info['reclaimable_words']}w")
+    if info.get("commands"):
+        print(f"   commands {info['commands']}")
     by_rule: dict[str, list[str]] = {}
     for e in result["errors"]:
         by_rule.setdefault(e["rule"], []).append(e["detail"])

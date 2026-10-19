@@ -78,6 +78,20 @@ omnicli alias --list                        # every skill
 omnicli alias <skill> --remove              # delete
 ```
 
+**A multi-word alias donates its weight to every word in it.** The alias
+column is weighted as a whole, so `"text embeddings api"` hands its owner a
+strong signal on the word *text* — a word that belongs to half the
+collection. That is how `openrouter-free` came to beat `audiocpp` on
+*"generate speech from this text"*: both query words were weight-12 hits
+for it, and one of them was the word "text".
+
+`audit.py` warns about aliases containing generic words (`text`, `api`,
+`model`, `file`, `search`, `data`, `code`, `output`, `tool`, …). The warning
+is a prompt to re-curate, not a rule to obey — `"text to speech"` is the
+standard name for the thing and stays. But where a generic word is
+*avoidable*, prefer the distinctive one: `"speech synthesis"` over
+`"text to speech"`, `"whisper transcript"` over `"speech to text"`.
+
 ## Why the alias column is weighted separately
 
 In the catalog, aliases and tags live in their own FTS5 column at roughly

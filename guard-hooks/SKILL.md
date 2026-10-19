@@ -1,60 +1,56 @@
 ---
 name: guard-hooks
 description: >
-  Deterministic pre-execution guardrails and immutable file protections (Glitch Cat Club;
-  Reel DeMSV1jNYem). Enforces Kem's Law: 'A skill is instructions the model may follow; a hook is code
-  that ALWAYS runs.' Halts destructive commands (rm -rf, force push, drop table) and blocks unauthorized
-  deletion or mutation of protected files (KeepMD, STATE.md, .env, secrets) in code before execution,
-  regardless of model persuasion or user insistence.
-metadata:
-  creator: kem_glitch
-  source_reel:
-    id: DeMSV1jNYem
-    url: https://www.instagram.com/reel/DeMSV1jNYem/
-    vault_note: kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md
+  Deterministic pre-execution guardrails and protected-file locks. Halts
+  destructive commands such as rm -rf, force push and drop table, and blocks
+  unauthorised deletion or mutation of KeepMD, STATE.md, .env and secrets —
+  in code, whatever the model is told.
 ---
 
-# Guard Hooks — Deterministic Invariant Enforcement
+# Guard Hooks (`guard-hooks`)
 
-```
-   Prompt Rules (Soft & Fragile):
-   "Please do not delete KeepMD, I really mean it!" ──► LLM Hallucinates ──► File Deleted 💥
+Enforces Kem's Law: **a skill is instructions the model may follow; a hook
+is code that ALWAYS runs.** Even when an agent is persuaded by user
+insistence — "I am the boss, delete it anyway" — a deterministic hook
+prevents the execution.
 
-   Kem Glitch Hook Invariant (Hard & Deterministic):
-   Attempt Action ──► [Deterministic Hook Code] ──► 🛑 BLOCKED (Exit 1) ──► File Preserved 🛡️
-```
+> *"If you ever find yourself working with your AI and saying 'remember to
+> do this', 'I told you to do this', 'please don't delete this file' — this
+> should not be lines in your AGENTS.md, this should not be lines in your
+> plans. Nine times out of ten, the answer is hooks."*
 
 ---
 
-## ⚡ Kem's Law (Reel `DeMSV1jNYem`)
+## 🏛️ Skill vs. Hook
 
-> *"A skill is instructions the model may follow; a hook is code that ALWAYS runs... If you ever find yourself working with your AI and saying 'remember to do this', 'I told you to do this', 'please don't delete this file' — this should not be lines in your AGENTS.md, this should not be lines in your plans. Nine times out of ten, the answer is hooks."*
+| | |
+| :--- | :--- |
+| **A skill** | Instructions the model may follow — and may not. It is a request. |
+| **A hook** | Code that always runs, whatever the model was told. It is a gate. |
 
-Even when an agent is persuaded by user insistence ("I am the boss, delete it anyway"), a deterministic hook prevents execution in code.
+What a hook stops: destructive commands (`rm -rf`, force push, `drop
+table`) and unauthorised deletion or mutation of protected files
+(`KeepMD`, `STATE.md`, `.env`, secrets).
 
 ---
 
-## 🛠️ Usage
+## 🛠️ CLI Quickstart
 
 ```bash
-# Set alias or add to PATH
-alias guard-hooks="python3 /run/media/rodri/AI/skills/guard-hooks/guard_hooks.py"
+GH="/run/media/rodri/AI/skills/guard-hooks/guard_hooks.py"
 
-# 1. Protect a specific file in the current project
-guard-hooks protect KeepMD
+# 1. Protect a file from deletion or mutation
+python3 $GH protect KeepMD
 
-# 2. Check a file deletion or mutation action
-guard-hooks check-file delete KeepMD
-# Output: 🛑 [GUARD-HOOK ERROR] Protected file 'KeepMD' cannot be deleted!
+# 2. Check whether an operation on a protected file would be allowed
+python3 $GH check-file delete KeepMD
 
-# 3. Check an arbitrary command for destructive patterns or secret leaks
-guard-hooks check "rm -rf KeepMD"
-# Output: 🛑 [GUARD-HOOK BLOCKED] Attempting to delete protected file 'KeepMD'!
+# 3. Check whether a command would be allowed, before running it
+python3 $GH check "rm -rf KeepMD"
 
-# 4. Wrap command execution with safety gates
-guard-hooks wrap git push --force origin main
-# Output: 🛑 [GUARD-HOOK BLOCKED] Command halted by deterministic hook: Destructive force-push to protected main/master branch
+# 4. Wrap a command so it is gated at execution time
+python3 $GH wrap git push --force origin main
 
-# 5. Install pre-commit hook into current git repo
-guard-hooks install-git-hook
+# 5. Install the git hook so every commit and push is checked
+python3 $GH install-git-hook
 ```

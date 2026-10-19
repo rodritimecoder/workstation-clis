@@ -1,28 +1,37 @@
 ---
 name: acme-example
 description: >
-  Placeholder template for a new skill. Copy the shape, replace the name,
-  the description, and the commands. Nothing here is a real capability.
+  Placeholder for a new skill's frontmatter. One sentence naming what it is
+  and where it came from, then what it does. Fifty words is the house
+  maximum.
 ---
 
-# acme-example
+# Acme Example (`acme-example`)
 
-One line: what this does, and its tier or fallback if it has one.
+One dense paragraph: what this is, which engine or model backs it, where it
+lives, and the problem it solves. This is the only prose the reader pays
+for before the commands.
 
-## Commands
+---
 
-### 1. <imperative action> (`<subcommand>`)
-One line: when to use *this* action, not the skill in general.
+## 🏛️ <The Concept>
+
+| <Dimension> | <Type> | <Representation> | <Example Question> |
+| :--- | :--- | :--- | :--- |
+| **`<mode-a>`** | <what it returns> | <how it is encoded> | *"<a question a user would ask>"* |
+| **`<mode-b>`** | <what it returns> | <how it is encoded> | *"<another question>"* |
+
+---
+
+## 🛠️ CLI Quickstart
+
 ```bash
-acme-example <subcommand> <arg>
+ACME="python3 /run/media/rodri/AI/skills/acme-example/acme_example.py"
+
+# 1. <Action> (<mode>)
+$ACME <subcommand> <args>
+# Output: <what it returns, so the reader knows without running it>
+
+# 2. <Action> (<mode>)
+$ACME <subcommand> --flag <value>
 ```
-
-### 2. <imperative action> (`<subcommand>`)
-```bash
-acme-example <subcommand> --flag <value>
-```
-
-## Notes
-
-Only if the agent needs a caveat that does not belong to a single command.
-One line each. Anything longer belongs in `references/`.
