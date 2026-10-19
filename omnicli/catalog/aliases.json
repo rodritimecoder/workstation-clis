@@ -156,19 +156,19 @@
       "announcements",
       "syllabus",
       "course materials",
-      "course materials",
-      "class materials",
-      "handouts",
-      "transcript"
+      "transcript",
+      "course content",
+      "modules",
+      "gradebook",
+      "submission status",
+      "reading list",
+      "course files",
+      "what is due",
+      "unit assessment"
     ],
     "tags": [
       "education",
-      "lms",
-      "course",
-      "materials",
-      "content",
-      "assignments",
-      "files"
+      "lms"
     ]
   },
   "cornell-notes": {

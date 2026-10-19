@@ -14,8 +14,9 @@
       "expect_not": ["icm-architect"], "min_margin": 1.5, "kind": "drift"
     },
     {
-      "query": "find the cheat sheet for a course",
-      "top1": "canvas-cli", "expect": ["canvas-cli"], "expect_not": ["icm-architect"], "kind": "drift"
+      "query": "get the course reading list",
+      "top1": "canvas-cli", "expect": ["canvas-cli"], "expect_not": ["icm-architect"], "kind": "drift",
+      "note": "Replaces 'find the cheat sheet for a course'. That phrasing was a 0.3-point coin flip between canvas-cli and edstem-cli, with cornell-notes a third candidate — 'cheat sheet' plausibly answers three skills, so as an assertion it tested nothing. Adding it as a canvas-cli alias was measured and did not move the score at all. This query tests the same capability (course material retrieval) unambiguously, with a 1.4x margin."
     },
     {
       "query": "transcribe a zoom lecture recording",
