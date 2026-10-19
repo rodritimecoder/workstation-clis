@@ -256,15 +256,32 @@ class TestContractCache(unittest.TestCase):
         This is the regression that a dropped `contract = cached` assignment
         caused: the rebuild succeeded, the tool count collapsed, and nothing
         errored.
+
+        The rebuild runs against a temporary database. Rebuilding the live
+        catalog here would mean running the test suite mutates shared state,
+        and it races with any sync that is copying skills around at the
+        time.
         """
-        before = self.con.execute(
-            "SELECT count(*) AS c FROM tools WHERE kind = 'subcommand'").fetchone()["c"]
-        self.assertGreater(before, 100, "expected subcommand tools in the catalog")
-        builder.build(self.con, progress=False)
-        after = self.con.execute(
-            "SELECT count(*) AS c FROM tools WHERE kind = 'subcommand'").fetchone()["c"]
-        self.assertEqual(after, before,
-                         f"rebuild lost subcommand tools: {before} -> {after}")
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            con = builder.connect(Path(tmp) / "test-catalog.db")
+            try:
+                builder.build(con, progress=False)
+                first = con.execute(
+                    "SELECT count(*) AS c FROM tools WHERE kind = 'subcommand'"
+                ).fetchone()["c"]
+                self.assertGreater(first, 100, "expected subcommand tools in the catalog")
+
+                # Second build: the contracts now come from the cache.
+                builder.build(con, progress=False)
+                second = con.execute(
+                    "SELECT count(*) AS c FROM tools WHERE kind = 'subcommand'"
+                ).fetchone()["c"]
+                self.assertEqual(second, first,
+                                 f"rebuild lost subcommand tools: {first} -> {second}")
+            finally:
+                con.close()
 
     def test_cached_contracts_keep_their_subcommands(self):
         row = self.con.execute(
