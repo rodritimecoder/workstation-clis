@@ -1,6 +1,6 @@
 ---
 name: local-hub
-description: "Unified local workstation inference hub and CLI gateway for Dual-GPU AMD Radeon hardware: Genesis 35B coder (:8080), LightOnOCR-3-1B vision (:8085), OneJev1.5-4B calibrated decisions (:8083), Nemotron 3.5 ASR (:8081), live health checks, and skill discovery."
+description: "Unified local workstation inference hub and CLI gateway for Dual-GPU AMD Radeon hardware: Genesis 35B coder (:8080), LightOnOCR-3-1B vision (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron 3.5 ASR (:8081), live health checks, and skill discovery."
 ---
 
 # `local-hub` — Workstation Inference & Skills Gateway
@@ -54,7 +54,7 @@ local-hub ocr --doctor
 ---
 
 ### 3. `local-hub decide` (or `local-hub jev`) — Premier Calibrated Decision Gating (:8083)
-Queries **OneJev1.5-4B** (premier vision+decision, $T=1.305$) and **JPT-4B** (:8090) for calibrated probabilities, classification, scoring, and binary gating.
+Queries **vllm-d3-mini** (premier vision+decision, calibrated $T=1.305$) and **JPT-4B** (:8090) for calibrated probabilities, classification, scoring, and binary gating.
 
 ```bash
 # 1. Binary Decision (noul) -> P(true)

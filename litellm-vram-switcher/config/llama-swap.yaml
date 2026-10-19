@@ -53,12 +53,33 @@ models:
     ttl: 0
 
   # ============================================================
-  # 2. Auxiliary Vision/Decision: Imajev-4B (~3.5 GB)
+  # 2. Premier Vision/Decision: vllm-d3-mini (~3.5 GB) — JEV DECISION MODEL
   # ============================================================
-  "imajev-4b":
+  "vllm-d3-mini":
     aliases:
       - "agent-classifier"
       - "local-classifier-jev"
+      - "jev-decision"
+      - "vllm-d3"
+    cmd: >
+      ${server_upstream_vulkan}
+      -m /run/media/rodri/AI/models/ggml-org/vllm-d3-mini-GGUF/vllm-d3-mini-Q4_K_M.gguf
+      --mmproj /run/media/rodri/AI/models/ggml-org/vllm-d3-mini-GGUF/mmproj-vllm-d3-mini-Q8_0.gguf
+      --host 127.0.0.1
+      --port ${PORT}
+      -ngl 99
+      -c 8192
+      --image-min-tokens 1024
+    proxy: "http://127.0.0.1:${PORT}"
+    ttl: 600
+
+  # ============================================================
+  # 3. Auxiliary Vision/Decision: Imajev-4B (~3.5 GB) — Legacy
+  # ============================================================
+  "imajev-4b":
+    aliases:
+      - "agent-classifier-legacy"
+      - "local-classifier-jev-legacy"
       - "imajev"
     cmd: >
       ${server_upstream_vulkan}
@@ -73,7 +94,7 @@ models:
     ttl: 600
 
   # ============================================================
-  # 3. Auxiliary Flagship OCR: LightOnOCR-3-1B (~1.5 GB)
+  # 4. Auxiliary Flagship OCR: LightOnOCR-3-1B (~1.5 GB)
   # ============================================================
   "lighton-ocr":
     aliases:
@@ -155,6 +176,7 @@ swap:
   matrix:
     vars:
       q: "qwen3.6-35b"
+      v: "vllm-d3-mini"
       i: "imajev-4b"
       l: "lighton-ocr"
       d: "deskforge-4b"
@@ -164,15 +186,16 @@ swap:
       q: 100 # Highest cost - keep the primary coder resident
       g: 40
       d: 15
+      v: 10
       i: 10
       l: 10
 
     sets:
-      # Pinned King (22G) + Decision (3.5G) + OCR (1.5G) = 27 GB <= 32 GB
-      standard_trio: "q & i & l"
+      # Pinned King (22G) + Premier Decision vllm-d3-mini (3.5G) + OCR (1.5G) = 27 GB <= 32 GB
+      standard_trio: "q & v & l"
 
       # Pinned King (22G) + GUI Browser Grounding (3.5G) + OCR (1.5G) = 27 GB <= 32 GB
       browser_agent: "q & d & l"
 
       # Alternative heavy model with auxiliary tools (18G + 3.5G + 1.5G = 23 GB)
-      gemma_suite: "g & i & l"
+      gemma_suite: "g & v & l"
