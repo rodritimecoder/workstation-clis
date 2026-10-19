@@ -41,8 +41,10 @@ VENV_PYTHON = SKILL_DIR / ".venv" / "bin" / "python"
 sys.path.insert(0, str(SKILL_DIR))
 
 try:
+    from catalog import aliases as aliases_mod
     from catalog import builder, registry, search  # noqa: E402
 except ImportError:  # pragma: no cover - degraded install
+    aliases_mod = None
     builder = registry = search = None  # type: ignore
 
 # The response cap. An agent must never be able to pull an unbounded payload
@@ -531,6 +533,66 @@ def cmd_invoke(tool_id: str, extra_args: list[str], out_path: str | None = None,
     sys.exit(code)
 
 
+def cmd_alias(skill: str = None, aliases: str = None, tags: str = None,
+              remove: bool = False, show_all: bool = False, as_json: bool = False):
+    """Read or write a skill's curated routing metadata.
+
+    The alias set is the routing surface of a skill: the words a user would
+    type that appear in no document. It lives behind this command so that a
+    publisher never needs to know where the file is.
+    """
+    if builder is None or aliases_mod is None:
+        sys.exit("❌ Error: omnicli catalog package not importable.")
+
+    if show_all or not skill:
+        data = aliases_mod.load()
+        if as_json:
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+            return
+        print(f"\n🏷️  [curated routing metadata] {len(data)} skills\n")
+        for name, rec in sorted(data.items()):
+            al = rec.get("aliases", [])
+            tg = rec.get("tags", [])
+            flag = "  (body not indexed)" if rec.get("index_body") is False else ""
+            print(f"  • {name}{flag}")
+            if al:
+                print(f"      aliases: {', '.join(al)}")
+            if tg:
+                print(f"      tags   : {', '.join(tg)}")
+        print()
+        return
+
+    if remove:
+        if aliases_mod.remove(skill):
+            print(f"🗑️  Removed curated metadata for {skill}")
+        else:
+            print(f"ℹ️  No curated metadata for {skill}")
+        return
+
+    if aliases is None and tags is None:
+        rec = aliases_mod.get(skill)
+        if as_json:
+            print(json.dumps(rec, indent=2, ensure_ascii=False))
+            return
+        if not rec:
+            print(f"ℹ️  No curated metadata for {skill}")
+            return
+        print(f"\n🏷️  {skill}")
+        print(f"   aliases: {', '.join(rec.get('aliases', [])) or '—'}")
+        print(f"   tags   : {', '.join(rec.get('tags', [])) or '—'}")
+        if rec.get("index_body") is False:
+            print("   body    : not indexed (router skills opt out)")
+        print()
+        return
+
+    al = [a for a in aliases.split(",")] if aliases is not None else None
+    tg = [t for t in tags.split(",")] if tags is not None else None
+    rec = aliases_mod.set_aliases(skill, al, tg)
+    print(f"🏷️  {skill}: {len(rec.get('aliases', []))} aliases, "
+          f"{len(rec.get('tags', []))} tags")
+    print("   Reindex with `omnicli index --rebuild` to apply.")
+
+
 # --------------------------------------------------------------------------
 # index / eval
 # --------------------------------------------------------------------------
@@ -759,6 +821,14 @@ def main():
                    help="Report whether the index is fresh, without rebuilding")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("alias", help="Read or write a skill's curated routing metadata")
+    p.add_argument("skill", nargs="?", help="Skill name; omit with --list to show all")
+    p.add_argument("--aliases", default=None, help="Comma-separated alias list (replaces)")
+    p.add_argument("--tags", default=None, help="Comma-separated tag list (replaces)")
+    p.add_argument("--remove", action="store_true", help="Delete a skill's curated metadata")
+    p.add_argument("--list", action="store_true", help="Show every skill's curated metadata")
+    p.add_argument("--json", action="store_true")
+
     p = sub.add_parser("eval", help="Run the golden routing evaluation")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -807,6 +877,9 @@ def main():
     elif args.action == "index":
         cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts,
                   as_json=args.json, check=args.check)
+    elif args.action == "alias":
+        cmd_alias(skill=args.skill, aliases=args.aliases, tags=args.tags,
+                  remove=args.remove, show_all=args.list, as_json=args.json)
     elif args.action == "eval":
         cmd_eval(verbose=args.verbose, as_json=args.json)
     elif args.action == "mcp":

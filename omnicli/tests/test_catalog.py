@@ -309,6 +309,17 @@ class TestSearch(unittest.TestCase):
         scores = [r["score"] for r in res["results"]]
         self.assertEqual(scores, sorted(scores, reverse=True))
 
+    def test_search_result_is_json_serialisable(self):
+        """`omnicli search --json` must not raise.
+
+        A working set left in the result dict (a set of matched tokens) made
+        the JSON encoder raise a TypeError, and nothing caught it: the
+        library tests only read individual fields.
+        """
+        res = search.search(self.con, "click a button on a web page", limit=3)
+        text = json.dumps(res)
+        self.assertIn("results", json.loads(text))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

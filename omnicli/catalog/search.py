@@ -204,7 +204,8 @@ def _aggregate(
         matched = {t for t, ids in token_hits.items() if r["rid"] in ids}
         entry = by_skill.get(r["skill"])
         if entry is None:
-            entry = {"skill": r["skill"], "score": 0.0, "chunks": [], "kinds": set(), "matched": set()}
+            entry = {"skill": r["skill"], "score": 0.0, "chunks": [], "kinds": set(),
+                     "_matched": set()}
             by_skill[r["skill"]] = entry
         entry["chunks"].append({
             "kind": r["kind"],
@@ -215,7 +216,7 @@ def _aggregate(
             "snippet": _snippet(r["body"]),
         })
         entry["kinds"].add(r["kind"])
-        entry["matched"] |= matched
+        entry["_matched"] |= matched
         if score > entry["score"]:
             entry["score"] = score
 
@@ -225,15 +226,18 @@ def _aggregate(
         bonus = COVERAGE_WEIGHT * min(n - 1, COVERAGE_CAP)
         lex = entry["score"] * (1.0 + bonus)
 
-        covered = sum(idf[t] for t in entry["matched"] if t in idf)
+        covered = sum(idf[t] for t in entry["_matched"] if t in idf)
         coordination = (covered / denom) if denom > 0 else 0.0
 
         entry["lexical_score"] = round(lex, 4)
         entry["coordination"] = round(coordination, 4)
-        entry["matched_terms"] = sorted(entry["matched"])
+        entry["matched_terms"] = sorted(entry["_matched"])
         entry["coverage"] = n
         entry["kinds"] = sorted(entry["kinds"])
         entry["chunks"].sort(key=lambda c: c["score"], reverse=True)
+        # The working set is not part of the result. Leaving a set in here
+        # made `omnicli search --json` raise a TypeError.
+        entry.pop("_matched", None)
         out.append(entry)
 
     # Stage 1: rank by lexical score, keep the competitive candidates.
