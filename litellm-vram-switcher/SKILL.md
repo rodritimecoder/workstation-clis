@@ -14,7 +14,7 @@ Use this skill to inspect GPU VRAM, operate the automated model-swapping reverse
 Engineered for Dual AMD Radeon RX 9060 XT (32 GB total VRAM):
 - **Port `8000` (`llama-swap`)**: Native Go model-swapping proxy with automated VRAM solver matrix:
   - **`qwen3.6-35b` (Pinned King, ~22 GB)**: Q4_0 ROCMFP4 uncensored model split across both GPUs (`-ts 45/55`).
-  - **`imajev-4b` (Auxiliary Decision, ~3.5 GB)**: Calibrated decision model ($T=1.305$) with multimodal projector. Runs concurrently alongside Qwen3.6!
+  - **`vllm-d3-mini` (Premier Decision, ~3.7 GB)**: Native `/v1/systemone` decision model (5B, Q4_K_M) with multimodal projector; ~70 ms, zero generated tokens. OneJev1.5-4B remains the calibrated fallback on `:8089`.
   - **`lighton-ocr` (Auxiliary Vision OCR, ~1.5 GB)**: Flagship 16k t/s slide/doc OCR. Runs concurrently alongside Qwen3.6 and Imajev!
   - **`deskforge-4b` (GUI Grounding, ~3.5 GB)**: Desktop computer-use coordinate extraction agent.
   - **`gemma4-26b` (Heavy General Model, ~18 GB)**: Automatically evicts Qwen3.6 when called, and swaps Qwen3.6 back when needed.

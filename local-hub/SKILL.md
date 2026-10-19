@@ -1,6 +1,6 @@
 ---
 name: local-hub
-description: "Unified local workstation inference hub and CLI gateway for Dual-GPU AMD Radeon hardware: Genesis 35B coder (:8080), LightOnOCR-3-1B vision (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron 3.5 ASR (:8081), live health checks, and skill discovery."
+description: "Unified local workstation inference hub and CLI gateway for Dual-GPU AMD Radeon hardware: Genesis 35B coder (:8080), LightOnOCR-3-1B vision (:8085), vllm-d3-mini calibrated decisions (:8083, OneJev fallback :8089), Nemotron 3.5 ASR (:8081), live health checks, and skill discovery."
 ---
 
 # `local-hub` — Workstation Inference & Skills Gateway
@@ -54,21 +54,29 @@ local-hub ocr --doctor
 ---
 
 ### 3. `local-hub decide` (or `local-hub jev`) — Premier Calibrated Decision Gating (:8083)
-Queries **vllm-d3-mini** (premier vision+decision, calibrated $T=1.305$) and **JPT-4B** (:8090) for calibrated probabilities, classification, scoring, and binary gating.
+Queries **vllm-d3-mini** (premier, native `/v1/systemone`, 5B) on :8083, with **OneJev1.5-4B** (:8089, fallback) and **JPT-4B** (:8090) for calibrated probabilities, classification, scoring, and binary gating.
+
+vllm-d3-mini answers all three primitives in **one forward pass with zero generated tokens** (~70 ms), and the server's probabilities are already calibrated — no letter-logit readout or temperature correction.
 
 ```bash
 # 1. Binary Decision (noul) -> P(true)
 local-hub decide "User wants a refund after 60 days." "Is this within 30-day policy?"
-# Output: {"model": "onejev", "type": "noul", "answer": false, "p_true": 0.02, "confidence": 0.98}
+# Output: {"model": "vllm", "type": "noul", "answer": false, "p": {"true": 0.02, ...}, "confidence": 0.96}
 
 # 2. Multi-class Choice -> argmax + probability distribution
 local-hub decide "Crash log showing null pointer" "Which component failed?" '{"db": "database", "ui": "frontend", "net": "network"}'
 
 # 3. Ordered Score -> expected level
-local-hub decide "Customer review text" "Rate sentiment" '["negative", "neutral", "positive"]'
+local-hub decide "Customer review text" "Rate sentiment" '["negative", "neutral", "positive"]' --type score
+
+# Batch: many typed questions, one forward pass
+local-hub decide --batch questions.json
 
 # Cross-check multiple models
-local-hub decide "State text" "Question" --cross-check onejev,jpt
+local-hub decide "State text" "Question" --cross-check vllm,onejev,jpt
+
+# Explicit fallback to the previous premier model (letter-logit, :8089)
+local-hub decide "State text" "Question" --model onejev
 ```
 
 ---

@@ -10,34 +10,41 @@ from jev_engine import JevEngine
 
 def main():
     parent_parser = argparse.ArgumentParser(add_help=False)
-    parent_parser.add_argument("--host", default=None, help="OneJev host (default: $JEV_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
-    parent_parser.add_argument("--port", type=int, default=8083, help="Local JEV/OneJev service port (default: 8083)")
+    parent_parser.add_argument("--host", default=None, help="Decision host (default: $JEV_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
+    parent_parser.add_argument("--port", type=int, default=8083, help="Decision service port (default: 8083 = vllm-d3-mini, 8086 = OneJev fallback)")
     parent_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
-    parser = argparse.ArgumentParser(description="JEV Decision Engine CLI — OneJev1.5-4B Calibrated Multimodal Decision Primitives", parents=[parent_parser])
+    # Subparsers re-declare the shared options with SUPPRESS so that a --port
+    # given before the subcommand is not silently overwritten by the default.
+    sub_parent = argparse.ArgumentParser(add_help=False)
+    sub_parent.add_argument("--host", default=argparse.SUPPRESS)
+    sub_parent.add_argument("--port", type=int, default=argparse.SUPPRESS)
+    sub_parent.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+
+    parser = argparse.ArgumentParser(description="JEV Decision Engine CLI — vllm-d3-mini native /v1/systemone (OneJev fallback)", parents=[parent_parser])
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # bool
-    p_bool = subparsers.add_parser("bool", parents=[parent_parser], help="Binary boolean decision primitive")
+    p_bool = subparsers.add_parser("bool", parents=[sub_parent], help="Binary boolean decision primitive")
     p_bool.add_argument("--context", required=True, help="Input context or background facts")
     p_bool.add_argument("--question", required=True, help="Binary question to decide (Yes/No)")
     p_bool.add_argument("--image", default=None, help="Optional image path or base64 data for vision decision")
 
     # choice
-    p_choice = subparsers.add_parser("choice", parents=[parent_parser], help="Constrained discrete enum selection primitive")
+    p_choice = subparsers.add_parser("choice", parents=[sub_parent], help="Constrained discrete enum selection primitive")
     p_choice.add_argument("--context", required=True, help="Input context or background facts")
     p_choice.add_argument("--question", required=True, help="Question to decide")
     p_choice.add_argument("--options", nargs="+", required=True, help="Candidate options list")
     p_choice.add_argument("--image", default=None, help="Optional image path or base64 data for vision decision")
 
     # score
-    p_score = subparsers.add_parser("score", parents=[parent_parser], help="Continuous scalar magnitude score primitive (0.0 to 1.0)")
+    p_score = subparsers.add_parser("score", parents=[sub_parent], help="Continuous scalar magnitude score primitive (0.0 to 1.0)")
     p_score.add_argument("--context", required=True, help="Input context to score")
     p_score.add_argument("--criteria", required=True, help="Criteria for evaluation")
     p_score.add_argument("--image", default=None, help="Optional image path or base64 data for vision decision")
 
     # composite
-    p_comp = subparsers.add_parser("composite", parents=[parent_parser], help="Composite decision primitive (gate bool + action choice + quality score)")
+    p_comp = subparsers.add_parser("composite", parents=[sub_parent], help="Composite decision primitive (gate bool + action choice + quality score)")
     p_comp.add_argument("--context", required=True, help="Input context or background facts")
     p_comp.add_argument("--question", required=True, help="Question to decide")
     p_comp.add_argument("--options", nargs="+", required=True, help="Candidate options list")
@@ -45,17 +52,19 @@ def main():
     p_comp.add_argument("--image", default=None, help="Optional image path or base64 data for vision decision")
 
     # clean-context
-    p_clean = subparsers.add_parser("clean-context", parents=[parent_parser], help="Pairwise context de-duplication and superseding prune")
+    p_clean = subparsers.add_parser("clean-context", parents=[sub_parent], help="Pairwise context de-duplication and superseding prune")
     p_clean.add_argument("--claims-file", required=True, help="JSON file containing array of {timestamp, text} claims")
 
     # uat
-    p_uat = subparsers.add_parser("uat", parents=[parent_parser], help="Frontend acceptance action decider with optional visual grounding")
+    p_uat = subparsers.add_parser("uat", parents=[sub_parent], help="Frontend acceptance action decider with optional visual grounding")
     p_uat.add_argument("--intent", required=True, help="User test intent (e.g., 'Click the login button')")
     p_uat.add_argument("--dom-file", required=True, help="JSON file containing array of {id, text, tag} clickable elements")
     p_uat.add_argument("--image", default=None, help="Optional UI screenshot for visual UAT")
 
     args = parser.parse_args()
-    engine = JevEngine(host=args.host, port=args.port)
+    args.port = getattr(args, "port", 8083)
+    args.json = getattr(args, "json", False)
+    engine = JevEngine(host=getattr(args, "host", None), port=args.port)
 
     if args.command == "bool":
         res = engine.decide_bool(args.context, args.question, image=args.image)

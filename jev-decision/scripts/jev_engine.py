@@ -2,6 +2,7 @@
 import base64
 import json
 import math
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -39,7 +40,14 @@ class JevEngine:
         self.ssl_ctx.verify_mode = ssl.CERT_NONE
 
         self.endpoint = f"{self.scheme}://{self.host}:{self.port}/completion"
+        self.systemone_url = f"{self.scheme}://{self.host}:{self.port}/v1/systemone"
         self.health_url = f"{self.scheme}://{self.host}:{self.port}/health"
+
+        # auto     = native /v1/systemone first, fall back to the onejev letter readout
+        # systemone/vllm = native only
+        # legacy   = letter readout only (OneJev/Imajev-4B)
+        self.backend = os.environ.get("JEV_BACKEND", "auto").lower()
+        self._systemone_supported: Optional[bool] = None
 
     def is_online(self) -> bool:
         try:
@@ -59,6 +67,115 @@ class JevEngine:
         if len(image) > 64 and ("/" in image or "+" in image or image.endswith("=")):
             return image
         return None
+
+    def _data_url(self, image: Optional[str]) -> Optional[str]:
+        raw = self._encode_image(image)
+        if not raw:
+            return None
+        mime = "image/png"
+        try:
+            guess, _ = mimetypes.guess_type(str(image))
+            if guess and guess.startswith("image/"):
+                mime = guess
+        except Exception:
+            pass
+        return f"data:{mime};base64,{raw}"
+
+    def _call_systemone(
+        self,
+        state: str,
+        question: str,
+        options: Optional[List[str]],
+        typ: str,
+        image: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """vllm-d3-mini native /v1/systemone. Calibrated server-side."""
+        if self.backend == "legacy" or self._systemone_supported is False:
+            return None
+        if not self.is_online():
+            return None
+
+        q: Dict[str, Any] = {"type": typ, "instructions": question}
+        levels: Optional[List[str]] = None
+        if typ == "choice":
+            if not options:
+                raise ValueError("Options list required for choice primitive")
+            q["criteria"] = {str(o): None for o in options}
+        elif typ == "score":
+            levels = [str(o) for o in (options or ["0.0", "0.25", "0.5", "0.75", "1.0"])]
+            q["criteria"] = levels
+
+        payload: Dict[str, Any] = {"state": state, "questions": {"answer": q}}
+        data_url = self._data_url(image)
+        if data_url:
+            payload["images"] = [data_url]
+
+        try:
+            req = urllib.request.Request(
+                self.systemone_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            ctx = self.ssl_ctx if self.scheme == "https" else None
+            with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code in (404, 400, 501):     # not a decision-model server
+                self._systemone_supported = False
+            return None
+        except Exception:
+            return None
+
+        self._systemone_supported = True
+        ans = (data.get("answers") or {}).get("answer")
+        if not ans:
+            return None
+        source = "vllm_d3_mini_systemone"
+
+        if typ == "noul":
+            p_true = round(float(ans.get("noul", 0.0)), 4)
+            p_false = round(1.0 - p_true, 4)
+            return {
+                "primitive": "bool",
+                "decision": p_true >= 0.5,
+                "confidence": round(abs(p_true - 0.5) * 2.0, 4),
+                "probabilities": {"true": p_true, "false": p_false},
+                "source": source,
+            }
+
+        if typ == "score":
+            probs_raw = ans.get("probabilities") or {}
+            dist: Dict[str, float] = {}
+            scalar = 0.0
+            for k, v in probs_raw.items():
+                if not str(k).isdigit():
+                    continue
+                i = int(k)
+                if levels and i < len(levels):
+                    try:
+                        scalar += float(levels[i]) * float(v)
+                        dist[levels[i]] = round(float(v), 4)
+                    except ValueError:
+                        dist[str(k)] = round(float(v), 4)
+            return {
+                "primitive": "score",
+                "score": round(min(1.0, max(0.0, scalar)), 4),
+                "probabilities": dist or probs_raw,
+                "source": source,
+            }
+
+        probs = {str(k): round(float(v), 4) for k, v in (ans.get("probabilities") or {}).items()}
+        best = ans.get("choice") or (max(probs, key=probs.get) if probs else None)
+        conf = ans.get("confidence")
+        if conf is None:
+            conf = _concentration(list(probs.values())) if probs else 0.0
+        return {
+            "primitive": "choice",
+            "selection": best,
+            "confidence": round(float(conf), 4),
+            "probabilities": probs,
+            "source": source,
+        }
 
     def _call_onejev(
         self,
@@ -176,7 +293,9 @@ class JevEngine:
         }
 
     def decide_bool(self, context: str, question: str, image: Optional[str] = None) -> Dict[str, Any]:
-        res = self._call_onejev(context, question, None, "noul", image)
+        res = self._call_systemone(context, question, None, "noul", image)
+        if res is None:
+            res = self._call_onejev(context, question, None, "noul", image)
         if res is not None:
             return res
 
@@ -199,7 +318,9 @@ class JevEngine:
     def decide_choice(self, context: str, question: str, options: List[str], image: Optional[str] = None) -> Dict[str, Any]:
         if not options:
             raise ValueError("Choice primitive requires at least one option")
-        res = self._call_onejev(context, question, options, "choice", image)
+        res = self._call_systemone(context, question, options, "choice", image)
+        if res is None:
+            res = self._call_onejev(context, question, options, "choice", image)
         if res is not None:
             return res
 
@@ -223,7 +344,10 @@ class JevEngine:
         }
 
     def decide_score(self, context: str, criteria: str, image: Optional[str] = None) -> Dict[str, Any]:
-        res = self._call_onejev(context, criteria, ["0.0", "0.25", "0.5", "0.75", "1.0"], "score", image)
+        levels = ["0.0", "0.25", "0.5", "0.75", "1.0"]
+        res = self._call_systemone(context, criteria, levels, "score", image)
+        if res is None:
+            res = self._call_onejev(context, criteria, levels, "score", image)
         if res is not None:
             return res
 

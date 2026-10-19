@@ -5,8 +5,9 @@
     decide.py "state" "question" '["low","mid","high"]'  # score -> expected level
     decide.py "state" "question" '{"billing":"desc", ...}'  # choice -> argmax + distribution
     decide.py --state-file notes.md --question "..." --options keep,draft,discard
+    decide.py --model vllm ...     # vllm-d3-mini via /v1/systemone (:8083, default)
     decide.py --model jev ...      # Jev-Style-2B (no server needed)
-    decide.py --model imajev ...   # Imajev-4B (llama-server :8083, default)
+    decide.py --model imajev ...   # Imajev/OneJev-4B fallback (llama-server :8089)
     decide.py --model jpt ...      # JPT-4B (llama-server + :8080; started on demand)
     decide.py --batch q.json       # {"state": ..., "questions": {qid: {...}}}
 
@@ -35,13 +36,22 @@ JEV_DIR = pathlib.Path(os.environ.get("JEV_DIR", "/home/rodri/build/jev-env"))
 DEFAULT_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 ENGINE_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 
-# ---- vllm-d3-mini / OneJev1.5-4B / Imajev-4B decision backend -------------------------------
-# Served by the ROCmFPX llama.cpp build on IMAJEV_PORT (sh/vllm-d3-mini.sh, sh/onejev-4b.sh, or sh/imajev-4b.sh).
-# vllm-d3-mini is the premier vision + decision model for calibrated routing.
+# ---- vllm-d3-mini backend (premier) ----------------------------------------
+# Served by llama.cpp >= b11729 on VLLM_PORT (sh/vllm-d3-mini.sh). Native
+# /v1/systemone: the model returns calibrated probabilities for all typed
+# questions in one forward pass, so there is no letter readout or temperature
+# divide - the server's numbers are already calibrated.
+VLLM_PORT = int(os.environ.get("VLLM_PORT", "8083"))
+VLLM_BASE = f"http://127.0.0.1:{VLLM_PORT}"
+
+# ---- OneJev1.5-4B / Imajev-4B decision backend -------------------------------
+# Fallback behind vllm-d3-mini, served by the stock upstream llama.cpp build on
+# IMAJEV_PORT (sh/onejev-4b.sh or sh/imajev-4b.sh). OneJev1.5-4B is the previous
+# premier vision + decision model for calibrated routing.
 # The readout is client-side. We present the options as letters, prefill the
 # assistant turn with "Answer:" so the next token IS the choice, read the letter
 # logits off completion_probabilities, divide by calibration temperature, then softmax.
-IMAJEV_PORT = int(os.environ.get("IMAJEV_PORT", "8083"))
+IMAJEV_PORT = int(os.environ.get("IMAJEV_PORT", "8089"))
 IMAJEV_BASE = f"http://127.0.0.1:{IMAJEV_PORT}"
 IMAJEV_TEMPERATURE = float(os.environ.get("IMAJEV_TEMPERATURE", "1.3051569717552742"))
 IMAJEV_IMAGE = os.environ.get("IMAJEV_IMAGE", "")
@@ -151,6 +161,127 @@ def ask_jevstyle(state, question, opts, typ, port=JEVSTYLE_PORT, timeout=180):
     return _wrap(typ, options, _softmax_over_labels(top, options, T=1.0))
 
 
+def ensure_vllm(port=VLLM_PORT, timeout=180):
+    if _health(f"http://127.0.0.1:{port}/health"):
+        return
+    launcher = pathlib.Path("/run/media/rodri/AI/sh/vllm-d3-mini.sh")
+    if not launcher.exists():
+        raise SystemExit(f"vllm-d3-mini launcher missing: {launcher}")
+    subprocess.Popen([str(launcher)], stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True,
+                     env={**os.environ, "PORT": str(port)})
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _health(f"http://127.0.0.1:{port}/health"):
+            return
+        time.sleep(1.0)
+    raise SystemExit(f"vllm-d3-mini did not come up on :{port} - start sh/vllm-d3-mini.sh")
+
+
+def _systemone_question(question, opts, typ):
+    q = {"type": typ, "instructions": question}
+    if typ == "choice":
+        if isinstance(opts, dict):
+            q["criteria"] = opts
+        elif isinstance(opts, (list, tuple)):
+            q["criteria"] = {str(o): None for o in opts}
+    elif typ == "score":
+        if not isinstance(opts, (list, tuple)):
+            raise SystemExit("score needs a list of levels, lowest first")
+        q["criteria"] = [str(o) for o in opts]
+    return q
+
+
+def ask_vllm(state, question, opts, typ, port=VLLM_PORT, timeout=180, images=None):
+    """vllm-d3-mini: native /v1/systemone, already calibrated server-side.
+
+    Returns the same internal shape as the other backends so flatten() and
+    --cross-check treat every model identically.
+    """
+    payload = {"state": state, "questions": {"answer": _systemone_question(question, opts, typ)}}
+    if images:
+        payload["images"] = images
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/systemone",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        res = json.load(urllib.request.urlopen(req, timeout=timeout))
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"systemone {e.code}: {e.read().decode(errors='replace')[:300]}")
+    except urllib.error.URLError as e:
+        raise SystemExit(f"systemone unreachable on :{port} ({e.reason}) - start sh/vllm-d3-mini.sh")
+
+    ans = (res.get("answers") or {}).get("answer")
+    if not ans:
+        raise SystemExit(f"systemone returned no answer: {str(res)[:300]}")
+    return _map_systemone(ans, levels=opts if typ == "score" else None)
+
+
+def _map_systemone(ans, levels=None):
+    """systemone answer object -> the internal backend shape.
+
+    A systemone score is the expected *level index* (e.g. 2.28 of 4 levels), so
+    it is re-expressed against the caller's level values when they are numeric.
+    """
+    typ = ans.get("type")
+    if typ == "noul":
+        p = float(ans.get("noul", 0.0))
+        return {"type": "noul",
+                "probabilities": {"true": round(p, 4), "false": round(1.0 - p, 4)},
+                "confidence": round(abs(p - 0.5) * 2.0, 4)}
+    if typ == "score":
+        probs = ans.get("probabilities") or {}
+        if levels:
+            try:
+                dist = {str(levels[int(k)]): round(v, 4) for k, v in probs.items()
+                        if k.isdigit() and int(k) < len(levels)}
+                scalar = sum(float(levels[int(k)]) * v for k, v in probs.items()
+                             if k.isdigit() and int(k) < len(levels))
+                if dist:
+                    return {"type": "score", "score": round(scalar, 4),
+                            "probabilities": dist,
+                            "confidence": ans.get("confidence", 0.0)}
+            except (TypeError, ValueError):
+                pass
+        return {"type": "score",
+                "score": ans.get("score"),
+                "probabilities": probs,
+                "confidence": ans.get("confidence", 0.0)}
+    return {"type": "choice",
+            "answer": ans.get("choice"),
+            "probabilities": ans.get("probabilities") or {},
+            "confidence": ans.get("confidence", 0.0)}
+
+
+def ask_vllm_batch(state, questions, port=VLLM_PORT, timeout=180, images=None):
+    """One state, many typed questions, one forward pass. Questions may be a
+    plain string (treated as noul) or a full systemone question object."""
+    qs = {}
+    for qid, spec in questions.items():
+        qs[qid] = spec if isinstance(spec, dict) else {"type": "noul", "instructions": str(spec)}
+    payload = {"state": state, "questions": qs}
+    if images:
+        payload["images"] = images
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/systemone",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        res = json.load(urllib.request.urlopen(req, timeout=timeout))
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"systemone {e.code}: {e.read().decode(errors='replace')[:300]}")
+    except urllib.error.URLError as e:
+        raise SystemExit(f"systemone unreachable on :{port} ({e.reason}) - start sh/vllm-d3-mini.sh")
+    answers = res.get("answers") or {}
+    out = {}
+    for qid, ans in answers.items():
+        spec = qs.get(qid) or {}
+        lvls = spec.get("criteria") if spec.get("type") == "score" else None
+        out[qid] = _map_systemone(ans, levels=lvls)
+    return out
+
+
 def _logaddexp(a, b):
     """math.logaddexp equivalent (not in the stdlib math module)."""
     if a == -math.inf:
@@ -164,10 +295,7 @@ def _logaddexp(a, b):
 def ensure_imajev(port=IMAJEV_PORT, timeout=10):
     if _health(f"{IMAJEV_BASE}/health"):
         return
-    # Try vllm-d3-mini first (premier decision model), then fall back to OneJev/Imajev
-    launcher = pathlib.Path("/run/media/rodri/AI/sh/vllm-d3-mini.sh")
-    if not launcher.exists():
-        launcher = pathlib.Path("/run/media/rodri/AI/sh/onejev-4b.sh")
+    launcher = pathlib.Path("/run/media/rodri/AI/sh/onejev-4b.sh")
     if not launcher.exists():
         launcher = pathlib.Path("/run/media/rodri/AI/sh/imajev-4b.sh")
     if not launcher.exists():
@@ -179,7 +307,7 @@ def ensure_imajev(port=IMAJEV_PORT, timeout=10):
         if _health(f"{IMAJEV_BASE}/health"):
             return
         time.sleep(1.0)
-    raise SystemExit(f"decision server did not come up on :{port} - start sh/vllm-d3-mini.sh")
+    raise SystemExit(f"decision server did not come up on :{port} - start sh/onejev-4b.sh")
 
 
 def _letters_for(opts, typ):
@@ -405,7 +533,11 @@ def _run_one(model, state, question, opts, typ, a):
     """Dispatch one model -> flattened {answer, p, confidence}. Shared by the
     primary run and by --cross-check so both go through identical code."""
     port = a.port
-    if model in ("onejev", "imajev"):
+    if model in ("vllm", "d3"):
+        port = VLLM_PORT if a.port is None else a.port
+        ensure_vllm(port, a.timeout)
+        raw = ask_vllm(state, question, opts, typ, port=port, timeout=a.timeout)
+    elif model in ("onejev", "imajev"):
         ensure_imajev(IMAJEV_PORT, a.timeout)
         port = IMAJEV_PORT if a.port is None else a.port
         raw = ask_imajev(state, question, opts, typ, port=port, timeout=a.timeout)
@@ -432,15 +564,17 @@ def main():
     ap.add_argument("--state", help="same as the first positional")
     ap.add_argument("--question", help="same as the second positional")
     ap.add_argument("--options", help="same as the third positional")
-    ap.add_argument("--model", default=os.environ.get("JEV_CLI_MODEL", "onejev"),
-                    choices=["onejev", "imajev", "jev", "jpt"],
-                    help="onejev=OneJev1.5-4B premier vision+decision on :8083 (default), "
-                         "imajev=Imajev-4B alias on :8083, "
+    ap.add_argument("--model", default=os.environ.get("JEV_CLI_MODEL", "vllm"),
+                    choices=["vllm", "d3", "onejev", "imajev", "jev", "jpt"],
+                    help="vllm=vllm-d3-mini native /v1/systemone on :8083 (default, premier), "
+                         "d3=alias for vllm, "
+                         "onejev=OneJev1.5-4B vision+decision fallback on :8089, "
+                         "imajev=Imajev-4B alias on :8089, "
                          "jev=Jev-Style-2B on :8085, jpt=JPT-4B System One on :8090")
     ap.add_argument("--state-file", help="read the state from a file")
     ap.add_argument("--type", default="auto", choices=["auto", "choice", "score", "noul"])
     ap.add_argument("--port", type=int, default=None,
-                    help="model server port (default: imajev 8083, jev 8085, jpt 8090)")
+                    help="model server port (default: vllm 8083, onejev/imajev 8089, jev 8085, jpt 8090)")
     ap.add_argument("--cross-check", metavar="MODEL[,MODEL...]", default=None,
                     help="run 2+ models on the same question and flag disagreement, "
                          "e.g. --cross-check imajev,jpt (implies the first as primary)")
@@ -453,15 +587,29 @@ def main():
     # ---- batch mode
     if a.batch:
         payload = json.loads(pathlib.Path(a.batch).read_text())
+        if a.model in ("vllm", "d3"):
+            port = VLLM_PORT if a.port is None else a.port
+            ensure_vllm(port, a.timeout)
+            answers = ask_vllm_batch(payload.get("state", ""), payload.get("questions") or {},
+                                     port=port, timeout=a.timeout)
+            print(json.dumps({"model": "vllm", "answers":
+                              [flatten(q, answers[q]) for q in answers]}, indent=1))
+            return
         if a.model == "jpt":
-            ensure_jpt(a.port, a.timeout)
-            out = ask_jpt(a.port, payload)
-        else:
-            raise SystemExit("batch mode needs --model jpt (jev takes one question at a time)")
-        answers = out["answers"]
-        print(json.dumps({"model": "jpt", "answers": answers if a.raw else
-                          [flatten(q, answers[q]) for q in answers]}, indent=1))
-        return
+            port = DEFAULT_PORT if a.port is None else a.port
+            ensure_jpt(port, a.timeout)
+            st = payload.get("state", "")
+            answers = {}
+            for qid, spec in (payload.get("questions") or {}).items():
+                if isinstance(spec, dict):
+                    answers[qid] = ask_jpt(port, st, spec.get("instructions", ""),
+                                           spec.get("criteria"), spec.get("type", "noul"))
+                else:
+                    answers[qid] = ask_jpt(port, st, str(spec), None, "noul")
+            print(json.dumps({"model": "jpt", "answers": answers if a.raw else
+                              [flatten(q, answers[q]) for q in answers]}, indent=1))
+            return
+        raise SystemExit("batch mode supports --model vllm or jpt")
 
     state = pathlib.Path(a.state_file).read_text(errors="replace") if a.state_file \
         else (a.state or a.state_pos)
@@ -503,9 +651,13 @@ def main():
         q["criteria"] = opts
 
     if a.port is None:
-        a.port = {"onejev": IMAJEV_PORT, "imajev": IMAJEV_PORT, "jev": JEVSTYLE_PORT}.get(a.model, DEFAULT_PORT)
+        a.port = {"vllm": VLLM_PORT, "d3": VLLM_PORT,
+                  "onejev": IMAJEV_PORT, "imajev": IMAJEV_PORT, "jev": JEVSTYLE_PORT}.get(a.model, DEFAULT_PORT)
 
-    if a.model == "jpt":
+    if a.model in ("vllm", "d3"):
+        ensure_vllm(a.port, a.timeout)
+        ans = ask_vllm(state, question, opts, typ, port=a.port, timeout=a.timeout)
+    elif a.model == "jpt":
         ensure_jpt(a.port, a.timeout)
         ans = ask_jpt(a.port, state, question, opts, typ)
     elif a.model in ("onejev", "imajev"):

@@ -21,7 +21,7 @@ metadata:
 
 # JEV Decision Engine (`jev-decision`)
 
-A calibrated, non-generative decision system implementing Kem's (Glitch Cat Club) **3 Universal Decision Primitives**, backed by the premier **OneJev1.5-4B Multimodal Vision Model** (`prithivMLmods/OneJev1.5-4B-GGUF` + `OneJev1.5-4B.mmproj-bf16.gguf` on `:8083`). Solves the latency, cost, and stochastic drift of asking frontier generative models to answer discrete, structured questions.
+A calibrated, non-generative decision system implementing Kem's (Glitch Cat Club) **3 Universal Decision Primitives**, backed by the premier **vllm-d3-mini** decision model (`ggml-org/vllm-d3-mini-GGUF`, 5B, native `/v1/systemone` on `:8083`; OneJev1.5-4B remains the calibrated fallback on `:8089`). Solves the latency, cost, and stochastic drift of asking frontier generative models to answer discrete, structured questions.
 
 ---
 
@@ -44,18 +44,18 @@ JEV="python3 /run/media/rodri/AI/skills/jev-decision/jev_decision.py"
 # 1. Binary Decision (Bool)
 $JEV bool --context "Postgres was deprecated and replaced with SQLite." \
           --question "Does SQLite supersede Postgres?"
-# Output: ⚖️ [JEV Bool] -> YES (Confidence: 92.0%) [onejev_1.5_4b_server]
+# Output: ⚖️ [JEV Bool] -> YES (Confidence: 92.0%) [vllm_d3_mini_systemone]
 
 # 2. Constrained Enum Selection (Choice)
 $JEV choice --context "Integration tests must run in parallel across 16 CPU cores." \
             --question "Which runner lane?" \
             --options sequential_lane parallel_worker_lane skip_tests
-# Output: 🎯 [JEV Choice] -> 'parallel_worker_lane' (Confidence: 89.5%) [onejev_1.5_4b_server]
+# Output: 🎯 [JEV Choice] -> 'parallel_worker_lane' (Confidence: 89.5%) [vllm_d3_mini_systemone]
 
 # 3. Scalar Magnitude Score (Score)
 $JEV score --context "Unit tests achieve 100% coverage with zero failures." \
            --criteria "test coverage and zero failures"
-# Output: 📊 [JEV Score] -> 1.0000 / 1.0000 [onejev_1.5_4b_server]
+# Output: 📊 [JEV Score] -> 1.0000 / 1.0000 [vllm_d3_mini_systemone]
 
 # 4. Composite Decision Card (Single-Shot Triage)
 $JEV composite --context "Refactored test suite with 100% pass rate." \
