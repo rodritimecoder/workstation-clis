@@ -1,171 +1,86 @@
 ---
 name: hybrid-browser
-description: "Tiered browser automation agent using Podman Chromium, Chrome DevTools Protocol (CDP), and DeskForge-Qwen3.5-4B visual grounding fallback. Use whenever asked to browse the web, interact with authenticated web portals, click complex canvas/SVG buttons, or automate web flows."
+description: >
+  Drive a sandboxed Chromium over CDP: navigate, click, type, screenshot.
+  Falls back to local vision grounding for canvas, SVG and Shadow DOM.
 ---
 
-# Hybrid Browser (Playwright + DeskForge Grounding)
+# hybrid-browser
 
-A tiered web automation skill designed for local LLM workloads. It automates a sandboxed Chromium instance running inside Podman, splitting tasks across two tiers:
-1. **Tier 1 (Fast Path):** Uses native Playwright accessibility & DOM locators over Chrome DevTools Protocol (`:9222`) for instant, token-free clicks.
-2. **Tier 2 (Vision Fallback):** When elements are drawn on `<canvas>`, SVG dashboards, Shadow DOM, or obfuscated React widgets, it takes a screenshot, resizes via Lanczos even-dimensions, and queries local `DeskForge-Qwen3.5-4B` (`:8088`) for normalized `(x, y)` coordinates to click.
+Two paths: a native Rust CDP client (`playwright-rs`, ~3ms cold start) and a
+Python wrapper (`hybrid-browser`) that falls back to local DeskForge vision
+when the DOM yields no selector.
 
----
+## Commands
 
-## Architecture & Ports
-
-| Component | Endpoint | Purpose |
-| :--- | :--- | :--- |
-| **Podman Container (`hybrid-browser`)** | `http://127.0.0.1:3010` | Live interactive KasmVNC web desktop (you can watch or log in manually) |
-| **Chromium CDP** | `http://127.0.0.1:9222` | Direct Chrome DevTools Protocol automated by Playwright |
-| **DeskForge Server** | `http://127.0.0.1:8088` | Local `DeskForge-Qwen3.5-4B` running on Vulkan dual RX 9060 XT |
-
-Persistent profile directory is preserved across container restarts at:
-`~/.local/share/hybrid-browser-profile`
-
----
-
-## Quick Start Commands
-
-### 1. Start the Background Services
-Starts the rootless Podman browser container and warms up DeskForge on port 8088:
+### 1. Start the browser services
 ```bash
-~/.gemini/config/skills/hybrid-browser/scripts/service.sh start
+omnicli invoke hybrid-browser/scripts/service -- start
 ```
 
-### 2. View the Live Interactive GUI (KasmVNC)
-Opens the live browser screen in a borderless native app window:
+### 2. Open a URL (`playwright-rs`)
+Native client. Starts a headless engine if none is running.
 ```bash
-~/.gemini/config/skills/hybrid-browser/scripts/service.sh gui
-```
-*(Or navigate to `http://127.0.0.1:3010` in any web browser).*
-
-### 3. Check Service Status
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/service.sh status
-```
-
-### 4. Stop All Services
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/service.sh stop
-```
-
----
-
-## Driving the Browser via CLI
-
-Use the python wrapper `run.sh` to drive navigation and interactions:
-
-### Navigate to a page:
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --url "https://news.ycombinator.com"
-```
-
-### Click an element (attempts DOM first, falls back to DeskForge vision):
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --click "login"
-```
-
-### Type into the focused input field:
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --type "myusername"
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --press "Tab"
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --type "mypassword"
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --press "Enter"
-```
-
-### Get a clean text snapshot of the current viewport:
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --snapshot
-```
-
-### Capture screenshot to file:
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --screenshot "/tmp/current_page.png"
-```
-
-### Interactive REPL Mode:
-```bash
-~/.gemini/config/skills/hybrid-browser/scripts/run.sh --interactive
-```
-In the REPL:
-- `goto <url>`
-- `click <button text or visual description>`
-- `type <text>`
-- `press <key>`
-- `snap`
-- `screenshot`
-
----
-
-## Ultra-Fast Native Playwright CLI & CDP Verification (`playwright-rs` / `fast-cdp`)
-
-`hybrid-browser` includes a compiled native Rust binary (`fast-cdp-rs`, aliased as `playwright-rs` and `fast-cdp`) communicating directly over Chrome DevTools Protocol (`:9222`) WebSockets. It replaces heavyweight Node.js Playwright CLI runs (3ms cold start vs 183ms, 3ms snapshot vs 470ms).
-
-### 1. Interactive Session Commands (`playwright-rs`)
-
-For stateful interactive browser navigation, DOM inspection, and form interactions across multiple CLI calls:
-
-```bash
-# Open a URL (starts background headless engine or connects to :9222)
 playwright-rs open "https://example.com"
+```
 
-# Capture accessibility snapshot with numbered ref IDs (3ms)
+### 3. Snapshot the page (`playwright-rs`)
+Accessibility tree with numbered ref IDs, for clicking by reference.
+```bash
 playwright-rs snapshot
+```
 
-# Click an element by its ref ID (e.g. e1) or CSS selector
+### 4. Click an element (`playwright-rs`)
+By ref ID from the snapshot, or by CSS selector.
+```bash
 playwright-rs click e1
+```
 
-# Fill or type into form inputs
+### 5. Fill a field and submit (`playwright-rs`)
+```bash
 playwright-rs fill e2 "search query"
 playwright-rs press Enter
+```
 
-# Run JavaScript in the page context
+### 6. Run JavaScript in the page (`playwright-rs`)
+```bash
 playwright-rs eval "document.title"
+```
 
-# Capture a PNG screenshot
+### 7. Screenshot (`playwright-rs`)
+```bash
 playwright-rs screenshot /tmp/result.png
+```
 
-# Cleanly close the session
+### 8. Close the session (`playwright-rs`)
+```bash
 playwright-rs close
 ```
 
-### 2. Multi-Session & Container Attachment
-
+### 9. Vision-grounded click (`hybrid-browser`)
+Use when the element is canvas, SVG, Shadow DOM or obfuscated React.
 ```bash
-# Work in a specific named session:
-playwright-rs -s work open "https://github.com"
-playwright-rs -s work snapshot
-
-# Attach directly to the running hybrid-browser Podman container (:9222 / KasmVNC :3010):
-playwright-rs attach --cdp "http://127.0.0.1:9222"
+hybrid-browser --click "login"
 ```
 
-### 3. One-Shot Deterministic Verification (`fast-cdp verify`)
-
+### 10. One-shot page verification (`fast-cdp verify`)
+Asserts a selector and text in under 40ms.
 ```bash
-# Verify selector & text presence in <40ms
-fast-cdp verify "http://localhost:3000" \
-  --assert-selector "h1" \
-  --assert-text "Dashboard" \
-  --json
-
-# Click and verify dynamic state update
-fast-cdp verify "http://localhost:3000" \
-  --click "#submit-btn" \
-  --assert-text "Saved successfully" \
-  --screenshot "/tmp/verification_proof.png"
+fast-cdp verify "http://localhost:3000" --assert-selector "h1" --assert-text "Dashboard"
 ```
 
-### 4. Autonomous UAT Mode (Jev / JPT-4B Driven)
-
-Autonomous goal-directed browser actions in 200–400ms without Vision model overhead:
+### 11. Goal-directed UAT (`fast-cdp uat`)
+Hands the interactive elements to JPT-4B (`:8090`) to decide and click.
 ```bash
-# Hand interactive elements to JPT-4B (:8090) to decide and click the checkout button:
-fast-cdp uat "http://localhost:3000" \
-  --goal "Proceed to checkout" \
-  --expect-text "Checkout Successful" \
-  --model jpt \
-  --json
+fast-cdp uat "http://localhost:3000" --goal "Proceed to checkout" --expect-text "Checkout Successful"
 ```
 
+### 12. Interactive REPL (`hybrid-browser`)
+Stateful across calls: `goto`, `click`, `type`, `press`, `snap`, `screenshot`.
+```bash
+hybrid-browser --interactive
+```
 
+## Reference
+
+- `references/architecture.md` — tiers, ports (:3010, :9222, :8088), profile path
