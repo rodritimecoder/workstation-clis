@@ -256,7 +256,10 @@ def main() -> int:
                  "that appear in no document.",
     }, indent=2) + "\n", encoding="utf-8")
 
-    print(f"📂 Run area: {run}")
+    # The path goes on its own line, unlabelled. A "Run area: <path>" line
+    # reads as one path-shaped string, and a reader that copies it verbatim
+    # ends up creating a directory named "area:".
+    print(f"📂 Run area\n   {run}")
     print(f"   01_interview/  read the existing skill")
     print(f"   02_draft/      write SKILL.md + aliases.json")
     print(f"   03_proof/      prove routing, check for regressions")
