@@ -46,6 +46,7 @@ def set_aliases(
     tags: list[str] | None = None,
     *,
     index_body: bool | None = None,
+    body_budget: int | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Set a skill's curated metadata. Returns the stored record.
@@ -53,6 +54,13 @@ def set_aliases(
     Passing None for a field leaves it unchanged; passing an empty list
     clears it. Unknown skills are created, because a publisher may register
     a skill before its directory exists in the collection.
+
+    ``body_budget`` overrides the token gate's body limit for a skill. A
+    *command surface* is read to find a command, so its body has a tight
+    budget. A *method* skill is read to learn the method, and the method is
+    the product — so it may claim a larger one. The override lives here
+    rather than in the gate so the budget a skill claims and the budget the
+    gate enforces cannot drift apart.
     """
     data = load(path)
     record = dict(data.get(skill) or {})
@@ -62,6 +70,8 @@ def set_aliases(
         record["tags"] = [t.strip() for t in tags if t.strip()]
     if index_body is not None:
         record["index_body"] = bool(index_body)
+    if body_budget is not None:
+        record["body_budget"] = int(body_budget)
     record.setdefault("aliases", [])
     record.setdefault("tags", [])
     data[skill] = record

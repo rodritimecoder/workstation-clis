@@ -166,7 +166,9 @@
       "exam prep",
       "anki export",
       "printable notes",
-      "summary sheet"
+      "summary sheet",
+      "spaced repetition",
+      "cue note pairs"
     ],
     "tags": [
       "education",
@@ -210,7 +212,10 @@
       "bootstrap",
       "secrets shield",
       "blob guard",
-      "multi repo"
+      "multi repo",
+      "commit without a blanket git add",
+      "quality gate before push",
+      "rebase my branch before pushing"
     ],
     "tags": [
       "git",
@@ -240,12 +245,13 @@
       "guardrails",
       "destructive command",
       "rm rf",
+      "is this destructive",
       "force push",
       "drop table",
-      "protect file",
-      "block dangerous",
-      "destructive command",
-      "is this destructive"
+      "protected file",
+      "stop the agent from deleting my notes",
+      "make this command safe before running it",
+      "lock down a file"
     ],
     "tags": [
       "safety",
@@ -279,12 +285,15 @@
       "workspace architecture",
       "context map",
       "restructure a repo into folders",
-      "agent readable layout"
+      "agent navigable structure",
+      "folders as orchestration",
+      "cold read by an agent"
     ],
     "tags": [
       "architecture",
       "organisation"
-    ]
+    ],
+    "body_budget": 900
   },
   "jev-decision": {
     "aliases": [
@@ -313,7 +322,10 @@
       "ollama",
       "litellm proxy",
       "model server management",
-      "thermal"
+      "thermal",
+      "unload the models i don't need",
+      "free up headroom",
+      "which model is resident"
     ],
     "tags": [
       "gpu",
@@ -328,7 +340,11 @@
       "extract text from document",
       "spreadsheet to markdown",
       "slides to markdown",
-      "read attachment"
+      "read attachment",
+      "word document to text",
+      "powerpoint to markdown",
+      "excel spreadsheet",
+      "unreadable binary office file"
     ],
     "tags": [
       "documents",
@@ -485,7 +501,10 @@
       "download transcript",
       "keyframe slides",
       "recording slides",
-      "lecture slides"
+      "lecture slides",
+      "speaker transcript",
+      "slide deck from a talk",
+      "recorded talk"
     ],
     "tags": [
       "education",
