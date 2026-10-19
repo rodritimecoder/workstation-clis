@@ -104,7 +104,7 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | [`review-hub`](review-hub/) | `review-hub` | Unified code review and architecture audit gateway: Ponytail (minimal diff & YAGNI), pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, No-Comments, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` / `git-sync` | Autonomous fleet synchronizer (`sync-all`, `status-all`), disciplined 6-stage branch sync engine (`git-sync`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
-| [`local-hub`](local-hub/) | `local-hub` | Unified Dual-GPU hardware inference hub (`llm`, `ocr`, `decide`, `asr`, `status`) and late-binding gateway across all workstation skills. |
+| [`omnicli`](omnicli/) | `omnicli` | Unified Dual-GPU hardware inference hub (`llm`, `ocr`, `decide`, `asr`, `status`) and late-binding gateway across all workstation skills. |
 | [`graph-memory`](graph-memory/) | `graph-memory` | Local hybrid RAG (BM25 + BGE-small 384d) with exact-quote LLM distillation, prompt recall hooks, and session digests. |
 | [`litellm-vram-switcher`](litellm-vram-switcher/) | `vram-rig-ctl` | Multi-GPU VRAM switcher, llama-swap orchestrator (:8000), and LiteLLM failover manager (:4000). |
 | [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |
@@ -148,23 +148,23 @@ python3 graph-memory/rag/build_index.py --corpus "/path/to/notes"
 python3 graph-memory/rag/distil.py "/path/to/notes" --limit 10
 ```
 
-### 3. `local-hub` — Workstation Local Hardware Inference & Skills Hub
+### 3. `omnicli` — Workstation Local Hardware Inference & Skills Hub
 Unified CLI for all local Dual-GPU inference endpoints on ports `:8080`–`:8090`:
 ```bash
 # Query Genesis 35B Coder on :8080 (Dual RX 9060 XT offload)
-local-hub llm "Write an async rate limiter in TypeScript" --stream
+omnicli llm "Write an async rate limiter in TypeScript" --stream
 
 # OCR PDFs, slides, and screenshots with LightOnOCR-3-1B on :8085
-local-hub ocr lecture.pdf --pages 1-5 -o notes.md
+omnicli ocr lecture.pdf --pages 1-5 -o notes.md
 
 # Calibrated decision gating with Imajev-4B on :8083
-local-hub decide "User request context" "Is this safe to run?"
+omnicli decide "User request context" "Is this safe to run?"
 
 # Speech-to-text with Nemotron-3.5 on :8081
-local-hub asr transcribe meeting.mp3
+omnicli asr transcribe meeting.mp3
 
 # Live health check on all inference ports
-local-hub status
+omnicli status
 ```
 
 ### 4. `hybrid-browser` — Vision-Grounded Browser Agent

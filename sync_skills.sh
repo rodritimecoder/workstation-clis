@@ -71,10 +71,15 @@ done
 # Setup Launchers in ~/.local/bin
 echo "🔗 [workstation-sync] Configuring CLI launchers in $BIN_DIR..."
 
-# local-hub & review-hub
-[ -f "$SCRIPT_DIR/local-hub/local_hub.py" ] && ln -sf "$SCRIPT_DIR/local-hub/local_hub.py" "$BIN_DIR/local-hub" && chmod +x "$SCRIPT_DIR/local-hub/local_hub.py"
-[ -f "$SCRIPT_DIR/local-hub/local_hub.py" ] && ln -sf "$SCRIPT_DIR/local-hub/local_hub.py" "$BIN_DIR/skills-hub"
-[ -f "$SCRIPT_DIR/local-hub/local_hub.py" ] && ln -sf "$SCRIPT_DIR/local-hub/local_hub.py" "$BIN_DIR/uber"
+# omnicli (canonical gateway) & review-hub
+# `omnicli` is the primary name. `uber`, `local-hub` and `skills-hub` remain
+# as deprecated aliases so existing scripts and prompts keep working.
+if [ -f "$SCRIPT_DIR/omnicli/omnicli.py" ]; then
+    chmod +x "$SCRIPT_DIR/omnicli/omnicli.py"
+    for alias in omnicli uber local-hub skills-hub; do
+        ln -sf "$SCRIPT_DIR/omnicli/omnicli.py" "$BIN_DIR/$alias"
+    done
+fi
 [ -f "$SCRIPT_DIR/review-hub/review_hub.py" ] && ln -sf "$SCRIPT_DIR/review-hub/review_hub.py" "$BIN_DIR/review-hub" && chmod +x "$SCRIPT_DIR/review-hub/review_hub.py"
 
 # state-compactor & cgate

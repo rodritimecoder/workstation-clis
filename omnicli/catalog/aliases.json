@@ -1,0 +1,119 @@
+{
+  "omnicli": {
+    "aliases": ["tool registry", "find a tool", "search skills", "run a skill", "gateway", "omnicli", "discover a tool", "tool contract", "what can this machine do", "list my tools"],
+    "tags": ["gateway", "discovery"],
+    "index_body": false
+  },
+  "local": {
+    "aliases": ["llm", "local model", "on device model", "offline model", "run a model locally", "text generation", "chat completion", "servers on this machine", "local endpoints", "speech to text locally", "read text from an image locally", "what is running locally"],
+    "tags": ["inference", "endpoints", "online", "offline", "running", "status", "servers"]
+  },
+  "local-hub": {
+    "aliases": ["llm", "local model", "servers on this machine", "health check endpoints", "port status", "tool registry", "find a tool", "search skills", "run a skill", "gateway"],
+    "tags": ["gateway", "inference", "discovery"]
+  },
+  "academic-icm": {
+    "aliases": ["course hub", "canvas zoom cornell", "lecture study pipeline", "academic orchestrator"],
+    "tags": ["education", "orchestrator"]
+  },
+  "agent-reach": {
+    "aliases": ["research", "look up online", "internet search", "scrape", "social media posts", "reddit twitter youtube bilibili xiaohongshu", "调研", "搜索", "查一下", "网上"],
+    "tags": ["research", "web"]
+  },
+  "agentic-engineering": {
+    "aliases": ["software factory", "autonomous pipeline", "kanban board", "build feature end to end", "event listener", "task splitter"],
+    "tags": ["engineering", "autonomy"]
+  },
+  "audiocpp": {
+    "aliases": ["audio", "speech", "asr", "tts", "voice", "podcast", "recording", "transcribe", "whisper", "speak", "sound", "audiobook", "dictation", "voice clone", "align audio to text"],
+    "tags": ["audio", "speech", "tts", "asr"]
+  },
+  "canvas-cli": {
+    "aliases": ["canvas", "lms", "homework", "assignments", "grades", "due dates", "announcements", "syllabus", "course materials", "course materials", "class materials", "handouts", "transcript"],
+    "tags": ["education", "lms", "course", "materials", "content", "assignments", "files"]
+  },
+  "cornell-notes": {
+    "aliases": ["revision notes", "study guide", "active recall", "cue notes", "exam prep", "anki export", "printable notes", "summary sheet"],
+    "tags": ["education", "notes"]
+  },
+  "edstem-cli": {
+    "aliases": ["ed discussion", "forum threads", "classmates answers", "tutor answers", "course forum", "ask a question"],
+    "tags": ["education", "forum"]
+  },
+  "gh-action-subagent": {
+    "aliases": ["github actions", "ci runner", "cloud sandbox", "spawn agent in cloud", "pull request from agent"],
+    "tags": ["github", "cloud", "autonomy"]
+  },
+  "github-architect": {
+    "aliases": ["git sync", "sync repos", "fleet", "multiple machines", "bootstrap", "secrets shield", "blob guard", "multi repo"],
+    "tags": ["git", "github", "sync"]
+  },
+  "graph-memory": {
+    "aliases": ["knowledge graph", "rag", "vector search", "bm25", "embeddings recall", "entity dedup", "knowledge base search", "what do we know about"],
+    "tags": ["memory", "retrieval"]
+  },
+  "guard-hooks": {
+    "aliases": ["safety", "guardrails", "destructive command", "rm rf", "force push", "drop table", "protect file", "block dangerous", "destructive command", "is this destructive"],
+    "tags": ["safety", "guardrails"]
+  },
+  "hybrid-browser": {
+    "aliases": ["browse the web", "browser automation", "open a website", "screenshot of page", "navigate", "click button", "fill form", "web scraping with js"],
+    "tags": ["browser", "automation"]
+  },
+  "icm-architect": {
+    "aliases": ["design a folder structure", "lay out a knowledge base", "workspace architecture", "context map", "restructure a repo into folders", "agent readable layout"],
+    "tags": ["architecture", "organisation"]
+  },
+  "jev-decision": {
+    "aliases": ["classify", "probability", "confidence score", "binary gate", "choose between options", "multiple choice", "argmax over labels", "how likely", "calibrated", "front end visual test"],
+    "tags": ["classification", "decision"]
+  },
+  "litellm-vram-switcher": {
+    "aliases": ["gpu memory", "vram", "how much gpu is free", "swap model", "ollama", "litellm proxy", "model server management", "thermal"],
+    "tags": ["gpu", "servers"]
+  },
+  "markitdown-cli": {
+    "aliases": ["convert to markdown", "pdf to markdown", "docx to text", "extract text from document", "spreadsheet to markdown", "slides to markdown", "read attachment"],
+    "tags": ["documents", "conversion"]
+  },
+  "nvidia-nim": {
+    "aliases": ["nvidia api", "nim", "cloud inference", "deepseek", "qwen api", "batched embeddings", "api key pooling"],
+    "tags": ["cloud", "inference"]
+  },
+  "ocr": {
+    "aliases": ["read text in image", "screenshot text", "scan a document", "extract text from picture", "recognise handwriting", "slide text", "screenshot to markdown"],
+    "tags": ["vision", "ocr"]
+  },
+  "okf-architect": {
+    "aliases": ["knowledge bundle", "provenance", "validate schema", "open knowledge format", "trust tier"],
+    "tags": ["knowledge", "schema"]
+  },
+  "openrouter-free": {
+    "aliases": ["free model", "delegate to cloud", "compound bash batch", "text embeddings api", "speech synthesis api", "cheap subagent"],
+    "tags": ["cloud", "free", "subagent"]
+  },
+  "review-hub": {
+    "aliases": ["code review", "review my code", "quality rules", "coding standards", "architecture audit", "style guide", "review my diff", "audit my code", "pre commit review", "quality rules"],
+    "tags": ["code", "quality", "review", "rules", "standards", "pre-push", "commit", "guidelines"]
+  },
+  "subagent-spaces": {
+    "aliases": ["isolated sandbox", "container", "podman", "cpu pinned", "blast radius", "run untrusted code safely"],
+    "tags": ["sandbox", "isolation"]
+  },
+  "tailscale-ops": {
+    "aliases": ["expose over network", "private https", "tailnet", "mesh", "funnel", "webhook endpoint", "remote access"],
+    "tags": ["network"]
+  },
+  "video-miner": {
+    "aliases": ["video", "youtube", "transcribe a video", "key frames", "summarise a recording", "slides from video", "video knowledge notes"],
+    "tags": ["video", "media"]
+  },
+  "worktree-harness": {
+    "aliases": ["git worktree", "parallel agents", "branch per agent", "swarm", "merge conflict", "quality gate", "spawn parallel coders"],
+    "tags": ["git", "parallelism", "agents"]
+  },
+  "zoom-recorder": {
+    "aliases": ["zoom", "zoom recording", "lecture recording", "cloud recording", "download transcript", "keyframe slides", "recording slides", "lecture slides"],
+    "tags": ["education", "media"]
+  }
+}

@@ -10,36 +10,36 @@ Authoritative catalog of local AI inference engines, model weights, port binding
 
 Always check health before launching (`curl -s http://127.0.0.1:<port>/health`).
 
-| Port | Service | Default Model | Launcher | Health Check | Unified local-hub Command |
+| Port | Service | Default Model | Launcher | Health Check | Unified omnicli Command |
 |---|---|---|---|---|---|
-| `:8080` | `llama-server` (Vulkan) | `Qwen3.6-35B-A3B Uncensored Genesis` | `sh/luffy_nothink.sh` | `curl -s http://127.0.0.1:8080/health` | `local-hub llm "<prompt>"` |
-| `:8081` | `audio.cpp` (Vulkan) | `nemotron-asr`, `kokoro-v1.0`, `qwen3-forced-aligner` | `audio-v0.9.0-bin-ubuntu-x64-vulkan/run-audiocpp.sh` | `curl -s http://127.0.0.1:8081/health` | `local-hub asr transcribe <audio>` |
-| `:8083` | `llama-server` (Vulkan) | `imajev-4b-Q4_K_M` + `mmproj` | `sh/imajev-4b.sh` | `curl -s http://127.0.0.1:8083/health` | `local-hub decide <state> <question> [options]` |
-| `:8084` | `crispembed-server` | `CrispEmbed Scene Text (DBNet + PARSeq)` | `sh/crispembed-ocr.sh` | `curl -s http://127.0.0.1:8084/health` | `local-hub ocr <image> --model crispembed` |
-| `:8085` | `llama-server` (Vulkan) | `LightOnOCR-3-1B` | `sh/lighton-ocr.sh` | `curl -s http://127.0.0.1:8085/health` | `local-hub ocr <image-or-pdf>` |
-| `:8090` | `jpt-engine` | `jpt-4b.Q4_K_M` + `mmproj` | `sh/jpt-4b/` | `curl -s http://127.0.0.1:8090/health` | `local-hub decide --model jpt <state> <question>` |
+| `:8080` | `llama-server` (Vulkan) | `Qwen3.6-35B-A3B Uncensored Genesis` | `sh/luffy_nothink.sh` | `curl -s http://127.0.0.1:8080/health` | `omnicli llm "<prompt>"` |
+| `:8081` | `audio.cpp` (Vulkan) | `nemotron-asr`, `kokoro-v1.0`, `qwen3-forced-aligner` | `audio-v0.9.0-bin-ubuntu-x64-vulkan/run-audiocpp.sh` | `curl -s http://127.0.0.1:8081/health` | `omnicli asr transcribe <audio>` |
+| `:8083` | `llama-server` (Vulkan) | `imajev-4b-Q4_K_M` + `mmproj` | `sh/imajev-4b.sh` | `curl -s http://127.0.0.1:8083/health` | `omnicli decide <state> <question> [options]` |
+| `:8084` | `crispembed-server` | `CrispEmbed Scene Text (DBNet + PARSeq)` | `sh/crispembed-ocr.sh` | `curl -s http://127.0.0.1:8084/health` | `omnicli ocr <image> --model crispembed` |
+| `:8085` | `llama-server` (Vulkan) | `LightOnOCR-3-1B` | `sh/lighton-ocr.sh` | `curl -s http://127.0.0.1:8085/health` | `omnicli ocr <image-or-pdf>` |
+| `:8090` | `jpt-engine` | `jpt-4b.Q4_K_M` + `mmproj` | `sh/jpt-4b/` | `curl -s http://127.0.0.1:8090/health` | `omnicli decide --model jpt <state> <question>` |
 
 ---
 
-## Unified Local Inference & Skills Gateway (`local-hub`)
+## Unified Local Inference & Skills Gateway (`omnicli`)
 
-All local hardware inference services and workstation agent skills in `/run/media/rodri/AI/skills/` are unified under the **`local-hub`** CLI (`~/.local/bin/local-hub`, backward-compatible alias `skills-hub`).
+All local hardware inference services and workstation agent skills in `/run/media/rodri/AI/skills/` are unified under the **`omnicli`** CLI (`~/.local/bin/omnicli`, backward-compatible alias `skills-hub`).
 
 ### 1. Unified Local Inference Commands
 Execute local Dual-GPU models with zero context overhead:
-- **LLM Coder (:8080):** `local-hub llm "<prompt>" [--stream] [--out <file>]`
-- **Speech-to-Text (:8081):** `local-hub asr transcribe <audio> [--out <file>]`
-- **Calibrated Decisions (:8083/:8090):** `local-hub decide "<state>" "<question>" [options]`
-- **Vision Document & Slide OCR (:8085):** `local-hub ocr <file> [--pages 1-3] [-o <file>]`
-- **Live Port & Mesh Health:** `local-hub status` (or `local-hub health`)
+- **LLM Coder (:8080):** `omnicli llm "<prompt>" [--stream] [--out <file>]`
+- **Speech-to-Text (:8081):** `omnicli asr transcribe <audio> [--out <file>]`
+- **Calibrated Decisions (:8083/:8090):** `omnicli decide "<state>" "<question>" [options]`
+- **Vision Document & Slide OCR (:8085):** `omnicli ocr <file> [--pages 1-3] [-o <file>]`
+- **Live Port & Mesh Health:** `omnicli status` (or `omnicli health`)
 
 ### 2. The 4-Step Late-Binding Funnel (Skill Discovery)
 Never dump static skill lists into the prompt or hardcode paths. Use the dynamic discovery funnel:
-- **Discover:** `local-hub search "<intent>"` (searches all workstation skills via full-body index)
-- **Inspect Tools:** `local-hub tools <skill>` (lists available executable scripts)
-- **Read Contract:** `local-hub inspect <skill>` (loads the exact YAML contract for that 1 skill only)
-- **Invoke with Projection:** `local-hub run <skill> [script] [args] [--out / --project]` (runs with disk buffering)
-- **Full Live Vault:** `local-hub list` (lists all registered skills dynamically from upstream)
+- **Discover:** `omnicli search "<intent>"` (searches all workstation skills via full-body index)
+- **Inspect Tools:** `omnicli tools <skill>` (lists available executable scripts)
+- **Read Contract:** `omnicli inspect <skill>` (loads the exact YAML contract for that 1 skill only)
+- **Invoke with Projection:** `omnicli run <skill> [script] [args] [--out / --project]` (runs with disk buffering)
+- **Full Live Vault:** `omnicli list` (lists all registered skills dynamically from upstream)
 
 ---
 

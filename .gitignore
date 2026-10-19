@@ -5,7 +5,9 @@ __pycache__/
 *.so
 
 # Virtual Environments
-.venv/
+# No trailing slash: omnicli/.venv is a symlink to an ext4 venv, and a
+# directory-only rule would not ignore the symlink itself.
+.venv
 venv/
 env/
 ENV/

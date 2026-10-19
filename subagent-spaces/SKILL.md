@@ -84,5 +84,5 @@ subagent-spaces doctor
 By default, spaces use `--network host`, enabling sandboxed subagents to seamlessly query your workstation's local LLM and speech servers:
 * `http://127.0.0.1:8080` — Primary LLM (Qwen 35B)
 * `http://127.0.0.1:8081` — Nemotron 3.5 ASR (`audiocpp-asr`)
-* `http://127.0.0.1:8083` — vllm-d3-mini Decision (`local-hub decide`), OneJev fallback on :8089
+* `http://127.0.0.1:8083` — vllm-d3-mini Decision (`omnicli decide`), OneJev fallback on :8089
 * `http://127.0.0.1:8085` — LightOnOCR-3-1B (`ocr-cli`)
