@@ -68,6 +68,40 @@ def meta_set(con: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
+def _cached_contract(con: sqlite3.Connection, path: str, mtime_ns: int,
+                     interpreter: str | None) -> dict | None:
+    """Return a previously extracted contract, if it is still valid.
+
+    Validity is keyed on the file's mtime and the interpreter that was used.
+    Touching a script, or running the extraction under a different Python,
+    invalidates the entry.
+    """
+    if not mtime_ns:
+        return None
+    row = con.execute(
+        "SELECT contract FROM contract_cache "
+        "WHERE path = ? AND mtime_ns = ? AND interpreter = ?",
+        (path, mtime_ns, interpreter or ""),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["contract"])
+    except json.JSONDecodeError:
+        return None
+
+
+def _store_contract(con: sqlite3.Connection, path: str, mtime_ns: int,
+                    interpreter: str | None, contract: dict) -> None:
+    if not mtime_ns:
+        return
+    con.execute(
+        "INSERT OR REPLACE INTO contract_cache"
+        "(path, mtime_ns, interpreter, contract) VALUES(?,?,?,?)",
+        (path, mtime_ns, interpreter or "", json.dumps(contract)),
+    )
+
+
 def _ensure_docs_schema(con: sqlite3.Connection) -> None:
     """Recreate the FTS5 table when its column layout has drifted.
 
@@ -224,17 +258,22 @@ def build(
             tool_count += 1
             contract = t["contract"]
             if with_contracts and t["kind"] == "script" and t["path"]:
+                st_mtime = 0
                 try:
                     st = os.stat(t["path"])
-                    key = f"{t['path']}:{st.st_mtime_ns}:{skill_python}"
+                    st_mtime = st.st_mtime_ns
+                    key = f"{t['path']}:{st_mtime}:{skill_python}"
                 except OSError:
                     key = t["path"]
                 cached = contract_cache.get(key)
                 if cached is None:
+                    cached = _cached_contract(con, t["path"], st_mtime, skill_python)
+                if cached is None:
                     cached = registry.extract_contract(
                         Path(t["path"]), python=skill_python)
-                    contract_cache[key] = cached
+                    _store_contract(con, t["path"], st_mtime, skill_python, cached)
                     n_contracts += 1
+                contract_cache[key] = cached
                 contract = cached
                 n_scripts += 1
             tool_rows.append((

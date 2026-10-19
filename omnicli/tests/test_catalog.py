@@ -225,6 +225,56 @@ class TestCatalog(unittest.TestCase):
         self.assertIn("podcast", aliases)
 
 
+class TestContractCache(unittest.TestCase):
+    """The contract cache makes rebuilds incremental.
+
+    Without it every rebuild re-runs --help on sixty-odd scripts, which is
+    the difference between 130ms and 3.2 seconds.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.con = builder.connect()
+
+    def test_cache_roundtrip(self):
+        builder._store_contract(self.con, "/tmp/fake.py", 12345, "/usr/bin/python3",
+                                {"usage": "x", "flags": ["--a"], "positionals": [],
+                                 "subcommands": [{"name": "s"}], "help": "usage: x"})
+        got = builder._cached_contract(self.con, "/tmp/fake.py", 12345, "/usr/bin/python3")
+        self.assertIsNotNone(got)
+        self.assertEqual(got["usage"], "x")
+        self.assertEqual(got["subcommands"][0]["name"], "s")
+
+    def test_cache_invalidated_by_mtime(self):
+        builder._store_contract(self.con, "/tmp/fake2.py", 1, "", {"usage": "old"})
+        self.assertIsNone(builder._cached_contract(self.con, "/tmp/fake2.py", 2, ""))
+        self.assertIsNone(builder._cached_contract(self.con, "/tmp/fake2.py", 1, "/other"))
+
+    def test_cache_survives_a_rebuild(self):
+        """A rebuild must not lose subcommand tools to the cache.
+
+        This is the regression that a dropped `contract = cached` assignment
+        caused: the rebuild succeeded, the tool count collapsed, and nothing
+        errored.
+        """
+        before = self.con.execute(
+            "SELECT count(*) AS c FROM tools WHERE kind = 'subcommand'").fetchone()["c"]
+        self.assertGreater(before, 100, "expected subcommand tools in the catalog")
+        builder.build(self.con, progress=False)
+        after = self.con.execute(
+            "SELECT count(*) AS c FROM tools WHERE kind = 'subcommand'").fetchone()["c"]
+        self.assertEqual(after, before,
+                         f"rebuild lost subcommand tools: {before} -> {after}")
+
+    def test_cached_contracts_keep_their_subcommands(self):
+        row = self.con.execute(
+            "SELECT contract FROM tools WHERE id = 'audiocpp/scripts/audiocpp_cli'"
+        ).fetchone()
+        contract = json.loads(row["contract"])
+        self.assertGreaterEqual(len(contract.get("subcommands", [])), 5,
+                                "audiocpp_cli should expose its subcommands")
+
+
 class TestSearch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

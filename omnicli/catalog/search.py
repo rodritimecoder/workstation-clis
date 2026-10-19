@@ -23,8 +23,7 @@ import os
 import re
 import sqlite3
 import struct
-import urllib.error
-import urllib.request
+import time
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +58,14 @@ EMBEDDING_URL = os.environ.get(
 EMBEDDING_MODEL = os.environ.get("OMNICLI_EMBEDDING_MODEL", "bge-small-en-v1.5")
 
 # A re-ranker is only worth its latency if the endpoint is actually up.
-EMBEDDING_TIMEOUT = 20.0
+#
+# Two separate timeouts, because the failure modes differ. A *probe* is a
+# liveness check and must be near-instant: if the port is filtered rather
+# than closed, a 20s probe would stall every search. The re-rank itself may
+# legitimately take longer, since it embeds the query plus every candidate.
+PROBE_TIMEOUT = 1.0
+RERANK_TIMEOUT = 5.0
+PROBE_TTL = 30.0
 RERANK_CANDIDATES = 20
 
 
@@ -260,14 +266,22 @@ def _snippet(body: str, width: int = 220) -> str:
 # optional embedding re-ranker
 # --------------------------------------------------------------------------
 
-def _embed(texts: list[str]) -> list[list[float]] | None:
-    """Call the local embedding endpoint. Returns None if it is unavailable."""
+def _embed(texts: list[str], timeout: float = RERANK_TIMEOUT) -> list[list[float]] | None:
+    """Call the local embedding endpoint. Returns None if it is unavailable.
+
+    ``urllib.request`` is imported here rather than at module scope. It
+    costs about 10ms to import, and the common case — a BM25-only search
+    with no embedding server running — never needs it.
+    """
+    import urllib.error
+    import urllib.request
+
     payload = json.dumps({"input": texts, "model": EMBEDDING_MODEL}).encode("utf-8")
     req = urllib.request.Request(
         EMBEDDING_URL, data=payload, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=EMBEDDING_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
         return None
@@ -318,15 +332,23 @@ def rerank(con: sqlite3.Connection, query: str, candidates: list[dict[str, Any]]
     return scored + candidates[RERANK_CANDIDATES:]
 
 
-def embedding_available() -> bool:
-    """Cheap liveness probe for the optional re-ranker."""
-    try:
-        req = urllib.request.Request(f"{EMBEDDING_URL.rstrip('/')}/../../health")
-    except Exception:
-        return False
-    # The embeddings endpoint has no guaranteed /health, so probe with a
-    # minimal embed call instead of guessing at a health path.
-    return _embed(["ping"]) is not None
+_PROBE: dict[str, Any] = {"at": 0.0, "ok": False}
+
+
+def embedding_available(max_age: float = PROBE_TTL) -> bool:
+    """Liveness probe for the optional re-ranker, cached briefly.
+
+    The probe uses a short timeout and its result is cached for half a
+    minute, so a filtered (rather than closed) port costs one second once
+    instead of stalling every status call.
+    """
+    now = time.monotonic()
+    if now - _PROBE["at"] < max_age:
+        return bool(_PROBE["ok"])
+    ok = _embed(["ping"], timeout=PROBE_TIMEOUT) is not None
+    _PROBE["at"] = now
+    _PROBE["ok"] = ok
+    return ok
 
 
 # --------------------------------------------------------------------------

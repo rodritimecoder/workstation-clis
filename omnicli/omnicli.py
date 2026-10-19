@@ -25,6 +25,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -534,16 +535,49 @@ def cmd_invoke(tool_id: str, extra_args: list[str], out_path: str | None = None,
 # index / eval
 # --------------------------------------------------------------------------
 
-def cmd_index(rebuild: bool = False, with_contracts: bool = True, as_json: bool = False):
+def cmd_index(rebuild: bool = False, with_contracts: bool = True, as_json: bool = False,
+              check: bool = False):
     con = builder.connect()
+
+    if check:
+        # Report freshness without doing any work. Used by the skill factory
+        # to skip a rebuild when nothing changed.
+        stale = builder.is_stale(con)
+        version_ok = builder.meta_get(con, "schema_version") == builder.SCHEMA_VERSION
+        fresh = (not stale) and version_ok
+        payload = {
+            "fresh": fresh,
+            "stale": stale,
+            "schema_version_ok": version_ok,
+            "skills": int(builder.meta_get(con, "skill_count", "0") or 0),
+            "tools": int(builder.meta_get(con, "tool_count", "0") or 0),
+            "docs": int(builder.meta_get(con, "doc_count", "0") or 0),
+            "built_at": float(builder.meta_get(con, "built_at", "0") or 0),
+            "db": str(builder.db_path()),
+        }
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            state = "✅ fresh" if fresh else "⚠️  stale"
+            print(f"{state}  {payload['skills']} skills · {payload['tools']} tools · "
+                  f"{payload['docs']} docs")
+            print(f"   {payload['db']}")
+        sys.exit(0 if fresh else 1)
+
+    t0 = time.monotonic()
     summary = builder.ensure_built(con, rebuild=rebuild, with_contracts=with_contracts, progress=True)
+    elapsed = time.monotonic() - t0
     if as_json:
+        summary["elapsed_seconds"] = round(elapsed, 3)
         print(json.dumps(summary, indent=2))
         return
     verb = "rebuilt" if summary.get("rebuilt") else "up to date"
+    extracted = summary.get("contracts_extracted", 0)
+    detail = f" · {extracted} contracts extracted" if extracted else " · 0 contracts extracted (cached)"
     print(f"\n📇 Catalog {verb}: {summary['skills']} skills · {summary['tools']} tools · "
-          f"{summary['docs']} docs")
-    print(f"   {builder.db_path()}\n")
+          f"{summary['docs']} docs{detail}")
+    print(f"   {builder.db_path()}")
+    print(f"   {elapsed * 1000:.0f} ms\n")
 
 
 def cmd_eval(verbose: bool = False, as_json: bool = False):
@@ -721,6 +755,8 @@ def main():
     p = sub.add_parser("index", help="Build or refresh the catalog index")
     p.add_argument("--rebuild", action="store_true", help="Force a full rebuild")
     p.add_argument("--no-contracts", action="store_true", help="Skip --help contract extraction")
+    p.add_argument("--check", action="store_true",
+                   help="Report whether the index is fresh, without rebuilding")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("eval", help="Run the golden routing evaluation")
@@ -769,7 +805,8 @@ def main():
     elif args.action == "describe":
         cmd_describe(args.tool_id, as_json=args.json)
     elif args.action == "index":
-        cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts, as_json=args.json)
+        cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts,
+                  as_json=args.json, check=args.check)
     elif args.action == "eval":
         cmd_eval(verbose=args.verbose, as_json=args.json)
     elif args.action == "mcp":

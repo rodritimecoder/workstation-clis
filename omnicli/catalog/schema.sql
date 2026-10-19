@@ -66,3 +66,18 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- --------------------------------------------------------- contract cache
+-- Extracting a contract means running a script's --help, which costs about
+-- 50ms each. There are sixty-odd scripts, so a cold rebuild spends over
+-- three seconds re-learning facts that have not changed. This table makes
+-- the rebuild incremental: the key includes the file's mtime and the
+-- interpreter used, so a cached contract is only reused when both are
+-- unchanged, and a touched script is re-extracted.
+CREATE TABLE IF NOT EXISTS contract_cache (
+    path        TEXT NOT NULL,
+    mtime_ns    INTEGER NOT NULL,
+    interpreter TEXT NOT NULL,
+    contract    TEXT NOT NULL,
+    PRIMARY KEY (path, mtime_ns, interpreter)
+);
