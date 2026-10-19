@@ -78,6 +78,13 @@ def main() -> None:
                             break
                 if not echo:
                     continue
+                # A two-word alias that happens to appear in a query is not
+                # an answer key: "force push", "rm rf", "drop table" and
+                # "out loud" are all legitimate domain terms. Containment
+                # only counts from three words up; shorter overlaps are
+                # left to the 5-gram check, which needs five.
+                if len(words) < 3 and na in nq:
+                    continue
                 # Derivable? Either the alias phrase appears verbatim in the
                 # skill's own documentation, or at least two of its content
                 # words do (the vocabulary may be non-contiguous, e.g.

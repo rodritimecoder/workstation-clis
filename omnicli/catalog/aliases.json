@@ -122,7 +122,21 @@
       "audiobook",
       "dictation",
       "voice clone",
-      "align audio to text"
+      "align audio to text",
+      "speech to text",
+      "text to speech",
+      "narrate",
+      "word timestamps",
+      "subtitle timing",
+      "millisecond word boundaries",
+      "read this audio out loud",
+      "out loud",
+      "say this in my voice",
+      "text into a voice",
+      "voice over",
+      "narrate this",
+      "offline speech synthesis",
+      "local tts"
     ],
     "tags": [
       "audio",
