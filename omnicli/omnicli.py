@@ -186,7 +186,7 @@ SERVICES = [
     {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper"},
     {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU flagship coder"},
     {"port": 8081, "name": "audio.cpp ASR & TTS", "role": "Streaming speech-to-text / TTS"},
-    {"port": 8083, "name": "vllm-d3-mini Decision Gating", "role": "Premier calibrated decisions"},
+    {"port": 8083, "name": "Decision Gating", "role": "Premier calibrated decisions (protocol auto-detected)"},
     {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection"},
     {"port": 8085, "name": "LightOnOCR Flagship OCR", "role": "Document and slide OCR"},
     {"port": 8087, "name": "Embedding Server (BGE / EmbeddingGemma)", "role": "Optional re-ranker for catalog search"},

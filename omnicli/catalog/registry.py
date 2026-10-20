@@ -57,7 +57,7 @@ ENDPOINTS = {
         "argv": ["{python}", "{skill}/scripts/ocr.py"],
     },
     "local/decide": {
-        "summary": "Calibrated decision primitives (bool/choice/score) via vllm-d3-mini (:8083).",
+        "summary": "Calibrated decision primitives (bool/choice/score) via the decision model on :8083.",
         "argv": ["{python}", "{skill}/scripts/decide.py"],
     },
     "local/asr": {
@@ -78,7 +78,7 @@ VIRTUAL_SKILLS = {
         "description": (
             "Local LLM and inference endpoints on this workstation: Genesis 35B "
             "coder for writing code (:8080), LightOnOCR document vision (:8085), "
-            "vllm-d3-mini calibrated decisions (:8083), Nemotron speech-to-text "
+            "calibrated decisions (:8083), Nemotron speech-to-text "
             "(:8081), and the optional embedding server (:8087) used to re-rank "
             "catalog search. Use for running a model locally, offline, or on device."
         ),
