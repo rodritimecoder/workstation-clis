@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# skills-frontline — switch what a harness is told about up front.
+#
+#   shelf    (default) the harness receives every skill. The model sees every
+#            skill's frontmatter in context and picks one. This is the Agent
+#            Skills spec's progressive-disclosure model.
+#
+#   gateway  the harness receives only the gateway skill (omnicli). The model
+#            reaches the rest of the library through omnicli's catalog: one
+#            BM25 search over every skill body, then one contract on demand,
+#            then a bounded invocation.
+#
+# The skills are never modified and never removed from the upstream tree or
+# the public bundles. This only changes what a harness is handed.
+#
+# Usage:
+#   skills-frontline status
+#   skills-frontline shelf      # back to the full front line
+#   skills-frontline gateway    # gateway only
+#   skills-frontline toggle     # flip
+set -uo pipefail
+
+STATE="${SKILLS_FRONTIER_STATE:-$HOME/.config/skills-frontline}"
+UPSTREAM="${SKILLS_UPSTREAM:-/run/media/rodri/AI/skills}"
+SYNC="$UPSTREAM/sync_skills.sh"
+HARNESSES=(
+  "$HOME/.pi/agent/skills"
+  "$HOME/.gemini/config/skills"
+  "$HOME/.config/opencode/skills"
+)
+
+usage() {
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+current() {
+  if [ -f "$STATE" ]; then
+    head -n1 "$STATE" 2>/dev/null | tr -d '[:space:]'
+  else
+    echo "shelf"
+  fi
+}
+
+set_mode() {
+  local mode="$1"
+  mkdir -p "$(dirname "$STATE")"
+  printf '%s\n' "$mode" > "$STATE"
+  echo "Front line set to: $mode"
+
+  # The gateway is reached over MCP, which resolves its command on PATH.
+  local shim="$HOME/.local/bin/omnicli"
+  local src="$UPSTREAM/omnicli/omnicli.py"
+  [ -f "$src" ] || src="$UPSTREAM/archived/omnicli/omnicli.py"
+  if [ -f "$src" ]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$src" "$shim"
+    chmod +x "$src" 2>/dev/null
+    echo "Shim: $shim -> $src"
+  fi
+
+  if [ -x "$SYNC" ]; then
+    SKILLS_FRONTIER="$mode" "$SYNC" >/dev/null 2>&1 \
+      && echo "Synced. Harness now has:" \
+      && for h in "${HARNESSES[@]}"; do
+           [ -d "$h" ] || continue
+           printf '  %-42s ' "$h"
+           ls "$h" 2>/dev/null | grep -c "^.*$" | tr -d '\n'
+           echo " entries"
+         done
+  else
+    echo "⚠️  sync script not found at $SYNC - run sync-skills manually."
+  fi
+}
+
+case "${1:-status}" in
+  status)
+    mode="$(current)"
+    echo "Front line: $mode"
+    echo
+    echo "  shelf   the harness gets every skill (the model picks from 38 frontmatters)"
+    echo "  gateway the harness gets omnicli only (4 metatools, ~594 tokens of schema)"
+    echo
+    for h in "${HARNESSES[@]}"; do
+      [ -d "$h" ] || continue
+      n=$(find "$h" -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l)
+      printf "  %-44s %s skills\n" "$h" "$n"
+    done
+    ;;
+  shelf|gateway)
+    set_mode "$1"
+    ;;
+  toggle)
+    if [ "$(current)" = "gateway" ]; then set_mode shelf; else set_mode gateway; fi
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "❌ unknown mode: $1 (expected shelf, gateway, toggle or status)" >&2
+    exit 2
+    ;;
+esac
