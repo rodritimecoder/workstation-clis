@@ -64,7 +64,7 @@ Gate status (`GATE_PASSED` / `GATE_FAILED`), duration, and output are immutably 
 ### 4. Automated Merge Conflict Arbitration
 When merging worker branches into `harness/<run_id>/integration`, adjacent hunk collisions are automatically arbitrated using:
 - **Calibrated Synthesizer (Fast Path)**: Preserves sequential imports, additive function declarations, and non-overlapping block unions.
-- **Decision Engine (Fallback)**: Leverages `inception/mercury-decide:free` or local `Imajev-4B` (`:8083`) to arbitrate semantic conflicts.
+- **Decision Engine (Fallback)**: Leverages `inception/mercury-decide:free` or local `vllm-d3-mini` (`:8083`) to arbitrate semantic conflicts.
 - **Post-Merge Verification**: Runs global integration tests immediately following merge.
 
 ### 5. Append-Only Event Log (`events.jsonl`)

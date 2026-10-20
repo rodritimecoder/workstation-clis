@@ -10,7 +10,7 @@ Do NOT load: Audio data, transcripts, full OCR models.
 
 ## Process
 1. For each candidate frame in `manifest.json`:
-   - Run the fast text presence evaluator (Imajev-4B decision query or local edge/contrast density heuristic).
+   - Run the fast text presence evaluator (vllm-d3-mini vision decision query or local edge/contrast density heuristic).
    - Classify: `has_text` (P >= 0.5) vs `no_text`.
 2. Record the score and classification decision in `output/gated_frames.json`.
 3. Symlink or copy the accepted frames into `output/text_frames/`.

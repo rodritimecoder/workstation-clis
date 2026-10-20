@@ -11,15 +11,6 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional, Union
 
-ONEJEV_TEMPERATURE = 1.3051569717552742
-LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-
-def _logaddexp(a: float, b: float) -> float:
-    m = max(a, b)
-    return m + math.log(math.exp(a - m) + math.exp(b - m))
-
-
 def _concentration(probs: List[float]) -> float:
     k = len(probs)
     if k <= 1:
@@ -29,7 +20,7 @@ def _concentration(probs: List[float]) -> float:
 
 class JevEngine:
     def __init__(self, host: Optional[str] = None, port: int = 8083, timeout: float = 5.0):
-        env_host = os.environ.get("JEV_HOST") or os.environ.get("ONEJEV_HOST")
+        env_host = os.environ.get("JEV_HOST")
         self.host = host or env_host or "127.0.0.1"
         self.port = port
         self.timeout = timeout
@@ -39,14 +30,9 @@ class JevEngine:
         self.ssl_ctx.check_hostname = False
         self.ssl_ctx.verify_mode = ssl.CERT_NONE
 
-        self.endpoint = f"{self.scheme}://{self.host}:{self.port}/completion"
         self.systemone_url = f"{self.scheme}://{self.host}:{self.port}/v1/systemone"
         self.health_url = f"{self.scheme}://{self.host}:{self.port}/health"
 
-        # auto     = native /v1/systemone first, fall back to the onejev letter readout
-        # systemone/vllm = native only
-        # legacy   = letter readout only (OneJev/Imajev-4B)
-        self.backend = os.environ.get("JEV_BACKEND", "auto").lower()
         self._systemone_supported: Optional[bool] = None
 
     def is_online(self) -> bool:
@@ -90,7 +76,7 @@ class JevEngine:
         image: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """vllm-d3-mini native /v1/systemone. Calibrated server-side."""
-        if self.backend == "legacy" or self._systemone_supported is False:
+        if self._systemone_supported is False:
             return None
         if not self.is_online():
             return None
@@ -177,125 +163,8 @@ class JevEngine:
             "source": source,
         }
 
-    def _call_onejev(
-        self,
-        state: str,
-        question: str,
-        options: Optional[List[str]],
-        typ: str,
-        image: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        if not self.is_online():
-            return None
-
-        image_b64 = self._encode_image(image)
-
-        if typ == "noul":
-            labels = {"A": "yes", "B": "no"}
-        elif typ == "score":
-            opts_list = options or ["0.0", "0.25", "0.5", "0.75", "1.0"]
-            labels = {LETTERS[i]: str(opt) for i, opt in enumerate(opts_list[:len(LETTERS)])}
-        else:
-            if not options:
-                raise ValueError("Options list required for choice primitive")
-            labels = {LETTERS[i]: str(opt) for i, opt in enumerate(options[:len(LETTERS)])}
-
-        lines = [f"Task: {question}", f"State: {state}"]
-        for lt, lb in labels.items():
-            lines.append(f"{lt}. {lb}")
-        lines.append("Answer:")
-        body = "\n".join(lines)
-
-        img_prefix = "<image>\n" if image_b64 else ""
-        prompt = f"{img_prefix}<|im_start|>user\n{body}<|im_end|>\n<|im_start|>assistant\nAnswer:"
-
-        payload: Dict[str, Any] = {
-            "prompt": prompt,
-            "max_tokens": 1,
-            "temperature": 0.0,
-            "n_probs": 20
-        }
-        if image_b64:
-            payload["image_data"] = [{"data": image_b64, "id": 1}]
-
-        try:
-            req = urllib.request.Request(
-                self.endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            ctx = self.ssl_ctx if self.scheme == "https" else None
-            with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
-                if resp.status != 200:
-                    return None
-                data = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return None
-
-        probs_raw = data.get("completion_probabilities") or []
-        if not probs_raw:
-            return None
-        tops = probs_raw[0].get("top_logprobs") or []
-
-        letter_lp: Dict[str, float] = {}
-        for t in tops:
-            tok = (t.get("token") or "").strip().rstrip(".,:)!").strip()
-            if len(tok) == 1 and tok.upper() in LETTERS and tok.upper() in labels:
-                lt = tok.upper()
-                letter_lp[lt] = _logaddexp(letter_lp.get(lt, -math.inf), float(t["logprob"]))
-
-        if not letter_lp:
-            return None
-
-        mx = max(letter_lp.values())
-        exps = {lt: math.exp((lp - mx) / ONEJEV_TEMPERATURE) for lt, lp in letter_lp.items()}
-        tot = sum(exps.values())
-        if tot <= 0:
-            return None
-        probs = {labels[lt]: round(v / tot, 4) for lt, v in exps.items()}
-
-        if typ == "noul":
-            p_yes = probs.get("yes", 0.0)
-            p_no = probs.get("no", 0.0)
-            denom = p_yes + p_no
-            if denom > 0:
-                p_true = round(p_yes / denom, 4)
-                p_false = round(p_no / denom, 4)
-            else:
-                p_true, p_false = 0.5, 0.5
-            decision = p_true >= 0.5
-            conf = round(abs(p_true - 0.5) * 2.0, 4)
-            return {
-                "primitive": "bool",
-                "decision": decision,
-                "confidence": conf,
-                "probabilities": {"true": p_true, "false": p_false},
-                "source": "onejev_1.5_4b_server",
-            }
-
-        if typ == "score":
-            scalar = sum(float(k) * v for k, v in probs.items() if re.match(r"^-?\d+(\.\d+)?$", k))
-            return {
-                "primitive": "score",
-                "score": round(min(1.0, max(0.0, scalar)), 4),
-                "probabilities": probs,
-                "source": "onejev_1.5_4b_server",
-            }
-
-        best = max(probs, key=probs.get)
-        conf = round(_concentration(list(probs.values())), 4)
-        return {
-            "primitive": "choice",
-            "selection": best,
-            "confidence": conf,
-            "probabilities": probs,
-            "source": "onejev_1.5_4b_server",
-        }
-
     def decide_bool(self, context: str, question: str, image: Optional[str] = None) -> Dict[str, Any]:
         res = self._call_systemone(context, question, None, "noul", image)
-        if res is None:
-            res = self._call_onejev(context, question, None, "noul", image)
         if res is not None:
             return res
 
@@ -319,8 +188,6 @@ class JevEngine:
         if not options:
             raise ValueError("Choice primitive requires at least one option")
         res = self._call_systemone(context, question, options, "choice", image)
-        if res is None:
-            res = self._call_onejev(context, question, options, "choice", image)
         if res is not None:
             return res
 
@@ -346,8 +213,6 @@ class JevEngine:
     def decide_score(self, context: str, criteria: str, image: Optional[str] = None) -> Dict[str, Any]:
         levels = ["0.0", "0.25", "0.5", "0.75", "1.0"]
         res = self._call_systemone(context, criteria, levels, "score", image)
-        if res is None:
-            res = self._call_onejev(context, criteria, levels, "score", image)
         if res is not None:
             return res
 

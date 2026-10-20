@@ -1,26 +1,33 @@
 ---
 name: jev-decision
+
 description: >
   Calibrated decision engine and sub-second visual UAT runner (Glitch Cat Club / Kem Glitch;
   Reels DdjOqRYNZZi, DeMSV1jNYem, DeKBMCQNRXU). Decouples perception from open-ended generative tokens
   into 3 universal primitives: bool (binary), choice (constrained enum), and score (scalar magnitude 0.0-1.0).
   Delivers high-throughput context de-duplication (41k decisions in 7 mins for $0.37) and frontend acceptance testing.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires the local vllm-d3-mini endpoint on :8083."
 metadata:
-  creator: kem_glitch
-  source_reels_1_id: DdjOqRYNZZi
-  source_reels_1_url: https://www.instagram.com/reel/DdjOqRYNZZi/
-  source_reels_1_vault_note: kem_glitch/2026-10-16_jev_decision_engine/notes.md
-  source_reels_2_id: DeMSV1jNYem
-  source_reels_2_url: https://www.instagram.com/reel/DeMSV1jNYem/
-  source_reels_2_vault_note: kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md
-  source_reels_3_id: DeKBMCQNRXU
-  source_reels_3_url: https://www.instagram.com/reel/DeKBMCQNRXU/
-  source_reels_3_vault_note: kem_glitch/2026-10-16_fast_frontend_uat_with_jev/notes.md
+  creator: "kem_glitch"
+  source_reels_1_id: "DdjOqRYNZZi"
+  source_reels_1_url: "https://www.instagram.com/reel/DdjOqRYNZZi/"
+  source_reels_1_vault_note: "kem_glitch/2026-10-16_jev_decision_engine/notes.md"
+  source_reels_2_id: "DeMSV1jNYem"
+  source_reels_2_url: "https://www.instagram.com/reel/DeMSV1jNYem/"
+  source_reels_2_vault_note: "kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md"
+  source_reels_3_id: "DeKBMCQNRXU"
+  source_reels_3_url: "https://www.instagram.com/reel/DeKBMCQNRXU/"
+  source_reels_3_vault_note: "kem_glitch/2026-10-16_fast_frontend_uat_with_jev/notes.md"
+allowed-tools: "Bash(jev-decision:*) Bash(python3:*) Read Write"
 ---
 
 # JEV Decision Engine (`jev-decision`)
 
-A calibrated, non-generative decision system implementing Kem's (Glitch Cat Club) **3 Universal Decision Primitives**, backed by the premier **vllm-d3-mini** decision model (`ggml-org/vllm-d3-mini-GGUF`, 5B, native `/v1/systemone` on `:8083`; OneJev1.5-4B remains the calibrated fallback on `:8089`). Solves the latency, cost, and stochastic drift of asking frontier generative models to answer discrete, structured questions.
+A calibrated, non-generative decision system implementing Kem's (Glitch Cat Club) **3 Universal Decision Primitives**, backed by **vllm-d3-mini with vision** (`ggml-org/vllm-d3-mini-GGUF`, 5B + `mmproj-vllm-d3-mini-Q8_0`, native `/v1/systemone` on `:8083`). It is the single decision model: calibrated probabilities come back from the server in one shot, with no generated tokens. Solves the latency, cost, and stochastic drift of asking frontier generative models to answer discrete, structured questions.
+
+Because the server loads the vision projector, `--image` is a first-class input on every primitive — screenshot gating costs the same as text gating.
 
 ---
 

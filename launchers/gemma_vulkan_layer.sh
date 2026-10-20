@@ -4,7 +4,7 @@
 # being divided by the tensor-split ratio.
 
 SERVER_EXE="/home/rodri/Desktop/llama-official/build/bin/llama-server"
-MODEL_PATH="/run/media/rodri/models/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
+MODEL_PATH="/run/media/rodri/AI/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
 
 # Split mode. "layer" spreads the model across every available device in
 # sequence; "row"/"tensor" divide it by the -ts ratio instead.

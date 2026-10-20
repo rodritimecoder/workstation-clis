@@ -11,7 +11,7 @@
 - Format: PNG or high-quality JPEG stored in `stages/03_visual_sample/output/frames/`.
 
 ## Visual Gating Defaults
-- Gating engine: `imajev-4b` on `:8083` or local variance/edge density heuristic.
+- Gating engine: `vllm-d3-mini` on `:8083` (vision `/v1/systemone`) or local variance/edge density heuristic.
 - Threshold: Drop candidate frames where probability of containing readable text/code is < 0.5.
 
 ## OCR Defaults

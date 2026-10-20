@@ -1,10 +1,17 @@
 ---
 name: icm-architect
+
 description: >
   Design a process, idea, or codebase into an ICM workspace, or restructure an
   existing folder, repo, or vault into one. Use when the user wants
   agent-runnable folder pipelines, a context map, or an audit of what a change
   would hit.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires network access to the model endpoints its scaffolding targets."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(icm-architect:*) Bash(python3:*) Read Write"
 ---
 
 # ICM Architect (`icm-architect`)

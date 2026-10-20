@@ -22,11 +22,10 @@ Hardware Topology, Dual GPU VRAM Budget, and Local Serving Endpoints.
 | **`:8080`** | `llama-server` | **Qwen3.6-35B-A3B Uncensored Genesis** | Primary Workstation Coder (22 GB ROCMFP4, dual-GPU split `-ts 45/55`) |
 | **`:8081`** | `audio.cpp` | **Nemotron 3.5 RNNT + Kokoro TTS** | Streaming STT (40 languages, word timestamps) & ultra-fast speech synthesis |
 | **`:8082`** | `llama-server` | **bge-small-en-v1.5 (F16 GGUF)** | Dedicated 384-dimensional symmetric vector embeddings for local RAG |
-| **`:8083`** | `llama-server` | **Imajev-4B ($T=1.305$)** | Calibrated decision model: discrete choice, ranking, and triage probabilities |
+| **`:8083`** | `llama-server` | **vllm-d3-mini (vision)** | The decision engine: `/v1/systemone` bool/choice/score probabilities + image gating |
 | **`:8084`** | `crispembed` | **CrispEmbed Suite (DBNet + PARSeq)**| Scene-text detection & line-level character recognition |
 | **`:8085`** | `llama-server` | **LightOnOCR-3-1B** | **#1 Flagship Document & Video OCR** (~16,000 t/s prefill, ~330 t/s gen) |
 | **`:8088`** | `llama-server` | **DeskForge-Qwen3.5-4B** (Vulkan) | Visual GUI grounding & pixel coordinate `(x, y)` extraction |
-| **`:8090`** | `jpt-engine` | **JPT-4B Decision Engine** | System One decision router with multimodal projector |
 | **`:9222`** | `podman` | **Chromium CDP** | Direct Chrome DevTools Protocol automated by Playwright |
 | **`:3010`** | `podman` | **KasmVNC Desktop** | Live web desktop view for browser inspection |
 
@@ -41,7 +40,7 @@ To prevent Out-Of-Memory (OOM) crashes while running heavy local coder models, t
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
 │  Genesis 35B Slice 1 (10 GB) │       │  Genesis 35B Slice 2 (12 GB) │
 ├──────────────────────────────┤       ├──────────────────────────────┤
-│  LightOnOCR-3-1B (2.2 GB)    │       │  Imajev-4B / JPT-4B (2.5 GB) │
+│  LightOnOCR-3-1B (2.2 GB)    │       │  vllm-d3-mini (3.7 GB)       │
 ├──────────────────────────────┤       ├──────────────────────────────┤
 │  audio.cpp Nemotron (1.8 GB) │       │  bge-small Embeddings (0.5GB)│
 ├──────────────────────────────┤       ├──────────────────────────────┤

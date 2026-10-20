@@ -48,7 +48,7 @@ flowchart TD
         P3[":8081 audio.cpp Nemotron ASR"]
         P4[":8082 BGE-Small-v1.5 Embeddings"]
         P5[":8085 LightOnOCR-3-1B Flagship"]
-        P6[":8083 Imajev-4B Decision"]
+        P6[":8083 vllm-d3-mini Decision"]
     end
 
     HW --> L1
@@ -85,11 +85,10 @@ All models run 100% locally on dual AMD Radeon RX 9060 XT GPUs via ROCm and Vulk
 | `:8080` | **Qwen3.6-35B-A3B Uncensored Genesis** | Primary Workstation LLM (22 GB ROCMFP4, dual-GPU `-ts 45/55`) |
 | `:8081` | **audio.cpp (Nemotron 3.5 + Kokoro)** | Streaming speech-to-text (40 languages) & fast text-to-speech |
 | `:8082` | **bge-small-en-v1.5 (F16 GGUF)** | Dedicated 384-dimensional symmetric vector embeddings |
-| `:8083` | **Imajev-4B ($T=1.305$)** | Calibrated multimodal decision gating (vision + text) |
+| `:8083` | **vllm-d3-mini (vision)** | The decision engine: `/v1/systemone` bool/choice/score probabilities + image gating |
 | `:8084` | **CrispEmbed Suite** | Ultra-compact scene-text detection & line recognition (DBNet + PARSeq) |
 | `:8085` | **LightOnOCR-3-1B** | **#1 Flagship Video & Slide OCR** (~16k t/s prefill, ~330 t/s gen) |
 | `:8088` | **DeskForge-Qwen3.5-4B** | Visual GUI grounding & computer-use coordinate extraction |
-| `:8090` | **JPT-4B Decision Engine** | System One decision gating with multimodal vision projector |
 
 ---
 
@@ -104,13 +103,12 @@ This suite contains 15 focused engineering, sandbox, and inference CLIs:
 | [`review-hub`](review-hub/) | `review-hub` | Unified code review and architecture audit gateway: Ponytail (minimal diff & YAGNI), pstack (23 playbooks), Poteto Mode, Thermonuclear, Unslop, TypeScript, No-Comments, and Grounded Verification. |
 | [`github-architect`](github-architect/) | `github-architect` / `git-sync` | Autonomous fleet synchronizer (`sync-all`, `status-all`), disciplined 6-stage branch sync engine (`git-sync`), multi-machine bootstrapper, and pre-push secret/blob security guard. |
 | [`subagent-spaces`](subagent-spaces/) | `subagent-spaces` | CPU-pinned rootless Podman sandboxes partitioning 16 CPU threads into dedicated worker slots with zero host blast radius. |
-| [`omnicli`](omnicli/) | `omnicli` | Unified Dual-GPU hardware inference hub (`llm`, `ocr`, `decide`, `asr`, `status`) and late-binding gateway across all workstation skills. |
+| *(retired)* `omnicli` | — | Retired 2026-10-20; archived at `archived/omnicli/`. Each local endpoint is now owned by a skill: `local-llm`, `ocr`, `jev-decision`, `audiocpp`. |
 | [`graph-memory`](graph-memory/) | `graph-memory` | Local hybrid RAG (BM25 + BGE-small 384d) with exact-quote LLM distillation, prompt recall hooks, and session digests. |
 | [`litellm-vram-switcher`](litellm-vram-switcher/) | `vram-rig-ctl` | Multi-GPU VRAM switcher, llama-swap orchestrator (:8000), and LiteLLM failover manager (:4000). |
 | [`tailscale-ops`](tailscale-ops/) | `tailscale-ops` | Tailscale mesh networking, homelab node discovery, HTTPS serving, and peer file transfer. |
 | [`hybrid-browser`](hybrid-browser/) | `hybrid-browser` | Tiered browser automation agent using Podman Chromium, CDP, and DeskForge-Qwen3.5-4B visual grounding. |
-| [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, Imajev visual gating, and LightOnOCR code extraction. |
-| [`uber-hub-factory`](uber-hub-factory/) | `uber-hub-factory` | Autonomous ICM pipeline & CLI factory that bridges native standalone skills into unified, late-binding Uber API Hubs. |
+| [`video-miner`](video-miner/) | `video-miner` | 6-stage ICM video mining orchestrator combining Nemotron ASR, vllm-d3-mini visual gating, and LightOnOCR code extraction. |
 | [`agentic-engineering`](agentic-engineering/) | `agentic` | Autonomous 7-step engineering pipeline: target-local Kanban (`.kanban/`), Event Listener, Fresh-Context Judge, Splitter, and multi-model sandboxes. |
 | [`markitdown-cli`](markitdown-cli/) | `markitdown-cli` | Universal document converter to Markdown (PDF, DOCX, XLSX, PPTX, CSV, HTML, Audio). |
 
@@ -148,23 +146,22 @@ python3 graph-memory/rag/build_index.py --corpus "/path/to/notes"
 python3 graph-memory/rag/distil.py "/path/to/notes" --limit 10
 ```
 
-### 3. `omnicli` — Workstation Local Hardware Inference & Skills Hub
-Unified CLI for all local Dual-GPU inference endpoints on ports `:8080`–`:8090`:
+### 3. Local inference endpoints — one skill each
+There is no gateway CLI. Each port is owned by a skill; read the skill's
+`SKILL.md` and run its script:
+
 ```bash
-# Query Genesis 35B Coder on :8080 (Dual RX 9060 XT offload)
-omnicli llm "Write an async rate limiter in TypeScript" --stream
+# LLM coder on :8080 (local-llm) — see skills repo hardware/local-llm/
+python3 hardware/local-llm/scripts/llm_client.py "Write an async rate limiter" --stream
 
-# OCR PDFs, slides, and screenshots with LightOnOCR-3-1B on :8085
-omnicli ocr lecture.pdf --pages 1-5 -o notes.md
+# OCR PDFs, slides and screenshots with LightOnOCR-3-1B on :8085
+ocr lecture.pdf --pages 1-5 -o notes.md
 
-# Calibrated decision gating with Imajev-4B on :8083
-omnicli decide "User request context" "Is this safe to run?"
+# Calibrated decision gating with vllm-d3-mini on :8083 (add --image for vision)
+jev bool --context "..." --question "Is this safe to run?"
 
 # Speech-to-text with Nemotron-3.5 on :8081
-omnicli asr transcribe meeting.mp3
-
-# Live health check on all inference ports
-omnicli status
+audiocpp asr transcribe meeting.mp3 --out meeting.md
 ```
 
 ### 4. `hybrid-browser` — Vision-Grounded Browser Agent

@@ -1,10 +1,17 @@
 ---
 name: openrouter-free
+
 description: >
   Delegate autonomous coding subagent loops, compound bash batching, text embeddings,
   calibrated decision routing, and TTS audio synthesis to verified free OpenRouter endpoints
   (NVIDIA Nemotron Ultra/Lightning, Inception Mercury Decide, Fish Audio, LFM Embed)
   with Homelab priority and Gemini failover.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires network access to openrouter.ai and an API key (OPENROUTER_API_KEY). The optional Gemini tier needs GEMINI_API_KEY."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(openrouter-free:*) Bash(python3:*) Read Write"
 ---
 
 # OpenRouter Free Multimodal & Subagent Skill (`openrouter-free`)

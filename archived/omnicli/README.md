@@ -70,8 +70,8 @@ omnicli/
 │   ├── textutil.py       # CJK bigram segmentation
 │   ├── aliases.json      # hand-curated synonyms per skill
 │   └── schema.sql
-├── mcp/server.py         # Face B: JSON-RPC 2.0 over stdio, 4 meta-tools
 ├── scripts/              # llm_client.py, ocr.py, decide.py, asr.py
+│   └── mcp_server.py     # Face B: JSON-RPC 2.0 over stdio, 4 meta-tools
 └── tests/
     ├── golden_eval.json  # 53 intent -> skill routing cases
     ├── eval_runner.py    # measures the catalog against the legacy scorer

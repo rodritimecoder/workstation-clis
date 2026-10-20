@@ -1,9 +1,16 @@
 ---
 name: ocr
+
 description: >
   Unified High-Performance OCR Hub combining Premier LightOnOCR-3-1B (documents, PDFs, slides,
   ~16k t/s prefill, ~330 t/s generation) with CrispEmbed (spatial scene-text 2D bounding boxes).
   Features one-way deterministic markdown stdout piping, typed JSON contracts, and automatic server lifecycle.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan, plus the LightOnOCR server on :8085 and CrispEmbed on :8084."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(ocr:*) Bash(python3:*) Read Write"
 ---
 
 # `ocr` — Unified Premier OCR Hub

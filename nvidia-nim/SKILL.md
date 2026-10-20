@@ -1,10 +1,17 @@
 ---
 name: nvidia-nim
+
 description: >
   Direct inference and autonomous subagent execution via NVIDIA NIM / API Catalog (integrate.api.nvidia.com)
   for hosted frontier models including GLM-5.3 (z-ai/glm-5.3-flash), Llama 3.3 70B, DeepSeek R1/V3, and Nemotron.
   Features an autonomous subagent loop with compound bash batching (run_bash_batch), calibrated decision routing (decide),
   batched embeddings (embed), multi-key pooling with automatic failover, and Kem Glitch token reduction.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires network access to integrate.api.nvidia.com and an NVIDIA API key (NVIDIA_API_KEY)."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(nvidia-nim:*) Bash(python3:*) Read Write"
 ---
 
 # NVIDIA NIM Multi-Agent & Multimodal Gateway (`nvidia-nim`)

@@ -333,7 +333,7 @@ def run_agent_loop(prompt: str, preferred_model: str = None, max_turns: int = 12
         "- `ocr read <file>`: LightOnOCR-3-1B document and image OCR.\n"
         "- `jev bool / choice / score`: Calibrated non-generative decisions.\n"
         "- `audiocpp tts / asr`: Speech synthesis and verbatim transcription.\n"
-        "- `local-hub search <intent>` / `local-hub run <skill>`: Discover and run any workstation skill.\n"
+        "- `local-llm \"<prompt>\"`: Local Qwen3.6-35B coder on :8080 (see the `local-llm` skill).\n"
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -606,7 +606,7 @@ def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
     local_services = {
         "genesis_35b_8080": check_tcp_port("127.0.0.1", 8080),
         "litellm_gateway_4000": check_tcp_port("127.0.0.1", 4000),
-        "onejev_decide_8083": check_tcp_port("127.0.0.1", 8083),
+        "vllm_d3_decide_8083": check_tcp_port("127.0.0.1", 8083),
         "fast_cdp_9222": check_tcp_port("127.0.0.1", 9222),
     }
 
@@ -671,7 +671,7 @@ def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
         print("\n  🖥️  Local Inference Headroom (Homelab Priority):")
         print(f"  • Genesis 35B (:8080):  {'✅ ONLINE' if local_services['genesis_35b_8080'] else '⚪ OFFLINE'}")
         print(f"  • LiteLLM Gate (:4000): {'✅ ONLINE' if local_services['litellm_gateway_4000'] else '⚪ OFFLINE'}")
-        print(f"  • OneJev Decide (:8083):{'✅ ONLINE' if local_services['onejev_decide_8083'] else '⚪ OFFLINE'}")
+        print(f"  • vllm-d3-mini Decide (:8083):{'✅ ONLINE' if local_services['vllm_d3_decide_8083'] else '⚪ OFFLINE'}")
         print(f"  • Fast-CDP (:9222):     {'✅ ONLINE' if local_services['fast_cdp_9222'] else '⚪ OFFLINE'}")
 
         if live_probe:

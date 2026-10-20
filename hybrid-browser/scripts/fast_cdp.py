@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -16,6 +17,53 @@ from playwright.sync_api import sync_playwright
 CDP_PORT = 9222
 CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
 PID_FILE = Path("/tmp/fast_cdp_daemon.pid")
+
+def goal_keywords(goal: str) -> List[str]:
+    """Split a goal into comparable words: lowercased, alphanumeric, >= 3 chars."""
+    normalized = re.sub(r"[^0-9a-zA-Z]+", " ", goal)
+    return [w.lower() for w in normalized.split() if len(w) >= 3]
+
+
+def select_target(
+    keywords: List[str], candidates: List[Dict[str, str]]
+) -> Optional[tuple]:
+    """Pick the candidate whose label covers the most of the goal's words.
+
+    `uat` used to hand this list to a decision model. The list is already
+    resolved from the DOM by the extraction script below, so that was a model
+    round trip to redo a choice the caller had already made -- and it made a
+    deterministic browser test depend on a multi-gigabyte server being up.
+    Scoring labels locally is reproducible, needs no VRAM, and reports the
+    words it matched so a wrong pick is debuggable.
+
+    Ties break toward the earlier element in DOM order. Returns None when
+    nothing matches, so the caller can ask for an explicit --ref.
+    """
+    if not keywords:
+        return None
+
+    best = None
+    for candidate in candidates:
+        ref = candidate["ref"]
+        haystack = candidate["description"].lower()
+        matched = [k for k in keywords if k in haystack]
+        if not matched:
+            continue
+        # Strictly greater keeps the earlier candidate on a tie.
+        if best is None or len(matched) > len(best[1]):
+            best = (ref, matched)
+
+    if best is None:
+        return None
+
+    ref, matched = best
+    score = round(len(matched) / len(keywords), 3)
+    return ref, matched, score
+
+
+def list_candidates(candidates: List[Dict[str, str]]) -> str:
+    return "\n".join(f"  {c['ref']}: {c['description']}" for c in candidates)
+
 
 def find_chromium_binary() -> Optional[str]:
     cache_dir = Path.home() / ".cache" / "ms-playwright"
@@ -186,7 +234,7 @@ class FastCDP:
         goal: str,
         expect_text: Optional[str] = None,
         expect_url: Optional[str] = None,
-        model: str = "jpt",
+        target_ref: Optional[str] = None,
         screenshot_path: Optional[str] = None,
         timeout_ms: int = 5000,
     ) -> Dict[str, Any]:
@@ -241,30 +289,37 @@ class FastCDP:
             if not candidates:
                 raise RuntimeError(f"No interactive elements found on page: {url}")
 
-            options = {c["ref"]: c["description"] for c in candidates[:20]}
+            # DOM order matters: ties must resolve reproducibly.
+            candidates = candidates[:20]
+            by_ref = {c["ref"]: c["description"] for c in candidates}
 
-            sys.path.insert(0, "/run/media/rodri/AI/skills/local-hub/scripts")
-            import decide
-
-            state = f"Page Title: {title}\nURL: {page.url}\nGoal: {goal}\nInteractive Elements:\n" + "\n".join(f"- {ref}: {desc}" for ref, desc in options.items())
-            question = f"Which interactive element should be clicked or triggered to achieve: '{goal}'?"
-
-            if model == "jpt":
-                decision = decide.ask_jpt(8090, state, question, options, "choice")
+            if target_ref:
+                if target_ref not in by_ref:
+                    raise RuntimeError(
+                        f"--ref '{target_ref}' is not on the page. Candidates:\n"
+                        + list_candidates(candidates)
+                    )
+                selected_ref, matched_on, match_score = target_ref, [], 1.0
+                how = "explicit_ref"
             else:
-                decision = decide.ask_imajev(state, question, options, "choice")
+                picked = select_target(goal_keywords(goal), candidates)
+                if picked is None:
+                    raise RuntimeError(
+                        f"No candidate matched the goal '{goal}'. Pass --ref to pick one of:\n"
+                        + list_candidates(candidates)
+                    )
+                selected_ref, matched_on, match_score = picked
+                how = "keyword_match"
 
-            selected_ref = decision.get("answer")
-            selected_desc = options.get(selected_ref, "Unknown")
-            prob = decision.get("probabilities", {}).get(selected_ref, 0.0)
+            selected_desc = by_ref.get(selected_ref, "Unknown")
 
             action_log.append({
                 "action": "click",
                 "ref": selected_ref,
                 "description": selected_desc,
-                "probability": round(prob, 4),
-                "confidence": round(decision.get("confidence", 0.0), 4),
-                "model": model,
+                "selection": how,
+                "matched_on": matched_on,
+                "match_score": match_score,
             })
 
             page.locator(f'[data-uat-ref="{selected_ref}"]').first.click(timeout=timeout_ms)
@@ -279,16 +334,12 @@ class FastCDP:
                 if expect_url not in page.url:
                     raise AssertionError(f"Expected UAT URL to contain '{expect_url}', got '{page.url}'.")
 
-            verification_verdict = "verified_by_assertions" if (expect_text or expect_url) else "action_executed"
-            if not (expect_text or expect_url):
-                post_body = page.inner_text("body", timeout=timeout_ms)[:500].replace("\n", " ")
-                verif_state = f"Goal was: {goal}. Post-action page content: {post_body}"
-                verif_q = f"Did the screen state update appropriately toward: '{goal}'?"
-                if model == "jpt":
-                    v_res = decide.ask_jpt(8090, verif_state, verif_q, {"confirmed": "yes", "unrelated": "no"}, "choice")
-                else:
-                    v_res = decide.ask_imajev(verif_state, verif_q, {"confirmed": "yes", "unrelated": "no"}, "choice")
-                verification_verdict = v_res.get("answer", "confirmed")
+            # Without an assertion there is nothing to verify, and a model's
+            # opinion of "that looks about right" is exactly the unverifiable
+            # claim UAT exists to remove. Say so plainly instead.
+            verification_verdict = (
+                "verified_by_assertions" if (expect_text or expect_url) else "action_executed"
+            )
 
             if screenshot_path:
                 page.screenshot(path=screenshot_path)
@@ -334,12 +385,12 @@ def main() -> int:
     verify_parser.add_argument("--timeout", type=int, default=5000, help="Operation timeout in ms")
     verify_parser.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    uat_parser = subparsers.add_parser("uat", help="Autonomous UAT driving using local JPT-4B/Imajev decision engine.")
+    uat_parser = subparsers.add_parser("uat", help="Deterministic UAT driving: match the goal to an element and assert the result.")
     uat_parser.add_argument("url", help="Target URL to test")
     uat_parser.add_argument("--goal", required=True, help="UAT goal (e.g. 'Click checkout button')")
     uat_parser.add_argument("--expect-text", dest="expect_text", help="Assert text appears after action")
     uat_parser.add_argument("--expect-url", dest="expect_url", help="Assert URL changes after action")
-    uat_parser.add_argument("--model", choices=["jpt", "imajev"], default="jpt", help="Decision model")
+    uat_parser.add_argument("--ref", dest="target_ref", help="Act on this exact candidate ref instead of matching the goal")
     uat_parser.add_argument("--screenshot", dest="screenshot_path", help="Save evidence screenshot path")
     uat_parser.add_argument("--no-block-media", dest="no_block_media", action="store_true", help="Disable media/font blocking")
     uat_parser.add_argument("--timeout", type=int, default=5000, help="Operation timeout in ms")
@@ -396,7 +447,7 @@ def main() -> int:
                 goal=args.goal,
                 expect_text=args.expect_text,
                 expect_url=args.expect_url,
-                model=args.model,
+                target_ref=args.target_ref,
                 screenshot_path=args.screenshot_path,
                 timeout_ms=args.timeout,
             )
@@ -410,7 +461,10 @@ def main() -> int:
             chosen = result["actions"][0] if result["actions"] else {}
             print(f"[{status}] UAT Goal: '{result['goal']}' ({result['duration_ms']}ms)")
             if chosen:
-                print(f"  Decision: {chosen.get('ref')} ({chosen.get('description')}) - p={chosen.get('probability')}")
+                print(
+                    f"  Target: {chosen.get('ref')} ({chosen.get('description')}) "
+                    f"- {chosen.get('selection')} score={chosen.get('match_score')}"
+                )
             print(f"  Verdict: {result['verification']}")
             if result["errors"]:
                 for err in result["errors"]:

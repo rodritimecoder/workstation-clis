@@ -8,6 +8,12 @@
 # Requires:
 #   --jinja: needed for the Qwen3.5 Jinja chat template
 #   --image-min-tokens 1024: ensures Qwen-VL visual grounding accuracy
+#
+# Thinking is disabled server-side. Qwen3.5 defaults to a reasoning channel, so
+# a grounding request with max_tokens=64 spends the whole budget on
+# `reasoning_content` and returns empty `content` -- which looks exactly like
+# "the model found nothing". Clients that want reasoning can override this per
+# request with chat_template_kwargs.
 
 set -uo pipefail
 
@@ -45,6 +51,7 @@ exec "$SERVER" \
   --host 127.0.0.1 \
   --port "$PORT" \
   --jinja \
+  --chat-template-kwargs '{"enable_thinking": false}' \
   --image-min-tokens "$IMAGE_MIN_TOKENS" \
   -ngl 99 \
   -c "$CTX" \

@@ -1,6 +1,13 @@
 ---
 name: subagent-spaces
+
 description: "Isolated CPU-pinned containerized sandbox environments for autonomous subagents using rootless Podman. Partitions 16 CPU threads into dedicated worker slots, mounts disposable workspaces, isolates untrusted builds and scripts, and connects directly to local inference endpoints."
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires the Podman container runtime, configured for rootless operation."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(subagent-spaces:*) Bash(podman:*) Bash(python3:*) Read Write"
 ---
 
 # Subagent Spaces (`subagent-spaces`)
@@ -84,5 +91,5 @@ subagent-spaces doctor
 By default, spaces use `--network host`, enabling sandboxed subagents to seamlessly query your workstation's local LLM and speech servers:
 * `http://127.0.0.1:8080` — Primary LLM (Qwen 35B)
 * `http://127.0.0.1:8081` — Nemotron 3.5 ASR (`audiocpp-asr`)
-* `http://127.0.0.1:8083` — vllm-d3-mini Decision (`omnicli decide`), OneJev fallback on :8089
+* `http://127.0.0.1:8083` — vllm-d3-mini Decision (`jev`), vision via `mmproj`
 * `http://127.0.0.1:8085` — LightOnOCR-3-1B (`ocr-cli`)

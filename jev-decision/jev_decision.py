@@ -11,7 +11,7 @@ from jev_engine import JevEngine
 def main():
     parent_parser = argparse.ArgumentParser(add_help=False)
     parent_parser.add_argument("--host", default=None, help="Decision host (default: $JEV_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
-    parent_parser.add_argument("--port", type=int, default=8083, help="Decision service port (default: 8083 = vllm-d3-mini, 8086 = OneJev fallback)")
+    parent_parser.add_argument("--port", type=int, default=8083, help="Decision service port (default: 8083 = vllm-d3-mini)")
     parent_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
     # Subparsers re-declare the shared options with SUPPRESS so that a --port
@@ -21,7 +21,7 @@ def main():
     sub_parent.add_argument("--port", type=int, default=argparse.SUPPRESS)
     sub_parent.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
 
-    parser = argparse.ArgumentParser(description="JEV Decision Engine CLI — vllm-d3-mini native /v1/systemone (OneJev fallback)", parents=[parent_parser])
+    parser = argparse.ArgumentParser(description="JEV Decision Engine CLI — vllm-d3-mini native /v1/systemone, vision-capable", parents=[parent_parser])
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # bool

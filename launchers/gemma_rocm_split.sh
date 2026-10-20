@@ -6,7 +6,7 @@
 # Start audio.cpp etc. on other ports; this one listens on 8080.
 
 SERVER_EXE="/home/rodri/Desktop/llama-official/build-rocm/bin/llama-server"
-MODEL_PATH="/run/media/rodri/models/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
+MODEL_PATH="/run/media/rodri/AI/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
 ROCM_LIB="/home/rodri/rocm-hip-dev/lib"
 
 export LD_LIBRARY_PATH="$ROCM_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

@@ -2,7 +2,7 @@
 DRIVE="/run/media/rodri/AI"
 SERVER_EXE="$DRIVE/ROCmFPX/build-vulkan-linux/bin/llama-server"
 MODEL_DIR="$DRIVE/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF"
-MODEL_PATH="${SRV_MODEL:-$MODEL_DIR/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_0_ROCMFP4.gguf}"
+MODEL_PATH="${SRV_MODEL:-$MODEL_DIR/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_K_M.gguf}"
 MMPROJ_PATH="${SRV_MMPROJ:-$MODEL_DIR/mmproj-Qwen3.6-35B-A3B-Uncensored-Genesis-Hermes-Final-F16.gguf}"
 TEMPLATE_PATH="$DRIVE/models/froggeric/Qwen-Fixed-Chat-Templates/chat_template.jinja"
 

@@ -108,11 +108,10 @@ except Exception as e:
       "8080:Genesis 35B Primary LLM"
       "8081:audio.cpp Nemotron ASR & Kokoro TTS"
       "8082:EmbeddingGemma-2 768d Multimodal"
-      "8083:OneJev1.5-4B Calibrated Decisions"
+      "8083:vllm-d3-mini Calibrated Decisions (vision)"
       "8084:CrispEmbed Scene-Text OCR"
       "8085:LightOnOCR Flagship Document OCR"
       "8088:DeskForge Visual GUI Grounding"
-      "8090:JPT-4B Decision Engine"
       "9222:Chromium CDP DevTools (fast-cdp)"
       "3010:KasmVNC Browser Web Desktop"
     )
@@ -120,6 +119,12 @@ except Exception as e:
     for item in "${SERVICES[@]}"; do
       PORT="${item%%:*}"
       NAME="${item##*:}"
+      # Never advertise a port with nothing behind it: the tailscale listener
+      # outlives the service, so a dead port looks healthy from the tailnet.
+      if ! ss -ltn 2>/dev/null | grep -q ":$PORT "; then
+        echo "  ○ Skipping $NAME on :$PORT (nothing listening locally)"
+        continue
+      fi
       echo "  • Serving $NAME on :$PORT..."
       tailscale serve --bg --https "$PORT" "http://127.0.0.1:$PORT" >/dev/null 2>&1 || true
     done

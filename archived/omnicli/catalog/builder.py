@@ -68,6 +68,17 @@ def meta_set(con: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
+def _cache_interpreter(interpreter: str | None) -> str:
+    """The cache key for the interpreter, carrying the parser version.
+
+    The contract cache is keyed on the script's mtime, so a change to the
+    *parser* would keep serving contracts the old parser produced. The
+    parser version rides along in this opaque column so that a parser fix
+    invalidates the cache without a schema change.
+    """
+    return f"{interpreter or ''}#p{registry.CONTRACT_PARSER_VERSION}"
+
+
 def _cached_contract(con: sqlite3.Connection, path: str, mtime_ns: int,
                      interpreter: str | None) -> dict | None:
     """Return a previously extracted contract, if it is still valid.
@@ -81,7 +92,7 @@ def _cached_contract(con: sqlite3.Connection, path: str, mtime_ns: int,
     row = con.execute(
         "SELECT contract FROM contract_cache "
         "WHERE path = ? AND mtime_ns = ? AND interpreter = ?",
-        (path, mtime_ns, interpreter or ""),
+        (path, mtime_ns, _cache_interpreter(interpreter)),
     ).fetchone()
     if not row:
         return None
@@ -98,8 +109,73 @@ def _store_contract(con: sqlite3.Connection, path: str, mtime_ns: int,
     con.execute(
         "INSERT OR REPLACE INTO contract_cache"
         "(path, mtime_ns, interpreter, contract) VALUES(?,?,?,?)",
-        (path, mtime_ns, interpreter or "", json.dumps(contract)),
+        (path, mtime_ns, _cache_interpreter(interpreter), json.dumps(contract)),
     )
+
+
+def _subcommand_contract(con: sqlite3.Connection, tool: dict, sub: str,
+                         parent_contract: dict | None,
+                         skill_python: str | None,
+                         contract_cache: dict[str, dict]) -> dict:
+    """The contract for one subcommand, extracted from its own --help.
+
+    A subcommand is a separate argparse parser with a separate flag set.
+    The parent's flags are inherited by the *tool* — running the script
+    still accepts them — but the parent's flags alone do not describe what
+    the subcommand takes.
+
+    Falls back to the parent's contract when the subcommand's own help
+    cannot be read, so a subcommand is never left with less than it had
+    before.
+    """
+    path = tool.get("path")
+    parent = parent_contract or {}
+    fallback = {
+        "usage": f"{tool['argv'][-1] if tool.get('argv') else tool['id']} {sub} [options]",
+        "flags": parent.get("flags", []),
+        "positionals": [],
+        "subcommands": [],
+        "help": parent.get("help", ""),
+        "parent_help_excerpt": "\n".join(parent.get("help", "").splitlines()[:12]),
+    }
+    if not path:
+        return fallback
+    try:
+        path = str(Path(path).resolve())
+    except OSError:
+        pass
+
+    st_mtime = 0
+    try:
+        st_mtime = os.stat(path).st_mtime_ns
+    except OSError:
+        pass
+
+    # The cache key carries the subcommand, so a script with many
+    # subcommands gets one cache entry per subcommand.
+    key = f"{path}#{sub}:{st_mtime}:{skill_python}:{registry.CONTRACT_PARSER_VERSION}"
+    cached = contract_cache.get(key)
+    if cached is None:
+        cached = _cached_contract(con, f"{path}#{sub}", st_mtime, skill_python)
+    if cached is None:
+        cached = registry.extract_contract(
+            Path(path), python=skill_python, args=[sub])
+        _store_contract(con, f"{path}#{sub}", st_mtime, skill_python, cached)
+    contract_cache[key] = cached
+
+    if not cached or not cached.get("usage"):
+        return fallback
+    out = dict(cached)
+    # An argparse subparser inherits the parent's options. A subcommand's
+    # own --help lists only the options added to that subparser, so the
+    # global flags --table, --project, --out --limit --format and the
+    # like are missing from it. The subcommand accepts them, so its
+    # contract has to list them.
+    merged = list(dict.fromkeys(
+        list(parent.get("flags", [])) + list(out.get("flags", []))))
+    out["flags"] = merged
+    out["parent_help_excerpt"] = "\n".join(parent.get("help", "").splitlines()[:12])
+    return out
 
 
 def _ensure_docs_schema(con: sqlite3.Connection) -> None:
@@ -254,28 +330,46 @@ def build(
             except OSError:
                 skill_python = None
 
+        # The ~/.local/bin shim points at a copy of the skill's own script —
+        # sometimes a copy in another bundle, so the paths differ even
+        # though the program is the same. Giving the shim its own set of
+        # subcommand children would list every subcommand twice: once under
+        # `<skill>/scripts/foo` and once under `<skill>/cli`. The shim keeps
+        # its contract; the children belong to the script.
+        seen_script_names: set[str] = set()
+
         for t in registry.discover_tools(s):
             tool_count += 1
             contract = t["contract"]
-            if with_contracts and t["kind"] == "script" and t["path"]:
+            # Both a script and the ~/.local/bin shim that points at it get a
+            # contract. The shim used to carry an empty one, so the contract
+            # an agent received for `<skill>/cli` — the entry point it is
+            # most likely to invoke — listed no flags at all.
+            if with_contracts and t["kind"] in ("script", "cli") and t["path"]:
+                # Resolve the shim so it is treated as the script it points
+                # at: the interpreter is chosen from the resolved suffix, and
+                # the cache entry is shared with the script tool.
+                cpath = Path(t["path"]).resolve()
                 st_mtime = 0
                 try:
-                    st = os.stat(t["path"])
+                    st = os.stat(cpath)
                     st_mtime = st.st_mtime_ns
-                    key = f"{t['path']}:{st_mtime}:{skill_python}"
+                    key = f"{cpath}:{st_mtime}:{skill_python}:{registry.CONTRACT_PARSER_VERSION}"
                 except OSError:
-                    key = t["path"]
+                    key = str(cpath)
                 cached = contract_cache.get(key)
                 if cached is None:
-                    cached = _cached_contract(con, t["path"], st_mtime, skill_python)
+                    cached = _cached_contract(con, str(cpath), st_mtime, skill_python)
                 if cached is None:
                     cached = registry.extract_contract(
-                        Path(t["path"]), python=skill_python)
-                    _store_contract(con, t["path"], st_mtime, skill_python, cached)
+                        cpath, python=skill_python)
+                    _store_contract(con, str(cpath), st_mtime, skill_python, cached)
                     n_contracts += 1
                 contract_cache[key] = cached
                 contract = cached
                 n_scripts += 1
+                if t["kind"] == "script":
+                    seen_script_names.add(cpath.name)
             tool_rows.append((
                 t["id"], t["skill"], t["kind"], t["summary"], t["path"],
                 json.dumps(t["argv"]), json.dumps(contract), t["parent"], now,
@@ -284,20 +378,31 @@ def build(
             # Subcommands become individually addressable tools. This is the
             # granularity that lets an agent pull ONE command's contract
             # instead of the whole script's surface.
+            #
+            # A subcommand gets its OWN contract, extracted by running
+            # ``<script> <sub> --help``. It used to inherit the parent's
+            # flags and help verbatim, which meant the contract an agent
+            # received for `ocr/ocr:read` listed only the parent parser's
+            # flags and never mentioned --pages, --output or --prompt — the
+            # flags the agent actually needed. Measured across the
+            # collection, that left 176 of 260 subcommand contracts
+            # incomplete.
             for sub in (contract or {}).get("subcommands", []):
+                if t["kind"] == "cli":
+                    # The shim wraps a copy of one of this skill's own
+                    # scripts. Its children would be the same commands
+                    # under a second name.
+                    try:
+                        if Path(t["path"]).resolve().name in seen_script_names:
+                            continue
+                    except OSError:
+                        pass
                 child_id = f"{t['id']}:{sub['name']}"
                 child_summary = sub.get("summary") or f"{t['id']} {sub['name']}"
                 child_argv = list(t["argv"]) + [sub["name"]]
-                child_contract = {
-                    "usage": f"{t['argv'][-1] if t['argv'] else t['id']} {sub['name']} [options]",
-                    "flags": contract.get("flags", []),
-                    "positionals": [],
-                    "subcommands": [],
-                    "help": contract.get("help", ""),
-                    "parent_help_excerpt": "\n".join(
-                        contract.get("help", "").splitlines()[:12]
-                    ),
-                }
+                child_contract = _subcommand_contract(
+                    con, t, sub["name"], contract, skill_python,
+                    contract_cache)
                 tool_rows.append((
                     child_id, t["skill"], "subcommand", child_summary, t["path"],
                     json.dumps(child_argv), json.dumps(child_contract), t["id"], now,

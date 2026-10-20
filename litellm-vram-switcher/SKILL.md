@@ -1,9 +1,16 @@
 ---
 name: litellm-vram-switcher
+
 description: >
   Manage the local LLM, VLM, OCR and TTS servers on dual-GPU hardware.
   Inspect VRAM, swap models in and out on port 8000, run the LiteLLM gateway
-  on port 4000, and free headroom on ports 8080-8090.
+  on port 4000, and free headroom on ports 8080-8088.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan, the llama.cpp binaries, and the LiteLLM gateway on :4000."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(vram-rig-ctl:*) Bash(python3:*) Read"
 ---
 
 # LiteLLM & llama-swap VRAM Controller (`litellm-vram-switcher`)
@@ -23,7 +30,7 @@ the auxiliary models are evicted and restored on demand.
 | :--- | :--- | :--- |
 | `qwen3.6-35b` | ~22 GB | **Pinned King** — Q4_0 ROCMFP4, split across both GPUs (`-ts 45/55`) |
 | `gemma4-26b` | ~18 GB | Heavy general model; evicts the King when called, and swaps it back when done |
-| `vllm-d3-mini` | ~3.7 GB | Decision model, native `/v1/systemone` on `:8083`, ~70 ms, zero generated tokens; OneJev1.5-4B is the fallback on `:8089` |
+| `vllm-d3-mini` | ~3.7 GB | **The** decision model: native `/v1/systemone` on `:8083`, ~70 ms, zero generated tokens, vision via `mmproj` |
 | `deskforge-4b` | ~3.5 GB | Desktop computer-use coordinate extraction |
 | `lighton-ocr` | ~1.5 GB | Flagship 16k t/s slide and document OCR; runs concurrently alongside the King |
 

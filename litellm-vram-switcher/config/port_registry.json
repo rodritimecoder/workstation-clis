@@ -1,7 +1,10 @@
 {
   "total_vram_budget_mb": 32000,
   "pinned_port": "8080",
-  "port_range": [8080, 8090],
+  "port_range": [
+    8080,
+    8088
+  ],
   "models": {
     "8080": {
       "alias": "local-coder-genesis",
@@ -28,12 +31,12 @@
       "role": "Fast dense vector representations & RRF search"
     },
     "8083": {
-      "alias": "local-decide-onejev",
-      "vram_mb": 3500,
+      "alias": "local-decide-vllm-d3",
+      "vram_mb": 3700,
       "pinned": false,
-      "name": "OneJev1.5-4B Calibrated Decision Engine",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/imajev-4b.sh",
-      "role": "Fast calibrated classification (bool/choice/score)"
+      "name": "vllm-d3-mini Decision Engine (vision)",
+      "cmd": "sh /run/media/rodri/AI/sh/vllm-d3-mini.sh",
+      "role": "Calibrated bool/choice/score + vision gating, native /v1/systemone"
     },
     "8084": {
       "alias": "local-ocr-crispembed",
@@ -58,14 +61,6 @@
       "name": "DeskForge Visual GUI Grounding",
       "cmd": "sh /run/media/rodri/AI/skills/launchers/deskforge-qwen.sh",
       "role": "Computer-use visual coordinates"
-    },
-    "8090": {
-      "alias": "local-decide-jpt",
-      "vram_mb": 3500,
-      "pinned": false,
-      "name": "JPT-4B Decision Engine",
-      "cmd": "python3 /run/media/rodri/AI/skills/launchers/jpt-4b/server.py",
-      "role": "Multimodal System One gating & decision routing"
     }
   }
 }

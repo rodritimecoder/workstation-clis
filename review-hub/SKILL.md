@@ -1,5 +1,6 @@
 ---
 name: review-hub
+
 description: >
   Unified Code Review, Architecture Audit, and Quality Enforcement Gateway. Late-binding
   dispatch hub for 8 core engineering review suites: Ponytail (minimal diff & YAGNI), pstack (23 playbooks),
@@ -7,6 +8,12 @@ description: >
   Unslop (31 AI tell elimination rules), TypeScript (type discipline), No-Comments (comment constraints),
   and Verification (grounded verification). Provides full pre-flight response projection (--project)
   and disk buffering (--out) to eliminate context bloat.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires Python 3.10+. No network access needed."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(review-hub:*) Bash(python3:*) Read Write"
 ---
 
 # Code Review & Architecture Audit Hub (`review-hub`)

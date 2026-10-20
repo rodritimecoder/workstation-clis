@@ -1,10 +1,17 @@
 ---
 name: guard-hooks
+
 description: >
   Deterministic pre-execution guardrails and protected-file locks. Halts
   destructive commands such as rm -rf, force push and drop table, and blocks
   unauthorised deletion or mutation of KeepMD, STATE.md, .env and secrets —
   in code, whatever the model is told.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires git to install the pre-commit and pre-push hooks."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(guard-hooks:*) Bash(guard:*) Bash(git:*) Read Write"
 ---
 
 # Guard Hooks (`guard-hooks`)

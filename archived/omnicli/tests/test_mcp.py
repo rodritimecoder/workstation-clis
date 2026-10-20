@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SERVER = HERE.parent / "mcp" / "server.py"
+SERVER = HERE.parent / "scripts" / "mcp_server.py"
 
 PASS = "\033[92mPASS\033[0m"
 FAIL = "\033[91mFAIL\033[0m"

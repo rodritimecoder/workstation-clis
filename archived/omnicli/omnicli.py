@@ -659,9 +659,9 @@ def cmd_eval(verbose: bool = False, as_json: bool = False):
 # --------------------------------------------------------------------------
 
 def cmd_mcp(as_json: bool = False):
-    server = SKILL_DIR / "mcp" / "server.py"
+    server = SKILL_DIR / "scripts" / "mcp_server.py"
     if not server.is_file():
-        sys.exit("❌ Error: mcp/server.py not found next to omnicli.")
+        sys.exit("❌ Error: scripts/mcp_server.py not found next to omnicli.")
     sys.exit(subprocess.run([sys.executable, str(server)]).returncode)
 
 

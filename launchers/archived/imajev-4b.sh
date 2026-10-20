@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# imajev-4b — Imajev-4B decision-model server on port 8083.
+# imajev-4b — Imajev-4B decision-model server on port 8089 (fallback decision port).
 #
 # Imajev is a decision model: it returns a probability per option rather than
 # generating text. Reading that out is client-side work — pull the option logits
@@ -18,7 +18,7 @@ DRIVE="/run/media/rodri/AI"
 SERVER="$DRIVE/llama.cpp/build/bin/llama-server"
 MODELS="$DRIVE/models/mindchain/imajev-4b-GGUF"
 
-PORT="${PORT:-8083}"
+PORT="${PORT:-8089}"
 CTX="${CTX:-8192}"
 IMAGE_MIN_TOKENS="${IMAGE_MIN_TOKENS:-1024}"
 

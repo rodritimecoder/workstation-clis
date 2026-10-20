@@ -1,10 +1,17 @@
 ---
 name: tailscale-ops
+
 description: >
   Runtime Tailscale network operations for discovering online homelab/desktop nodes,
   exposing local web servers or LLM ports over private HTTPS (tailscale serve),
   opening temporary public webhook endpoints (tailscale funnel), and transferring
   artifacts across devices (tailscale file cp).
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires the tailscale CLI and a running tailscaled daemon."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(tailscale-ops:*) Bash(tailscale:*) Read"
 ---
 
 # Tailscale Operations Skill (`tailscale-ops`)
@@ -26,7 +33,7 @@ tailscale-ops check-port <hostname-or-ip> <port>
 ```
 
 ### 3. Expose Entire Workstation AI Inference Matrix (`serve-mesh`)
-Expose all 12 local inference endpoints and fast-CDP browser DevTools (`:8080–:8090`, `:9222`, `:3010`, `:4000`, `:8000`) over private Tailscale HTTPS simultaneously with 1 command:
+Expose the locally-running inference endpoints and fast-CDP browser DevTools (`:8080–:8090`, `:9222`, `:3010`, `:4000`, `:8000`) over private Tailscale HTTPS simultaneously with 1 command:
 ```bash
 tailscale-ops serve-mesh
 ```

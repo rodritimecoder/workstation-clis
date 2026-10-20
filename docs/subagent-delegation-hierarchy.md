@@ -30,7 +30,7 @@ To maintain high throughput, avoid concurrency throttling (429s), and minimize c
 │  Tier 3: Calibrated Decision & Gating Routers                         │
 │  - inception/mercury-decide:free (via /api/alpha/decisions, P(choice)) │
 │  - nvidia/nemotron-3.5-lightning:free (fast classification)            │
-│  - Imajev-4B (:8083) / JPT-4B (:8090) (Zero-cost local calibrated)    │
+│  - vllm-d3-mini (:8083) (Zero-cost local calibrated + vision)         │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
                                     ▼
@@ -51,7 +51,7 @@ To maintain high throughput, avoid concurrency throttling (429s), and minimize c
 | **Frontier Architect** | Antigravity Native / Gemini | Local Genesis 35B | Interactive Agent Harness |
 | **Fast Subagent Worker** | `gemini-3.5-flash-lite` | `nemotron-3.5-lightning:free` | `generativelanguage.googleapis.com` |
 | **Heavy Logic Worker** | `nvidia/nemotron-3-ultra-550b-a55b:free` | `qwen-2.5-coder-32b:free` | `openrouter.ai/api/v1/chat` |
-| **Discrete Decisions** | `inception/mercury-decide:free` | `Imajev-4B` (`:8083`) | `openrouter.ai/api/alpha/decisions` |
+| **Discrete Decisions** | `inception/mercury-decide:free` | `vllm-d3-mini` (`:8083`) | `openrouter.ai/api/alpha/decisions` |
 | **Vector Embeddings** | `liquid/lfm-2.5-embedding-350m:free` | `bge-small-en-v1.5` (`:8082`) | `openrouter.ai/api/v1/embeddings` |
 | **Speech-to-Text (ASR)** | Local Nemotron 3.5 ASR (`:8081`) | Whisper Fallback | `audio.cpp` server |
 | **Speech Generation (TTS)**| `fish-audio/s2.1-pro-free:free` | Local Kokoro TTS (`:8081`) | `openrouter.ai/api/v1/audio/speech` |

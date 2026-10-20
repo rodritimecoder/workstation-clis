@@ -28,8 +28,8 @@ models:
       -m /run/media/rodri/AI/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_K_M.gguf
       --jinja
       --chat-template-file ${qwen_template}
-      --chat-template-kwargs '{"enable_thinking":true}'
-      --no-mmap
+      --reasoning on
+      --load-mode none
       -np 1
       --host 127.0.0.1
       --port ${PORT}

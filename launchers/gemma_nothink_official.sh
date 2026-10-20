@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 SERVER_EXE="/home/rodri/Desktop/llama-official/build/bin/llama-server"
-MODEL_PATH="/run/media/rodri/models/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
+MODEL_PATH="/run/media/rodri/AI/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
 
 "$SERVER_EXE" \
   -m "$MODEL_PATH" \

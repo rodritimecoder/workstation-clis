@@ -11,7 +11,7 @@ Stages:
   01_acquire       - Ingests video (URL or local), extracts audio & metadata
   02_audio_asr     - Speech-to-text with timestamps via audiocpp-asr (Nemotron 3.5)
   03_visual_sample - Smart frame sampling with ffmpeg & perceptual deduplication
-  04_visual_gate   - Gating frames with readable text (Imajev-4B / visual heuristics)
+  04_visual_gate   - Gating frames with readable text (vllm-d3-mini vision / heuristics)
   05_visual_ocr    - Visual OCR via LightOnOCR-3-1B (Qwen3-VL on llama.cpp Vulkan)
   06_synthesize    - Merges transcript & OCR into chronological mined_video.md
 """
@@ -45,7 +45,7 @@ STAGES = [
 ]
 
 # Service Endpoints
-IMAJEV_URL = os.environ.get("IMAJEV_URL", "http://127.0.0.1:8083/v1/chat/completions")
+DECISION_URL = os.environ.get("JEV_URL", "http://127.0.0.1:8083/v1/systemone")
 
 LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
 LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf"))
@@ -66,29 +66,19 @@ def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, wo
             cmd.extend(["--words-out", str(words_out)])
         return cmd
 
-    local_hub = shutil.which("local-hub")
-    if local_hub:
-        cmd = [local_hub, "asr", "transcribe", str(audio_wav)]
-        if offline:
-            cmd.extend(["--engine", "cli"])
-        if details:
-            cmd.append("--details")
-        return cmd
-
     candidates = [
-        Path("/run/media/rodri/AI/skills/local-hub/scripts/asr.py"),
-        Path.home() / ".gemini" / "config" / "skills" / "local-hub" / "scripts" / "asr.py",
-        Path.home() / ".gemini" / "config" / "skills" / "audiocpp-asr" / "scripts" / "asr.py",
+        Path("/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"),
+        Path.home() / ".gemini" / "config" / "skills" / "audiocpp" / "scripts" / "audiocpp_cli.py",
+        Path.home() / ".config" / "opencode" / "skills" / "audiocpp" / "scripts" / "audiocpp_cli.py",
+        Path.home() / ".pi" / "agent" / "skills" / "audiocpp" / "scripts" / "audiocpp_cli.py",
     ]
     for c in candidates:
         if c.is_file():
-            cmd = ["python3", str(c), "transcribe", str(audio_wav)]
-            if offline:
-                cmd.extend(["--engine", "cli"])
-            if details:
-                cmd.append("--details")
+            cmd = [sys.executable, str(c), "asr", "transcribe", str(audio_wav)]
+            if words_out:
+                cmd.extend(["--words-out", str(words_out)])
             return cmd
-    raise FileNotFoundError("Could not locate audiocpp, local-hub or asr.py on the system.")
+    raise FileNotFoundError("Could not locate the audiocpp skill (audiocpp_cli.py) on the system.")
 
 
 
@@ -363,7 +353,7 @@ def run_stage_02_audio_asr(workspace: Path) -> None:
     if not audio_wav.exists():
         raise FileNotFoundError(f"Missing upstream audio: {audio_wav}")
 
-    print("[02_audio_asr] Transcribing speech with hardware-accelerated ASR (audiocpp / local-hub)...")
+    print("[02_audio_asr] Transcribing speech with hardware-accelerated ASR (audiocpp)...")
     
     words_json = out_dir / "words.json"
     cmd = get_asr_cmd(audio_wav, details=True, offline=True, words_out=words_json)
@@ -480,38 +470,40 @@ def run_stage_04_visual_gate(workspace: Path) -> None:
         if not frame_path.exists():
             continue
             
-        # Fast local classifier:
-        # Check size & contrast, and query Imajev or fallback heuristic
+        # Fast local classifier: ask the vision decision model for a calibrated
+        # yes/no, then fall back to a size heuristic if it is offline.
         has_text = True
         confidence = 0.8
         ext = frame_path.suffix.lower().lstrip(".")
         mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
-        
-        # We can query local Imajev if available
+
         try:
             with open(frame_path, "rb") as img_file:
                 b64_data = base64.b64encode(img_file.read()).decode("utf-8")
-            
+
             payload = {
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Does this image show slides, code, UI text, or diagrams with readable text? Answer only YES or NO."},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}"}}
-                    ]
-                }],
-                "max_tokens": 5
+                "state": "Frame sampled from a technical video or lecture recording.",
+                "questions": {
+                    "answer": {
+                        "type": "noul",
+                        "instructions": (
+                            "Does this image show slides, code, UI text, or diagrams "
+                            "with readable text?"
+                        ),
+                    }
+                },
+                "images": [f"data:{mime};base64,{b64_data}"],
             }
             req = urllib.request.Request(
-                IMAJEV_URL,
+                DECISION_URL,
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                reply = data["choices"][0]["message"]["content"].strip().upper()
-                has_text = "YES" in reply or "TRUE" in reply
-                confidence = 0.9 if has_text else 0.1
+            p_true = float((data.get("answers") or {}).get("answer", {}).get("noul", 0.5))
+            has_text = p_true >= 0.5
+            confidence = round(abs(p_true - 0.5) * 2.0, 4)
         except Exception:
             # Fallback heuristic: frames above 15KB in JPEG usually carry UI/code/slide details
             file_sz = frame_path.stat().st_size

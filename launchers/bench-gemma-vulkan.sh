@@ -3,7 +3,7 @@
 # Copy of bench-luffy-q4-rocmfp4.sh, pointed at llama-official.
 
 BENCH_EXE="/home/rodri/Desktop/llama-official/build/bin/llama-bench"
-MODEL_PATH="/run/media/rodri/models/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
+MODEL_PATH="/run/media/rodri/AI/models/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"
 
 for f in "$BENCH_EXE" "$MODEL_PATH"; do
   if [ ! -f "$f" ]; then

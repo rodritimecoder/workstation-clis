@@ -76,10 +76,11 @@ VIRTUAL_SKILLS = {
         "path": "",
         "md_path": None,
         "description": (
-            "Local inference endpoints on this workstation: Genesis 35B coder (:8080), "
-            "LightOnOCR document vision (:8085), vllm-d3-mini calibrated decisions "
-            "(:8083), Nemotron speech-to-text (:8081), and the optional embedding "
-            "server (:8087) used to re-rank catalog search."
+            "Local LLM and inference endpoints on this workstation: Genesis 35B "
+            "coder for writing code (:8080), LightOnOCR document vision (:8085), "
+            "vllm-d3-mini calibrated decisions (:8083), Nemotron speech-to-text "
+            "(:8081), and the optional embedding server (:8087) used to re-rank "
+            "catalog search. Use for running a model locally, offline, or on device."
         ),
         "status": "active",
         "cli": None,
@@ -225,7 +226,15 @@ def _docstring_summary(path: Path) -> str:
 _SUBCMD_BLOCK_RE = re.compile(
     r"positional arguments:\n(?P<body>(?:[ \t]+[^\n]*\n)+)", re.MULTILINE
 )
-_SUBCMD_NAME_RE = re.compile(r"^    ([a-z][a-z0-9_-]*)(?:\s+\(([^)]*)\))?\s*$", re.MULTILINE)
+# A subcommand entry in the "positional arguments" block. argparse puts
+# the summary on the same line when the subparser was given help= (the
+# usual case) and on the following line when it was not, so both are
+# accepted here. The indent is 2 spaces for a top-level subparser list
+# and 4 for a list nested under a <command> placeholder.
+_SUBCMD_NAME_RE = re.compile(
+    r"^\s{2,6}([a-z][a-z0-9_-]*)(?:\s+\(([^)]*)\))?(?:\s{2,}(.+?))?\s*$",
+    re.MULTILINE,
+)
 
 
 def _usage_subcommands(usage: str) -> list[str]:
@@ -247,6 +256,12 @@ def _usage_subcommands(usage: str) -> list[str]:
     return [t.strip() for t in m.group(1).split(",") if t.strip()]
 
 
+# Bumped whenever the *parser* changes, not the scripts. The contract cache
+# is keyed on the script's mtime, so a parser fix would otherwise keep
+# serving the contracts the old parser produced.
+CONTRACT_PARSER_VERSION = 5
+
+
 def parse_help_contract(help_text: str) -> dict[str, Any]:
     """Turn argparse ``--help`` output into a structured contract.
 
@@ -262,7 +277,12 @@ def parse_help_contract(help_text: str) -> dict[str, Any]:
     usage_lines: list[str] = []
     in_usage = False
     for line in help_text.splitlines():
-        if line.startswith("usage:"):
+        # The usage line is matched case-insensitively: argparse prints
+        # "usage:" but hand-written help often prints "Usage:". A missing
+        # usage line meant the contract fell back to the parent's, so a
+        # subcommand's own flags were thrown away and its contract claimed
+        # to describe a program that had never printed it.
+        if line.lower().startswith("usage:"):
             in_usage = True
             usage = line.strip()
             usage_lines.append(line)
@@ -296,13 +316,19 @@ def parse_help_contract(help_text: str) -> dict[str, Any]:
                 continue
             name = m.group(1)
             aliases = [a.strip() for a in (m.group(2) or "").split(",") if a.strip()]
-            summary = ""
-            for nxt in lines[i + 1:]:
-                if not nxt.strip():
-                    continue
-                if nxt.startswith(" " * 8) and not _SUBCMD_NAME_RE.match(nxt):
-                    summary = nxt.strip()
-                break
+            summary = (m.group(3) or "").strip()
+            if not summary:
+                for nxt in lines[i + 1:]:
+                    if not nxt.strip():
+                        continue
+                    if nxt.startswith(" " * 8) and not _SUBCMD_NAME_RE.match(nxt):
+                        summary = nxt.strip()
+                    break
+            # A plain positional argument is listed in this block too, and
+            # it never carries a summary. Requiring one keeps a positional
+            # from being mistaken for a subcommand.
+            if not summary and name not in _usage_subcommands(" ".join(usage_lines)):
+                continue
             if name not in detailed:
                 order.append(name)
             detailed[name] = {"name": name, "aliases": aliases, "summary": summary}
@@ -356,9 +382,55 @@ def _mentions_help(path: Path) -> bool:
     return ("--help" in low or "usage()" in low or "help)" in low)
 
 
+# A path to a Python file, quoted or not. Quotes are excluded from the
+# character class so a quoted path is captured without them.
+_PY_DELEGATE_RE = re.compile(r"([^\s'\"`|;&]+\.py)")
+
+
+def shell_delegate(path: Path) -> Path | None:
+    """The Python script a shell wrapper forwards to, if there is exactly one.
+
+    A wrapper like ``exec "$VENV/bin/python" "$SCRIPT" "$@"`` never mentions
+    ``--help``, so the guard below refuses to run it — correct, because
+    running an unknown shell script is not free of side effects.
+
+    But the wrapper's contract *is* the contract of the script it wraps,
+    and that script can be inspected and run safely on its own. The
+    wrapper is therefore never executed: its source is read, the delegate
+    is found, and the delegate is what gets the --help.
+    """
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if len(src) > 100_000:
+        return None
+    candidates: list[Path] = []
+    for m in _PY_DELEGATE_RE.finditer(src):
+        raw = m.group(1)
+        cand = Path(raw)
+        if not cand.is_absolute():
+            cand = path.parent / cand.name
+        try:
+            if cand.is_file():
+                resolved = cand.resolve()
+                if resolved not in candidates:
+                    candidates.append(resolved)
+        except OSError:
+            continue
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def extract_contract(path: Path, timeout: float = 12.0,
-                     python: str | None = None) -> dict[str, Any]:
+                     python: str | None = None,
+                     args: list[str] | None = None) -> dict[str, Any]:
     """Run ``--help`` on a script and parse the resulting contract.
+
+    ``args`` runs the script with extra positional arguments before
+    ``--help`` — that is how a *subcommand's* own contract is obtained.
+    A subcommand is a different parser with a different flag set, and
+    inheriting the parent's flags gives an agent a contract that omits the
+    flags the subcommand actually takes.
 
     Two safety rules, both learned the hard way:
 
@@ -374,14 +446,24 @@ def extract_contract(path: Path, timeout: float = 12.0,
     if not _mentions_help(path):
         if path.suffix == ".py":
             empty["summary"] = _docstring_summary(path)
+            return empty
+        # A shell wrapper that forwards to exactly one Python script: take
+        # the contract of that script rather than running the wrapper.
+        delegate = shell_delegate(path)
+        if delegate is not None:
+            sub = extract_contract(delegate, timeout=timeout, python=python)
+            if sub.get("usage"):
+                sub = dict(sub)
+                sub["summary"] = _docstring_summary(delegate) if not sub.get("summary") else sub["summary"]
+                return sub
         return empty
 
     interp = python or sys.executable
     try:
         if path.suffix == ".py":
-            cmd = [interp, str(path), "--help"]
+            cmd = [interp, str(path)] + list(args or []) + ["--help"]
         else:
-            cmd = [str(path), "--help"]
+            cmd = [str(path)] + list(args or []) + ["--help"]
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
             stdin=subprocess.DEVNULL,

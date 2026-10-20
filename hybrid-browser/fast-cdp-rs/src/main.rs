@@ -2,7 +2,6 @@ use base64::Engine;
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::fs;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -88,8 +87,10 @@ struct UatArgs {
     expect_text: Option<String>,
     #[arg(long)]
     expect_url: Option<String>,
-    #[arg(long, default_value = "jpt", value_parser = ["jpt", "imajev"])]
-    model: String,
+    /// Act on this exact candidate ref (as reported by --json) instead of
+    /// matching the goal against element labels.
+    #[arg(long = "ref")]
+    target_ref: Option<String>,
     #[arg(long = "screenshot")]
     screenshot_path: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
@@ -226,9 +227,12 @@ struct UatAction {
     action: String,
     ref_id: String,
     description: String,
-    probability: f64,
-    confidence: f64,
-    model: String,
+    /// How the target was picked: `explicit_ref` or `keyword_match`.
+    selection: String,
+    /// Goal words found in the element's label.
+    matched_on: Vec<String>,
+    /// Share of the goal's words that matched, 0.0..1.0.
+    match_score: f64,
 }
 
 #[derive(Serialize)]
@@ -1426,46 +1430,48 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("No interactive elements found on page: {target_url}").into());
     }
 
-    let mut options = HashMap::new();
+    // Ordered, not a HashMap: ties must resolve in DOM order to be
+    // reproducible across runs.
+    let mut candidates: Vec<(String, String)> = Vec::new();
     for c in candidates_arr.iter().take(20) {
         if let (Some(r), Some(d)) = (
             c.get("ref").and_then(Value::as_str),
             c.get("description").and_then(Value::as_str),
         ) {
-            options.insert(r.to_string(), d.to_string());
+            candidates.push((r.to_string(), d.to_string()));
         }
     }
 
-    let title_val = client.evaluate("document.title")?;
-    let page_title = title_val
-        .get("value")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let keywords = goal_keywords(&args.goal);
 
-    let options_prompt = options
-        .iter()
-        .map(|(r, d)| format!("- {r}: {d}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let state = format!(
-        "Page Title: {page_title}\nURL: {target_url}\nGoal: {}\nInteractive Elements:\n{options_prompt}",
-        args.goal
-    );
-    let question = format!(
-        "Which interactive element should be clicked or triggered to achieve: '{}'?",
-        args.goal
-    );
-
-    let (selected_ref, prob, conf) = if args.model == "jpt" {
-        query_jpt_decision(&state, &question, &options)?
-    } else {
-        query_imajev_decision(&state, &question, &options)?
+    let (selected_ref, matched_on, match_score, how) = match args.target_ref.as_deref() {
+        Some(wanted) => {
+            if !candidates.iter().any(|(r, _)| r == wanted) {
+                return Err(format!(
+                    "--ref '{wanted}' is not on the page. Candidates:\n{}",
+                    list_candidates(&candidates)
+                )
+                .into());
+            }
+            (wanted.to_string(), Vec::new(), 1.0, "explicit_ref")
+        }
+        None => match select_target(&keywords, &candidates) {
+            Some((ref_id, matched, score)) => (ref_id, matched, score, "keyword_match"),
+            None => {
+                return Err(format!(
+                    "No candidate matched the goal '{}'. Pass --ref to pick one of:\n{}",
+                    args.goal,
+                    list_candidates(&candidates)
+                )
+                .into());
+            }
+        },
     };
 
-    let selected_desc = options
-        .get(&selected_ref)
-        .cloned()
+    let selected_desc = candidates
+        .iter()
+        .find(|(r, _)| r == &selected_ref)
+        .map(|(_, d)| d.clone())
         .unwrap_or_else(|| "Unknown".to_string());
 
     let mut actions = Vec::new();
@@ -1473,9 +1479,9 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         action: "click".to_string(),
         ref_id: selected_ref.clone(),
         description: selected_desc,
-        probability: prob,
-        confidence: conf,
-        model: args.model.clone(),
+        selection: how.to_string(),
+        matched_on,
+        match_score,
     });
 
     let click_script = format!(
@@ -1519,10 +1525,16 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         let _ = client.capture_screenshot(path);
     }
 
-    let verification = if errors.is_empty() {
+    // Without an assertion there is nothing to verify, and a model's opinion
+    // of "that looks about right" is exactly the unverifiable claim UAT exists
+    // to remove. Say so plainly instead.
+    let asserted = args.expect_text.is_some() || args.expect_url.is_some();
+    let verification = if !errors.is_empty() {
+        "failed".to_string()
+    } else if asserted {
         "verified_by_assertions".to_string()
     } else {
-        "failed".to_string()
+        "action_executed".to_string()
     };
 
     let duration_ms = (start.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
@@ -1547,8 +1559,8 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         );
         for a in &res.actions {
             println!(
-                "  Action: click {} ({}) [conf: {:.2}]",
-                a.ref_id, a.description, a.confidence
+                "  Action: click {} ({}) [{} score: {:.2}]",
+                a.ref_id, a.description, a.selection, a.match_score
             );
         }
         for err in &res.errors {
@@ -1562,87 +1574,62 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn query_jpt_decision(
-    state: &str,
-    question: &str,
-    options: &HashMap<String, String>,
-) -> Result<(String, f64, f64), Box<dyn std::error::Error>> {
-    let payload = json!({
-        "state": state,
-        "question": question,
-        "options": options,
-        "mode": "choice"
-    });
-
-    let resp = ureq::post("http://127.0.0.1:8090/v1/decide")
-        .timeout(Duration::from_millis(2500))
-        .send_json(payload)?;
-
-    let val: Value = resp.into_json()?;
-    let answer = val
-        .get("answer")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let conf = val.get("confidence").and_then(Value::as_f64).unwrap_or(0.9);
-    let prob = val
-        .get("probabilities")
-        .and_then(|p| p.get(&answer))
-        .and_then(Value::as_f64)
-        .unwrap_or(0.9);
-
-    Ok((answer, prob, conf))
+/// Split a goal into comparable words: lowercased, alphanumeric, >= 3 chars.
+fn goal_keywords(goal: &str) -> Vec<String> {
+    goal.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3)
+        .map(|w| w.to_lowercase())
+        .collect()
 }
 
-fn query_imajev_decision(
-    state: &str,
-    question: &str,
-    options: &HashMap<String, String>,
-) -> Result<(String, f64, f64), Box<dyn std::error::Error>> {
-    let prompt = format!(
-        "State:\n{state}\n\nQuestion: {question}\n\nPick the best option key among:\n{}",
-        options
+fn list_candidates(candidates: &[(String, String)]) -> String {
+    candidates
+        .iter()
+        .map(|(r, d)| format!("  {r}: {d}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Pick the candidate whose label covers the most of the goal's words.
+///
+/// `uat` used to hand this list to a decision model. The list is already
+/// resolved from the DOM by the extraction script above, so that was a model
+/// round trip to redo a choice the caller had already made -- and it made a
+/// deterministic browser test depend on a multi-gigabyte server being up.
+/// Scoring labels locally is reproducible, needs no VRAM, and reports the
+/// words it matched so a wrong pick is debuggable.
+///
+/// Ties break toward the earlier element in DOM order. Returns `None` when
+/// nothing matches, so the caller can ask for an explicit `--ref`.
+fn select_target(
+    keywords: &[String],
+    candidates: &[(String, String)],
+) -> Option<(String, Vec<String>, f64)> {
+    if keywords.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(usize, String, Vec<String>, usize)> = None;
+    for (idx, (ref_id, description)) in candidates.iter().enumerate() {
+        let haystack = description.to_lowercase();
+        let matched: Vec<String> = keywords
             .iter()
-            .map(|(k, v)| format!("- {k}: {v}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-
-    let payload = json!({
-        "model": "imajev-4b",
-        "messages": [
-            {"role": "system", "content": "You are a web automation decision engine. Reply only with the exact option key (e.g. uat-1)."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.0,
-        "max_tokens": 16
-    });
-
-    let resp = ureq::post("http://127.0.0.1:8083/v1/chat/completions")
-        .timeout(Duration::from_millis(2500))
-        .send_json(payload)?;
-
-    let val: Value = resp.into_json()?;
-    let content = val
-        .get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c0| c0.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-
-    for key in options.keys() {
-        if content.contains(key) {
-            return Ok((key.clone(), 0.95, 0.95));
+            .filter(|k| haystack.contains(k.as_str()))
+            .cloned()
+            .collect();
+        if matched.is_empty() {
+            continue;
+        }
+        // Strictly greater keeps the earlier candidate on a tie.
+        if best.as_ref().is_none_or(|(count, _, _, _)| matched.len() > *count) {
+            best = Some((matched.len(), ref_id.clone(), matched, idx));
         }
     }
 
-    if let Some(first_key) = options.keys().next() {
-        return Ok((first_key.clone(), 0.5, 0.5));
-    }
-
-    Err("No option found".into())
+    best.map(|(count, ref_id, matched, _idx)| {
+        let score = (count as f64 / keywords.len() as f64 * 1000.0).round() / 1000.0;
+        (ref_id, matched, score)
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

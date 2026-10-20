@@ -1,9 +1,14 @@
 ---
 name: video-miner
-description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (Imajev), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
+
+description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (vllm-d3-mini vision), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires ffmpeg and the local Nemotron ASR server on :8081."
 metadata:
-  author: rodri
+  author: "rodri"
   version: "1.3"
+allowed-tools: "Bash(video-miner:*) Bash(ffmpeg:*) Bash(python3:*) Read Write"
 ---
 
 # video-miner

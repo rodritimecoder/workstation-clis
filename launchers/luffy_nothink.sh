@@ -6,7 +6,7 @@
 
 DRIVE="/run/media/rodri/AI"
 SERVER_EXE="${SRV_SERVER:-$DRIVE/ROCmFPX/build-vulkan-linux/bin/llama-server}"
-MODEL_PATH="${SRV_MODEL:-$DRIVE/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_0_ROCMFP4.gguf}"
+MODEL_PATH="${SRV_MODEL:-$DRIVE/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_K_M.gguf}"
 TEMPLATE_PATH="${SRV_TEMPLATE:-$DRIVE/models/froggeric/Qwen-Fixed-Chat-Templates/chat_template.jinja}"
 
 # Override without editing:  LLAMA_PORT=8082 ./luffy_nothink.sh

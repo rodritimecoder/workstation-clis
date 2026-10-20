@@ -1,9 +1,16 @@
 ---
 name: markitdown-cli
+
 description: >
   Convert documents to Markdown with MarkItDown: PDF, DOCX, PPTX, XLSX, HTML,
   CSV, JSON, XML, EPUB, ZIP, Outlook .msg, notebooks, images with optional
   local OCR, and URLs. Use to read a document or attachment into text.
+
+license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
+compatibility: "Requires the markitdown package. OCR needs a local OpenAI-compatible server (MARKITDOWN_OCR_BASE_URL); the optional LLM clients need ANTHROPIC_API_KEY."
+metadata:
+  author: "rodri"
+allowed-tools: "Bash(markitdown-cli:*) Bash(python3:*) Read Write"
 ---
 
 # MarkItDown CLI (`markitdown-cli`)

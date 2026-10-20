@@ -11,13 +11,12 @@ Synthesized from local GPU inference configs, launchers, benchmarks, and agent c
 | `:8080` | **Qwen3.6-35B-A3B Uncensored Genesis Final (Q4_0_ROCMFP4)** | `launchers/luffy_nothink.sh` / `luffy_thinking.sh` | **Flagship Workstation LLM** (22 GB, Vulkan dual-GPU `-ts 45/55`, replaced TTQ). High-throughput uncensored coding, reasoning, and agents. |
 | `:8081` | **Nemotron 3.5 ASR + Kokoro TTS** | `audio.cpp` server | Real-time streaming speech-to-text (40 languages) + low-latency voice synthesis. |
 | `:8082` | **NaviDC-OCR (Q8_0 / Q5_K_M)** | `launchers/navidc-ocr.sh` | Dense scanned academic papers and multi-page PDFs. |
-| `:8083` | **Imajev-4B Decision Model** | `launchers/imajev-4b.sh` | Multimodal decision gating ($T=1.305$, vision + text via `imajev-4b-mmproj-f16.gguf`). |
+| `:8083` | **vllm-d3-mini Decision Model (vision)** | `sh/vllm-d3-mini.sh` | **The** decision engine: native `/v1/systemone` bool/choice/score with calibrated probabilities, plus vision via `mmproj-vllm-d3-mini-Q8_0.gguf`. |
 | `:8084` | **CrispEmbed Scene Text OCR** | `launchers/crispembed-ocr.sh` | Real-world scene-text OCR, word/line crops (DBNet + PARSeq / TrOCR). |
 | `:8085` | **LightOnOCR-3-1B** | `launchers/lighton-ocr.sh` | **#1 Flagship Video & Slide OCR** (~16k t/s prefill, ~330 t/s gen). |
 | `:8086` | **Jina-Reranker-v2 Base** | `launchers/jina-reranker.sh` | Cross-encoder semantic search & RAG reranking. |
 | `:8087` | **EmbeddingGemma-2** | `launchers/embeddinggemma-2.sh` | Text + Vision multimodal embeddings. |
 | `:8088` | **DeskForge-Qwen3.5-4B** | `launchers/deskforge-qwen.sh` | Visual GUI grounding & desktop computer-use coordinates. |
-| `:8090` | **JPT-4B Decision Engine** | `launchers/jpt-4b/start-jpt.sh` | **High-speed System One Decision Gating** with full multimodal vision support (`jpt-4b.mmproj-bf16.gguf`). |
 
 ---
 
@@ -38,10 +37,11 @@ Synthesized from local GPU inference configs, launchers, benchmarks, and agent c
    - `Trocr-small-printed` (`cstr/`): Fast printed line OCR.
 
 ### 2. Calibrated Decision & Gating Models
-1. **`JPT-4B` (`:8090`)** & **`Imajev-4B` (`:8083`)**
-   - **Multimodal Support**: Both models feature active vision projectors (`jpt-4b.mmproj-bf16.gguf` and `imajev-4b-mmproj-f16.gguf`), enabling simultaneous visual and textual decision routing.
-   - **Calibrated Scoring**: Used for classification, scoring, triage, and gated pipeline routing.
-   - **Chaoliang Deprecation Note**: Chaoliang (`Jev-Style-Qwen3.5-2B`) was removed/deprecated. It lacks vision projector capabilities and benchmarks strictly worse than both `JPT-4B` and `Imajev-4B`.
+1. **`vllm-d3-mini` (`:8083`)** — the single decision engine
+   - **Native Decision API**: answers on `/v1/systemone` with calibrated probabilities instead of generated tokens, so a `bool`/`choice`/`score` costs one short round trip (~70 ms).
+   - **Vision**: `mmproj-vllm-d3-mini-Q8_0.gguf` is loaded alongside the model, so every primitive accepts `--image` at no extra cost.
+   - **Not a chat model**: it emits probabilities, not prose. Free-form projection belongs to the generative LLM on `:8080` (see the `local-llm` skill).
+   - **Retired**: `JPT-4B` (`:8090`), `OneJev1.5-4B` (`:8089`), `Imajev-4B`, and `Chaoliang`/`Jev-Style-Qwen3.5-2B` are archived; `jev-decision` has no fallback model.
 
 ### 3. Desktop GUI & Browser Grounding
 - **`DeskForge-Qwen3.5-4B` (`:8088`)**: Primary visual grounding model for `hybrid-browser`. Translates screenshots into exact pixel interaction coordinates.
