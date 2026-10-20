@@ -229,5 +229,57 @@ class TestPublicationGuard(unittest.TestCase):
         self.assertEqual(second["removed"], [])
 
 
+class TestGuardedCommit(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        run = lambda *a: subprocess.run(["git", "-C", str(self.repo)] + list(a),
+                                        capture_output=True, text=True, check=True)
+        run("init", "-b", "main")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        (self.repo / "keep.txt").write_text("fine\n", encoding="utf-8")
+        run("add", "keep.txt")
+        run("commit", "-m", "init")
+
+    def test_clean_change_commits(self):
+        (self.repo / "new.txt").write_text("hello\n", encoding="utf-8")
+        result = git_sync.guarded_commit(str(self.repo), "sync: test")
+        self.assertEqual(result["blocked"], [])
+        self.assertEqual(len(result["committed"]), 1)
+        self.assertIn("new.txt", subprocess.run(
+            ["git", "-C", str(self.repo), "show", "--name-only", "--format=", "HEAD"],
+            capture_output=True, text=True).stdout)
+
+    def test_untracked_file_with_secret_is_blocked(self):
+        (self.repo / "leak.txt").write_text(TestPublicationGuard.FAKE_PAT + "\n", encoding="utf-8")
+        result = git_sync.guarded_commit(str(self.repo), "sync: test")
+        self.assertEqual(len(result["blocked"]), 1)
+        self.assertEqual(result["committed"], [])
+        # Nothing may reach the index.
+        staged = subprocess.run(["git", "-C", str(self.repo), "diff", "--cached", "--name-only"],
+                                capture_output=True, text=True).stdout
+        self.assertEqual(staged.strip(), "")
+
+    def test_modified_file_with_secret_is_blocked(self):
+        (self.repo / "keep.txt").write_text(TestPublicationGuard.FAKE_PAT + "\n", encoding="utf-8")
+        result = git_sync.guarded_commit(str(self.repo), "sync: test")
+        self.assertEqual(len(result["blocked"]), 1)
+        self.assertEqual(result["committed"], [])
+
+    def test_deletion_is_allowed(self):
+        (self.repo / "keep.txt").unlink()
+        result = git_sync.guarded_commit(str(self.repo), "sync: test")
+        self.assertEqual(result["blocked"], [])
+        self.assertEqual(len(result["committed"]), 1)
+
+    def test_changed_files_includes_untracked(self):
+        (self.repo / "brand_new.txt").write_text("x\n", encoding="utf-8")
+        files = git_sync.changed_files_in(str(self.repo))
+        self.assertIn("brand_new.txt", files)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -142,47 +142,55 @@ def frontmatter(skill_md: Path) -> dict:
     return fields
 
 
+def scan_file(path: Path, label: str) -> list:
+    findings = []
+    for pattern, kind in SECRET_FILE_PATTERNS:
+        if pattern.search(path.name):
+            findings.append({
+                "severity": "block", "kind": "secret-filename",
+                "source": label, "path": path.name, "detail": f"blocked {kind}",
+            })
+            break
+
+    size_mb = path.stat().st_size / (1024 * 1024)
+    if size_mb > MAX_BLOB_SIZE_MB:
+        findings.append({
+            "severity": "block", "kind": "oversized-blob",
+            "source": label, "path": path.name,
+            "detail": f"{size_mb:.1f} MB exceeds the {MAX_BLOB_SIZE_MB:.0f} MB ceiling",
+        })
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return findings
+    for pattern, kind in SECRET_CONTENT_PATTERNS:
+        match = pattern.search(content)
+        if not match:
+            continue
+        value = match.group(0)
+        if is_placeholder(value):
+            continue
+        token = value[:6] + "..." + value[-4:] if len(value) > 12 else "***"
+        findings.append({
+            "severity": "block", "kind": "secret-content",
+            "source": label, "path": path.name,
+            "detail": f"{kind}: {token}",
+        })
+        break
+
+    return findings
+
+
 def scan_source(source: Path, label: str, excludes: list = None) -> list:
     findings = []
     if not source.is_dir():
         return findings
 
     for path in iter_files(source, excludes):
-        rel = path.relative_to(source)
-        for pattern, kind in SECRET_FILE_PATTERNS:
-            if pattern.search(path.name):
-                findings.append({
-                    "severity": "block", "kind": "secret-filename",
-                    "source": label, "path": str(rel), "detail": f"blocked {kind}",
-                })
-                break
-
-        size_mb = path.stat().st_size / (1024 * 1024)
-        if size_mb > MAX_BLOB_SIZE_MB:
-            findings.append({
-                "severity": "block", "kind": "oversized-blob",
-                "source": label, "path": str(rel),
-                "detail": f"{size_mb:.1f} MB exceeds the {MAX_BLOB_SIZE_MB:.0f} MB ceiling",
-            })
-
-        try:
-            content = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        for pattern, kind in SECRET_CONTENT_PATTERNS:
-            match = pattern.search(content)
-            if not match:
-                continue
-            value = match.group(0)
-            if is_placeholder(value):
-                continue
-            token = value[:6] + "..." + value[-4:] if len(value) > 12 else "***"
-            findings.append({
-                "severity": "block", "kind": "secret-content",
-                "source": label, "path": str(rel),
-                "detail": f"{kind}: {token}",
-            })
-            break
+        for finding in scan_file(path, label):
+            finding["path"] = str(path.relative_to(source))
+            findings.append(finding)
 
     return findings
 

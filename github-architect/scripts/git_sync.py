@@ -165,17 +165,18 @@ def stage2_guard(changed_files: list[str], repo: str = None) -> list[str]:
     return safe_files, blocked_files
 
 
-def stage3_commit(safe_files: list[str], message: str = None) -> list[str]:
+def stage3_commit(safe_files: list[str], message: str = None, repo: str = None) -> list[str]:
     committed_shas = []
     if not safe_files:
         return committed_shas
 
     # Stage explicitly by path (NEVER git add -A or git add .)
     for f in safe_files:
-        if Path(f).exists():
-            run_git(["add", "--", f])
+        target = Path(f) if repo is None else Path(repo) / f
+        if target.exists():
+            run_git(["add", "--", f], cwd=repo)
         else:
-            run_git(["rm", "--cached", "--", f], check=False)
+            run_git(["rm", "--cached", "--", f], check=False, cwd=repo)
 
     commit_msg = message
     if not commit_msg:
@@ -185,9 +186,9 @@ def stage3_commit(safe_files: list[str], message: str = None) -> list[str]:
         else:
             commit_msg = f"feat: sync {len(safe_files)} changed files"
 
-    res = run_git(["commit", "-m", commit_msg])
+    res = run_git(["commit", "-m", commit_msg], cwd=repo)
     # Extract SHA
-    sha_res = run_git(["rev-parse", "--short", "HEAD"])
+    sha_res = run_git(["rev-parse", "--short", "HEAD"], cwd=repo)
     committed_shas.append((sha_res.stdout.strip(), commit_msg))
     return committed_shas
 
@@ -241,7 +242,99 @@ def stage6_push(branch: str, has_upstream: bool, auto_yes: bool = False):
         run_git(["push"])
 
 
+def _load_publication_guard():
+    try:
+        from publication_guard import scan_file
+        return scan_file
+    except ImportError:
+        import importlib.util
+        script_path = Path(__file__).resolve().parent / "publication_guard.py"
+        spec = importlib.util.spec_from_file_location("publication_guard", script_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.scan_file
+
+
+def changed_files_in(repo: str) -> list[str]:
+    """Every path the working tree differs on, including untracked files."""
+    res = run_git(["status", "--porcelain"], check=False, cwd=repo)
+    files = []
+    for line in res.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ")[-1].strip()
+        if path:
+            files.append(path)
+    return files
+
+
+def guarded_commit(repo: str, message: str, excludes: list = None) -> dict:
+    """Stage and commit only the files that pass the secret guard.
+
+    The content scan reads whole files rather than diffs: a brand-new file is
+    untracked, so `git diff HEAD` shows nothing for it and a secret planted
+    in a new file would sail straight through a diff-based guard.
+    """
+    scan_file = _load_publication_guard()
+    files = changed_files_in(repo)
+    safe, blocked = [], []
+    for rel in files:
+        target = Path(repo) / rel
+        if not target.is_file():
+            # A deletion or a rename source: nothing to scan, and its absence
+            # is the point.
+            safe.append(rel)
+            continue
+        findings = scan_file(target, "hub")
+        if findings:
+            blocked.append((rel, findings[0]["detail"]))
+        else:
+            safe.append(rel)
+
+    if blocked:
+        print("🛡️  [guard] Blocked files from staging:")
+        for rel, reason in blocked:
+            print(f"   ❌ {rel} — {reason}")
+        return {"committed": [], "blocked": blocked, "safe": safe}
+
+    committed = stage3_commit(safe, message=message, repo=repo) if safe else []
+    return {"committed": committed, "blocked": [], "safe": safe}
+
+
+def cmd_guarded_commit(args) -> int:
+    result = guarded_commit(args.repo, args.message, args.exclude)
+    if args.json:
+        print(json.dumps({
+            "repo": args.repo,
+            "committed": [c[0] for c in result["committed"]],
+            "blocked": [{"path": p, "reason": r} for p, r in result["blocked"]],
+            "staged": len(result["safe"]),
+        }, indent=2))
+    else:
+        if result["blocked"]:
+            print(f"🛑 [guard] {len(result['blocked'])} file(s) blocked; nothing committed.")
+        else:
+            print(f"✅ [guard] committed {len(result['committed'])} change(s) in {args.repo}")
+    return 1 if result["blocked"] else 0
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if argv and argv[0] == "guarded-commit":
+        gp = argparse.ArgumentParser(
+            prog="git-sync guarded-commit",
+            description="Stage and commit only the files that pass the secret guard",
+        )
+        gp.add_argument("--repo", required=True, help="Repository to commit in")
+        gp.add_argument("-m", "--message", required=True, help="Commit message")
+        gp.add_argument("--exclude", action="append", default=[], help="rsync-style exclude pattern (repeatable)")
+        gp.add_argument("--json", action="store_true")
+        gargs = gp.parse_args(argv[1:])
+        return cmd_guarded_commit(gargs)
+
     parser = argparse.ArgumentParser(
         prog="git-sync",
         description="Disciplined 6-Stage Git Branch Synchronization Engine (Look -> Guard -> Commit -> Gate -> Pull -> Push -> Report)"
@@ -256,7 +349,6 @@ def main(argv=None):
     parser.add_argument("--json", action="store_true", help="Emit receipt as JSON")
 
     args = parser.parse_args(argv)
-
     # Stage 1: Look
     look_info = stage1_look()
     branch = look_info["branch"]
