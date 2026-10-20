@@ -3,8 +3,8 @@ name: hybrid-browser
 
 description: >
   Drive a sandboxed Chromium over CDP: navigate, click, type, screenshot, and
-  verify pages. Falls back to local vision grounding for canvas, SVG and
-  Shadow DOM elements that have no selector.
+  verify pages. Selector-driven by default; an opt-in local vision fallback
+  handles canvas, SVG and closed Shadow DOM targets that have no selector.
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires the Podman container runtime and a Chromium browser; drives Chrome DevTools Protocol on :9222."
@@ -17,9 +17,14 @@ allowed-tools: "Bash(hybrid-browser:*) Bash(podman:*) Bash(python3:*) Read Write
 
 A tiered web automation skill for local agent workloads. A native Rust CDP
 client (`playwright-rs`, ~3ms cold start) drives a sandboxed Chromium over
-DevTools Protocol; when an element has no selector — `<canvas>`, SVG
-dashboards, Shadow DOM, obfuscated React — a Python wrapper falls back to
-the local `DeskForge-Qwen3.5-4B` model on `:8088` to ground the click.
+DevTools Protocol.
+
+Clicks are selector-driven by default. When the DOM yields nothing — `<canvas>`,
+SVG dashboards, closed Shadow DOM, text baked into images — a Python wrapper can
+fall back to `DeskForge-Qwen3.5-4B` on `:8088`, but that path is **opt-in and off
+by default**: `:8088` is archived, and a locator beats a coordinate guess
+wherever a selector exists. Enable it with `HYBRID_BROWSER_VISION=1` and
+the archived `deskforge-qwen.sh` launcher (`sh/archived/` on the AI volume).
 
 ---
 
@@ -28,7 +33,7 @@ the local `DeskForge-Qwen3.5-4B` model on `:8088` to ground the click.
 | Path | Use it when | Command | Example question |
 | :--- | :--- | :--- | :--- |
 | **Native CDP** | The DOM yields a selector | `playwright-rs` | *"Click the login button"* |
-| **Vision fallback** | The element has no selector | `hybrid-browser --click` | *"Click the blue submit button in the chart"* |
+| **Vision fallback** (opt-in) | The element has no selector at all — canvas/closed Shadow DOM only | `HYBRID_BROWSER_VISION=1 hybrid-browser --click` | *"Click the blue submit button in the chart"* |
 | **Deterministic verify** | You need a pass or fail, not a session | `fast-cdp verify` | *"Is the Dashboard heading rendered?"* |
 | **Goal-directed UAT** | You want to drive a flow and assert the outcome | `fast-cdp uat` | *"Proceed to checkout, then check for 'Checkout Successful'"* |
 

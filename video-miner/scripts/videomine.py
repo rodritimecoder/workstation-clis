@@ -35,6 +35,24 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = SKILL_DIR / "_templates" / "workspace"
 
+
+def _drive_root() -> Path:
+    """The AI volume root: $AI_ROOT, else the nearest ancestor holding models/.
+
+    Weights, the llama.cpp binaries and sibling skills all live under it, so
+    resolving from here keeps the skill working wherever the volume is mounted.
+    """
+    env = os.environ.get("AI_ROOT")
+    if env:
+        return Path(env).expanduser()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "models").is_dir():
+            return parent
+    return Path("/run/media/rodri/AI")
+
+
+DRIVE = _drive_root()
+
 STAGES = [
     "01_acquire",
     "02_audio_asr",
@@ -47,16 +65,16 @@ STAGES = [
 # Service Endpoints
 DECISION_URL = os.environ.get("JEV_URL", "http://127.0.0.1:8083/v1/systemone")
 
-LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
-LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf"))
-LLAMA_SERVER_BIN = Path(os.environ.get("LLAMA_SERVER_BIN", "/run/media/rodri/AI/llama.cpp/build/bin/llama-server"))
-LLAMA_MTMD_CLI = Path(os.environ.get("LLAMA_MTMD_CLI", "/run/media/rodri/AI/llama.cpp/build/bin/llama-mtmd-cli"))
+LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
+LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf"))
+LLAMA_SERVER_BIN = Path(os.environ.get("LLAMA_SERVER_BIN", DRIVE / "llama.cpp/build/bin/llama-server"))
+LLAMA_MTMD_CLI = Path(os.environ.get("LLAMA_MTMD_CLI", DRIVE / "llama.cpp/build/bin/llama-mtmd-cli"))
 LIGHTON_PORT = int(os.environ.get("LIGHTON_PORT", "8085"))
 LIGHTON_URL = os.environ.get("LIGHTON_URL", f"http://127.0.0.1:{LIGHTON_PORT}/v1/chat/completions")
 
 
 def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, words_out: Path | None = None) -> list[str]:
-    audiocpp_cli = shutil.which("audiocpp") or "/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"
+    audiocpp_cli = shutil.which("audiocpp") or str(DRIVE / "skills/audiocpp/scripts/audiocpp_cli.py")
     if shutil.which("audiocpp") or Path(audiocpp_cli).is_file():
         cmd = ["audiocpp" if shutil.which("audiocpp") else sys.executable]
         if not shutil.which("audiocpp"):
@@ -67,7 +85,8 @@ def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, wo
         return cmd
 
     candidates = [
-        Path("/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"),
+        DRIVE / "skills/audiocpp/scripts/audiocpp_cli.py",
+        DRIVE / "skills/hardware/audiocpp/scripts/audiocpp_cli.py",
         Path.home() / ".gemini" / "config" / "skills" / "audiocpp" / "scripts" / "audiocpp_cli.py",
         Path.home() / ".config" / "opencode" / "skills" / "audiocpp" / "scripts" / "audiocpp_cli.py",
         Path.home() / ".pi" / "agent" / "skills" / "audiocpp" / "scripts" / "audiocpp_cli.py",

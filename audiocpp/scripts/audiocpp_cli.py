@@ -6,6 +6,7 @@ import re
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -14,9 +15,27 @@ import wave
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-AUDIO_CPP_DIR = Path("/run/media/rodri/AI/audio.cpp")
-MODELS_DIR = Path("/run/media/rodri/AI/models/audio-cpp/audio.cpp-gguf")
-VOICE_DIR = Path("/run/media/rodri/AI/voice")
+
+def _drive_root() -> Path:
+    """The AI volume root: $AI_ROOT, else the nearest ancestor holding models/.
+
+    Every path below is relative to this, so the skill works wherever the
+    volume is mounted (or from a harness copy with $AI_ROOT set) instead of
+    only at the one absolute path it was written for.
+    """
+    env = os.environ.get("AI_ROOT")
+    if env:
+        return Path(env).expanduser()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "models").is_dir():
+            return parent
+    return Path("/run/media/rodri/AI")
+
+
+DRIVE = _drive_root()
+AUDIO_CPP_DIR = Path(os.environ.get("AUDIOCPP_DIR", DRIVE / "audio.cpp"))
+MODELS_DIR = Path(os.environ.get("AUDIOCPP_MODELS_DIR", DRIVE / "models/audio-cpp/audio.cpp-gguf"))
+VOICE_DIR = Path(os.environ.get("AUDIOCPP_VOICE_DIR", DRIVE / "voice"))
 
 CLI_BIN = AUDIO_CPP_DIR / "audiocpp_cli"
 SERVER_BIN = AUDIO_CPP_DIR / "audiocpp_server"
@@ -603,7 +622,11 @@ def cmd_doctor(json_mode: bool = False):
 
 
 def cmd_benchmark(json_mode: bool = False):
-    test_audio = Path("/run/media/rodri/AI/test_speech.wav")
+    # Scratch output goes to the system temp dir, not the AI volume: that volume
+    # is NTFS3 and is for weights, not ephemeral files.
+    test_audio = Path(os.environ.get(
+        "AUDIOCPP_TEST_WAV", Path(tempfile.gettempdir()) / "audiocpp_test_speech.wav"
+    ))
     test_text = "Hello, this is a local hardware-accelerated speech synthesis test using audio dot c p p."
     if not test_audio.is_file():
         cmd_speak(test_text, model_key="supertonic", out_file=str(test_audio), quiet=True)

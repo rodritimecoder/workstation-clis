@@ -36,8 +36,12 @@ def _bootstrap() -> None:
         pass
     if os.environ.get("_MARKITDOWN_CLI_REEXEC") == "1":
         return
-    py = SKILL_DIR / ".venv" / "bin" / "python"
-    if py.exists():
+    candidates = (
+        SKILL_DIR / ".venv" / "bin" / "python",
+        Path.home() / ".venvs" / SKILL_DIR.name / "bin" / "python",
+    )
+    py = next((c for c in candidates if c.exists()), None)
+    if py is not None:
         os.environ["_MARKITDOWN_CLI_REEXEC"] = "1"
         os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
     sys.exit(

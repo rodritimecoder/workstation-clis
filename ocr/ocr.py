@@ -9,7 +9,42 @@ sys.path.append(str(Path(__file__).resolve().parent / "scripts"))
 from ocr_engine import OCREngine, LIGHTON_LAUNCHER, CRISP_LAUNCHER, LIGHTON_MODEL_DIR, CRISP_MODELS_DIR
 
 
+def _reexec_in_venv() -> None:
+    """Re-exec under the skill venv when PyMuPDF is missing.
+
+    PDF OCR needs PyMuPDF, which is not installed in the system interpreter.
+    The skill ships a `.venv` symlink for exactly this, so hop into it once
+    (guarded by an env var) and then let the normal code path run.
+    """
+    try:
+        import pymupdf  # noqa: F401
+        return
+    except ImportError:
+        pass
+    if os.environ.get("_OCR_VENV_REEXEC") == "1":
+        return
+    here = Path(__file__).resolve()
+    # Bundle copies are rsynced with `--exclude .venv`, so the in-tree symlink is
+    # absent there; fall back to the machine-wide location it normally points at.
+    candidates = (
+        here.parent / ".venv" / "bin" / "python",
+        Path.home() / ".venvs" / here.parent.name / "bin" / "python",
+    )
+    venv_py = next((c for c in candidates if c.is_file()), None)
+    if venv_py is None:
+        return
+    try:
+        if venv_py.resolve() == Path(sys.executable).resolve():
+            return
+    except OSError:
+        return
+    env = dict(os.environ, _OCR_VENV_REEXEC="1")
+    os.execve(str(venv_py), [str(venv_py), str(here), *sys.argv[1:]], env)
+
+
 def main():
+    _reexec_in_venv()
+
     parent_parser = argparse.ArgumentParser(add_help=False)
     parent_parser.add_argument("--json", action="store_true", help="Output machine-readable JSON format")
     parent_parser.add_argument("--host", default=None, help="OCR server host (default: $OCR_HOST or 127.0.0.1, supports Tailscale *.ts.net)")

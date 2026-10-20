@@ -874,21 +874,20 @@ Synthesized by `github-architect` from local GPU inference configs, launchers, a
 
 | Port | Model / Engine | Launcher | Best Used For |
 |---|---|---|---|
-| `:8080` | **Qwen3.6-35B-A3B (Genesis Q4_0_ROCMFP4)** | `launchers/ttq_server.sh` | Complex reasoning, coding, uncensored generation |
+| `:8080` | **Qwen3.6-35B-A3B-Uncensored-Genesis (Q4_K_M)** | `sh/luffy_nothink.sh` | Complex reasoning, coding, uncensored generation |
 | `:8081` | **Nemotron 3.5 ASR + Kokoro TTS** | `audio.cpp` server | Real-time speech-to-text (40 langs) + fast speech synthesis |
-| `:8082` | **NaviDC-OCR (Q8_0 / Q5_K_M)** | `launchers/navidc-ocr.sh` | Dense scanned PDFs and papers |
 | `:8083` | **vllm-d3-mini Decision Model (vision)** | `sh/vllm-d3-mini.sh` | Native `/v1/systemone` bool/choice/score + image gating |
 | `:8084` | **CrispEmbed Scene Text OCR** | `launchers/crispembed-ocr.sh` | Real-world scene-text OCR (DBNet + PARSeq) |
-| `:8085` | **LightOnOCR-3-1B** | `launchers/lighton-ocr.sh` | **Flagship Video & Slide OCR** (~16k t/s prefill, ~330 t/s gen) |
+| `:8085` | **LightOnOCR-3-1B** | `launchers/lighton-ocr.sh` | **Flagship Video, Slide & Scanned-PDF OCR** (~16k t/s prefill, ~330 t/s gen) |
 | `:8086` | **Jina-Reranker-v2 Base** | `launchers/jina-reranker.sh` | Cross-encoder RAG reranking |
-| `:8087` | **EmbeddingGemma-2** | `launchers/embeddinggemma-2.sh` | Text + Vision multimodal embeddings |
+| `:8087` | **bge-small-en-v1.5 (384d)** | `launchers/bge-small.sh` | Text embeddings for RAG + semantic cache |
 | `:8088` | **DeskForge-Qwen3.5-4B** | `launchers/deskforge-qwen.sh` | Visual GUI grounding & computer use |
 
 ---
 
 ## 🏆 Model Rankings by Task
 
-- **Video & Slide OCR**: `LightOnOCR-3-1B` (#1) > `SmolDocling-256M` (#2) > `NaviDC-OCR` (#3) > `CrispEmbed` (#4)
+- **Video, Slide & Document OCR**: `LightOnOCR-3-1B` (#1) > `SmolDocling-256M` (#2) > `CrispEmbed` (#3)
 - **Calibrated Decisions**: `vllm-d3-mini` (Vision + Text, `/v1/systemone`)
 - **Browser Visual Grounding**: `DeskForge-Qwen3.5-4B` (GUI coordinates)
 - **Speech-to-Text**: `Nemotron-3.5-ASR` (Streaming RNNT on `:8081`)

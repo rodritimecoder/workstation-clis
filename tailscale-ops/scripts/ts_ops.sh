@@ -15,6 +15,19 @@ check_tailscale() {
   fi
 }
 
+usage() {
+  echo "Usage: $0 {peers|check-port|serve-mesh|mesh-status|serve-on|funnel-on|reset-tunnels|send-file|doctor}"
+  echo "  peers                  # List online tailnet peers"
+  echo "  doctor                 # Diagnostic check of tailscale status and active tunnels"
+  echo "  check-port <host> <p>  # Probe reachable port on peer"
+  echo "  serve-mesh             # Expose every inference and CDP slot over Tailscale HTTPS"
+  echo "  mesh-status            # View active Tailscale serve configurations"
+  echo "  serve-on <port>        # Expose single port privately on tailnet"
+  echo "  funnel-on <port>       # Expose single port publicly via funnel"
+  echo "  reset-tunnels          # Tear down all serve and funnel tunnels"
+  echo "  send-file <file> <tgt> # Transfer file to peer via tailscale file cp"
+}
+
 case "$CMD" in
   peers)
     check_tailscale
@@ -102,19 +115,22 @@ except Exception as e:
     DNS_NAME=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("Self", {}).get("DNSName", "").rstrip("."))')
     echo "⚡ Exposing Workstation AI Inference Matrix over Private Tailscale HTTPS (${DNS_NAME})..."
     
-    SERVICES=(
-      "4000:LiteLLM Dynamic Gateway"
-      "8000:llama-swap Controller"
-      "8080:Genesis 35B Primary LLM"
-      "8081:audio.cpp Nemotron ASR & Kokoro TTS"
-      "8082:EmbeddingGemma-2 768d Multimodal"
-      "8083:vllm-d3-mini Calibrated Decisions (vision)"
-      "8084:CrispEmbed Scene-Text OCR"
-      "8085:LightOnOCR Flagship Document OCR"
-      "8088:DeskForge Visual GUI Grounding"
-      "9222:Chromium CDP DevTools (fast-cdp)"
-      "3010:KasmVNC Browser Web Desktop"
-    )
+# ports:begin
+SERVICES=(
+  "8080:llm — Qwen3.6-35B-A3B-Uncensored-Genesis-Final"
+  "8081:audio — nemotron-asr"
+  "8083:decision — vllm-d3-mini"
+  "8084:ocr-crispembed — CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec)"
+  "8085:ocr-lighton — LightOnOCR-3-1B"
+  "8086:reranker — jina-reranker-v2-base-multilingual"
+  "8087:embed — bge-small-en-v1.5"
+  "4000:litellm — LiteLLM gateway"
+  "8000:llama-swap — llama-swap"
+  "3010:kasmvnc — KasmVNC (podman)"
+  "9222:cdp — Chromium DevTools"
+  "9223:cdp-internal — labwc forwarder"
+)
+# ports:end
 
     for item in "${SERVICES[@]}"; do
       PORT="${item%%:*}"
@@ -190,17 +206,13 @@ except Exception as e:
     echo "✅ Sent ${FILE_PATH} to ${TARGET}"
     ;;
 
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+
   *)
-    echo "Usage: $0 {peers|check-port|serve-mesh|mesh-status|serve-on|funnel-on|reset-tunnels|send-file|doctor}" >&2
-    echo "  peers                  # List online tailnet peers"
-    echo "  doctor                 # Diagnostic check of tailscale status and active tunnels"
-    echo "  check-port <host> <p>  # Probe reachable port on peer"
-    echo "  serve-mesh             # Expose all 12 workstation inference & CDP services over Tailscale HTTPS"
-    echo "  mesh-status            # View active Tailscale serve configurations"
-    echo "  serve-on <port>        # Expose single port privately on tailnet"
-    echo "  funnel-on <port>       # Expose single port publicly via funnel"
-    echo "  reset-tunnels          # Tear down all serve and funnel tunnels"
-    echo "  send-file <file> <tgt> # Transfer file to peer via tailscale file cp"
+    usage >&2
     exit 1
     ;;
 esac

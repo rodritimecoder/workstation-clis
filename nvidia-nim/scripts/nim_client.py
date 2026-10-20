@@ -414,7 +414,7 @@ def run_agent_loop(
         "- `ocr read <file>`: LightOnOCR-3-1B document and image OCR.\n"
         "- `jev bool / choice / score`: Calibrated non-generative decisions.\n"
         "- `audiocpp tts / asr`: Speech synthesis and verbatim transcription.\n"
-        "- `local-hub search <intent>` / `local-hub run <skill>`: Discover and run any workstation skill.\n"
+        "- `local-llm \"<prompt>\"`: Local Qwen3.6-35B coder on :8080 (see the `local-llm` skill).\n"
     )
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_prompt},

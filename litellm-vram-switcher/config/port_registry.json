@@ -8,59 +8,59 @@
   "models": {
     "8080": {
       "alias": "local-coder-genesis",
-      "vram_mb": 22000,
+      "vram_mb": 20500,
       "pinned": true,
-      "name": "Qwen3.6-35B-A3B Uncensored Genesis",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/luffy_thinking.sh",
-      "role": "#1 Coder & System Brain"
+      "name": "Qwen3.6-35B-A3B-Uncensored-Genesis-Final",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/luffy_nothink.sh",
+      "role": "Primary generative LLM \u2014 chat, code, long-form writing, prose projection"
     },
     "8081": {
-      "alias": "local-audio-nemotron",
+      "alias": "local-audio-audiocpp",
       "vram_mb": 2500,
       "pinned": false,
-      "name": "audio.cpp Nemotron ASR & Kokoro TTS",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/mic-asr.sh",
-      "role": "Real-time speech transcription & synthesis"
-    },
-    "8082": {
-      "alias": "local-embed-gemma2",
-      "vram_mb": 1500,
-      "pinned": false,
-      "name": "EmbeddingGemma-2 768d Multimodal",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/embeddinggemma-2.sh",
-      "role": "Fast dense vector representations & RRF search"
+      "name": "nemotron-asr",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/run-audiocpp.sh",
+      "role": "Speech-to-text, text-to-speech, forced alignment, voice cloning"
     },
     "8083": {
       "alias": "local-decide-vllm-d3",
       "vram_mb": 3700,
       "pinned": false,
-      "name": "vllm-d3-mini Decision Engine (vision)",
-      "cmd": "sh /run/media/rodri/AI/sh/vllm-d3-mini.sh",
-      "role": "Calibrated bool/choice/score + vision gating, native /v1/systemone"
+      "name": "vllm-d3-mini",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/vllm-d3-mini.sh",
+      "role": "The single decision engine \u2014 bool / choice / score primitives"
     },
     "8084": {
       "alias": "local-ocr-crispembed",
       "vram_mb": 1200,
       "pinned": false,
-      "name": "CrispEmbed Scene Text OCR",
+      "name": "CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec)",
       "cmd": "sh /run/media/rodri/AI/skills/launchers/crispembed-ocr.sh",
-      "role": "Spatial 2D bounding boxes and scene-text detection"
+      "role": "Scene text \u2014 2D bounding boxes and structured markdown"
     },
     "8085": {
       "alias": "local-ocr-lighton",
       "vram_mb": 1500,
       "pinned": false,
-      "name": "LightOnOCR-3-1B Flagship Document OCR",
+      "name": "LightOnOCR-3-1B",
       "cmd": "sh /run/media/rodri/AI/skills/launchers/lighton-ocr.sh",
-      "role": "#1 Document, slide, and table text extraction"
+      "role": "Documents, PDFs and slides \u2014 fast prefill, high-throughput markdown"
     },
-    "8088": {
-      "alias": "local-ground-deskforge",
-      "vram_mb": 3500,
+    "8086": {
+      "alias": "local-rerank-jina",
+      "vram_mb": null,
       "pinned": false,
-      "name": "DeskForge Visual GUI Grounding",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/deskforge-qwen.sh",
-      "role": "Computer-use visual coordinates"
+      "name": "jina-reranker-v2-base-multilingual",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/jina-reranker.sh",
+      "role": "Cross-encoder reranking for RAG"
+    },
+    "8087": {
+      "alias": "local-embed-bge",
+      "vram_mb": null,
+      "pinned": false,
+      "name": "bge-small-en-v1.5",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/bge-small.sh",
+      "role": "Vector embeddings for RAG and semantic caching"
     }
   }
 }

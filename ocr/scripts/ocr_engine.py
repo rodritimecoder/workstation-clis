@@ -10,7 +10,23 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-AI_DIR = Path("/run/media/rodri/AI")
+
+def _drive_root() -> Path:
+    """The AI volume root: $AI_ROOT, else the nearest ancestor holding models/.
+
+    Launchers, weights and the CrispEmbed build all live under it, so resolving
+    from here beats pinning the one mount point this was written for.
+    """
+    env = os.environ.get("AI_ROOT")
+    if env:
+        return Path(env).expanduser()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "models").is_dir():
+            return parent
+    return Path("/run/media/rodri/AI")
+
+
+AI_DIR = Path(os.environ.get("OCR_AI_DIR", _drive_root()))
 LIGHTON_LAUNCHER = AI_DIR / "sh" / "lighton-ocr.sh"
 LIGHTON_MODEL_DIR = AI_DIR / "models" / "prithivMLmods" / "LightOnOCR-3-1B-GGUF"
 
@@ -41,7 +57,7 @@ class OCREngine:
         host: Optional[str] = None,
         timeout: float = 60.0
     ):
-        env_host = os.environ.get("OCR_HOST") or os.environ.get("NAVIDC_OCR_HOST")
+        env_host = os.environ.get("OCR_HOST")
         self.host = host or env_host or "127.0.0.1"
         self.lighton_port = lighton_port
         self.crisp_port = crisp_port
@@ -231,18 +247,12 @@ class OCREngine:
             try:
                 import pymupdf
             except ImportError:
-                venv_py = AI_DIR / "skills" / "local-hub" / ".venv" / "bin" / "python"
-                if venv_py.is_file():
-                    cmd = [str(venv_py), str(Path(__file__).resolve()), str(p)]
-                    if prompt:
-                        cmd.extend(["--prompt", prompt])
-                    if pages:
-                        cmd.extend(["--pages", pages])
-                    res = subprocess.run(cmd, capture_output=True, text=True)
-                    if res.returncode != 0:
-                        raise RuntimeError(f"PDF OCR failed: {res.stderr}")
-                    return json.loads(res.stdout)
-                raise RuntimeError("PyMuPDF is required for PDF OCR. Install pymupdf or use local-hub .venv.")
+                # ocr.py re-execs under the skill venv, so this only fires when
+                # someone imports the engine directly from a bare interpreter.
+                raise RuntimeError(
+                    "PyMuPDF is required for PDF OCR. Run `ocr` (which re-execs "
+                    "into the skill venv) or install pymupdf into this interpreter."
+                )
 
             doc = pymupdf.open(p)
             total_pages = len(doc)

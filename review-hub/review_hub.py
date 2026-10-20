@@ -23,7 +23,25 @@ else:
     REVIEW_HUB_DIR = SCRIPT_PATH.parent
 
 SUITES_DIR = REVIEW_HUB_DIR / "suites"
-SKILLS_DIR = Path("/run/media/rodri/AI/skills")
+
+
+def _skills_root() -> Path:
+    """The skills tree this copy lives in: $SKILLS_ROOT, else the nearest
+    ancestor directory named 'skills'.
+
+    The gateway searches sibling skills for rubrics, so it must find the tree
+    it was actually installed into rather than the one it was written on.
+    """
+    env = os.environ.get("SKILLS_ROOT")
+    if env:
+        return Path(env).expanduser()
+    for parent in REVIEW_HUB_DIR.parents:
+        if parent.name == "skills":
+            return parent
+    return Path("/run/media/rodri/AI/skills")
+
+
+SKILLS_DIR = _skills_root()
 
 SUITES = {
     "ponytail": {

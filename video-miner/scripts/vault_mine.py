@@ -20,7 +20,23 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-DEFAULT_VAULT_DIR = Path("/run/media/rodri/AI/creator-vault")
+def _drive_root() -> Path:
+    """The AI volume root: $AI_ROOT, else the nearest ancestor holding models/.
+
+    Vault, weights and the mtmd binary all live under it, so resolving from here
+    keeps the skill working wherever the volume is mounted.
+    """
+    env = os.environ.get("AI_ROOT")
+    if env:
+        return Path(env).expanduser()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "models").is_dir():
+            return parent
+    return Path("/run/media/rodri/AI")
+
+
+DRIVE = _drive_root()
+DEFAULT_VAULT_DIR = Path(os.environ.get("CREATOR_VAULT_DIR", DRIVE / "creator-vault"))
 
 
 def slugify(text: str) -> str:
@@ -73,9 +89,15 @@ def ocr_frame_http(image_path: Path, port: int = 8085) -> str:
 
 def ocr_frame_cli(image_path: Path) -> str:
     """Fallback offline OCR via llama-mtmd-cli."""
-    cli = Path("/run/media/rodri/AI/llama.cpp/build/bin/llama-mtmd-cli")
-    model = Path("/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf")
-    mmproj = Path("/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf")
+    cli = Path(os.environ.get("LLAMA_MTMD_CLI", DRIVE / "llama.cpp/build/bin/llama-mtmd-cli"))
+    model = Path(os.environ.get(
+        "LIGHTON_MODEL",
+        DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf",
+    ))
+    mmproj = Path(os.environ.get(
+        "LIGHTON_MMPROJ",
+        DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf",
+    ))
     if not (cli.is_file() and model.is_file() and mmproj.is_file()):
         return ""
     cmd = [
@@ -344,7 +366,13 @@ def fast_mine_video(
             words_json = tmp_scratch / "words.json"
             transcript_raw = tmp_scratch / "transcript.txt"
 
-            audiocpp_cli = shutil.which("audiocpp") or "/run/media/rodri/AI/skills/audiocpp/scripts/audiocpp_cli.py"
+            audiocpp_cli = shutil.which("audiocpp") or next(
+                (str(p) for p in (
+                    DRIVE / "skills/audiocpp/scripts/audiocpp_cli.py",
+                    DRIVE / "skills/hardware/audiocpp/scripts/audiocpp_cli.py",
+                ) if p.is_file()),
+                str(DRIVE / "skills/audiocpp/scripts/audiocpp_cli.py"),
+            )
             cmd_asr = [
                 "audiocpp" if shutil.which("audiocpp") else sys.executable,
             ]

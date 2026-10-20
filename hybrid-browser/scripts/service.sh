@@ -7,7 +7,22 @@ IMAGE="lscr.io/linuxserver/chromium:latest"
 PROFILE_DIR="${HOME}/.local/share/hybrid-browser-profile"
 VNC_PORT="3010"
 CDP_PORT="9222"
-DESKFORGE_SH="/run/media/rodri/AI/sh/deskforge-qwen.sh"
+
+# The AI volume root: $AI_ROOT, else the ancestor of this script that holds sh/.
+# The DeskForge launcher lives there rather than next to this script, so walk up
+# instead of pinning the one mount point this was written for.
+_ai_root() {
+  if [ -n "${AI_ROOT:-}" ]; then printf '%s' "$AI_ROOT"; return; fi
+  local d
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [ "$d" != "/" ]; do
+    if [ -d "$d/sh" ] && [ -d "$d/models" ]; then printf '%s' "$d"; return; fi
+    d="$(dirname "$d")"
+  done
+  printf '%s' "/run/media/rodri/AI"
+}
+
+DESKFORGE_SH="${DESKFORGE_SH:-$(_ai_root)/sh/deskforge-qwen.sh}"
 
 action="${1:-status}"
 
@@ -88,6 +103,12 @@ chmod +x '"${PROFILE_DIR}"'/.config/labwc/autostart'
 }
 
 start_deskforge() {
+  # :8088 is archived: the vision tier is opt-in, so do not burn 4.3 GB of VRAM
+  # on bring-up unless it was explicitly requested.
+  if [ "${HYBRID_BROWSER_VISION:-0}" != "1" ]; then
+    echo "Vision fallback disabled (:8088 archived). Set HYBRID_BROWSER_VISION=1 to start DeskForge."
+    return 0
+  fi
   if curl -fsS -m 2 http://127.0.0.1:8088/health >/dev/null 2>&1; then
     echo "DeskForge-Qwen3.5-4B server is already healthy on :8088."
   else
@@ -132,7 +153,11 @@ case "$action" in
     echo "=== Hybrid Browser Stack Online ==="
     echo "Live Interactive GUI (KasmVNC): http://127.0.0.1:${VNC_PORT}"
     echo "DevTools CDP Endpoint:         http://127.0.0.1:${CDP_PORT}"
-    echo "DeskForge Grounding API:       http://127.0.0.1:8088/v1/chat/completions"
+    if [ "${HYBRID_BROWSER_VISION:-0}" = "1" ]; then
+      echo "DeskForge Grounding API:       http://127.0.0.1:8088/v1/chat/completions"
+    else
+      echo "Vision fallback:               disabled (:8088 archived)"
+    fi
     ;;
   gui)
     open_gui
@@ -144,8 +169,8 @@ case "$action" in
     echo "Container status:"
     podman ps -a --filter name="$CONTAINER_NAME"
     echo
-    echo "DeskForge health check:"
-    curl -fsS -m 2 http://127.0.0.1:8088/health 2>/dev/null && echo " (OK)" || echo " (Offline)"
+    echo "DeskForge health check (:8088 archived, opt-in):"
+    curl -fsS -m 2 http://127.0.0.1:8088/health 2>/dev/null && echo " (OK)" || echo " (off)"
     ;;
   *)
     echo "Usage: $0 {start|gui|stop|status}"

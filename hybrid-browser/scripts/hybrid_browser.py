@@ -1,22 +1,73 @@
 #!/usr/bin/env python3
 """
-Hybrid Browser Engine: Playwright (DOM Fast-Path) + DeskForge (Vision Grounding Fallback)
-Talks directly to Chromium over CDP (:9222) and DeskForge-Qwen3.5-4B (:8088).
+Hybrid Browser Engine: Playwright (DOM Fast-Path) + optional DeskForge vision fallback.
+
+Talks to Chromium over CDP (:9222). The DeskForge-Qwen3.5-4B fallback (:8088) is
+archived and opt-in via HYBRID_BROWSER_VISION=1; selectors are the default.
 """
 
 import argparse
 import base64
 import io
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
-from PIL import Image
-import requests
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+
+def _reexec_in_venv() -> None:
+    """Re-exec under the skill venv when Playwright is missing.
+
+    Playwright lives in the skill's virtualenv, not the system interpreter, and
+    bundle copies are rsynced with `--exclude .venv` -- so look in both places
+    before giving up. Guarded by an env var so the hop happens only once.
+    """
+    try:
+        import playwright  # noqa: F401
+        return
+    except ImportError:
+        pass
+    if os.environ.get("_HYBRID_BROWSER_VENV_REEXEC") == "1":
+        return
+    here = Path(__file__).resolve()
+    skill_dir = here.parent.parent
+    candidates = (
+        skill_dir / ".venv" / "bin" / "python",
+        Path.home() / ".venvs" / skill_dir.name / "bin" / "python",
+    )
+    venv_py = next((c for c in candidates if c.is_file()), None)
+    if venv_py is None:
+        return
+    try:
+        if venv_py.resolve() == Path(sys.executable).resolve():
+            return
+    except OSError:
+        return
+    env = dict(os.environ, _HYBRID_BROWSER_VENV_REEXEC="1")
+    os.execve(str(venv_py), [str(venv_py), str(here), *sys.argv[1:]], env)
+
+
+_reexec_in_venv()
+
+from PIL import Image  # noqa: E402
+import requests  # noqa: E402
+from playwright.sync_api import (  # noqa: E402
+    sync_playwright,
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 DESKFORGE_URL = "http://127.0.0.1:8088/v1/chat/completions"
+
+# :8088 is archived, so the vision tier is kept but off by default. Wherever the
+# DOM yields a selector, a locator beats a coordinate guess: exact text, single-
+# digit milliseconds, no 4 GB model resident and no sampling. The fallback only
+# earns its keep on <canvas>/WebGL, closed shadow roots and text baked into
+# images -- so it has to be asked for explicitly.
+VISION_FALLBACK = os.environ.get("HYBRID_BROWSER_VISION", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
 CDP_URL = "http://127.0.0.1:9222"
 
 SYSTEM_PROMPT = """You are a computer-use agent operating a desktop graphical interface. At each step you see the user's task, a screenshot of the current screen, and the actions you have already taken. Reply with the next action as pyautogui code and nothing else -- no explanation, no code fence, no commentary.
@@ -148,6 +199,11 @@ class HybridBrowser:
             pass
 
         # --- TIER 2: HARD PATH (DeskForge Vision Grounding) ---
+        if not VISION_FALLBACK:
+            print("  [✗ No DOM match] Vision fallback is off (:8088 is archived).")
+            print("      Enable it only for canvas/closed-shadow targets: "
+                  "HYBRID_BROWSER_VISION=1 plus the archived deskforge-qwen.sh launcher.")
+            return False
         print(f"  -> [Tier 2: DeskForge Vision Fallback] Element obscured/canvas/custom. Capturing screenshot...")
         return self._deskforge_click(target_description)
 
@@ -174,7 +230,11 @@ class HybridBrowser:
             ],
             "max_tokens": 64,
             "temperature": 0.0,
-            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}
+            # Raw requests.post, not the OpenAI SDK, so this is the literal
+            # body key llama-server reads. "extra_body" only exists in the SDK
+            # and would be ignored here, leaving Qwen3.5 to spend the 64-token
+            # budget on reasoning_content and return empty content.
+            "chat_template_kwargs": {"enable_thinking": False}
         }
 
         t0 = time.time()
