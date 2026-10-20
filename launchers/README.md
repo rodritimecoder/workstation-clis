@@ -21,7 +21,6 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:8085` | `ocr-lighton` | single (1) | LightOnOCR-3-1B | `lighton-ocr.sh` | Documents, PDFs and slides — fast prefill, high-throughput markdown |
 | `:8086` | `reranker` | single (1) | jina-reranker-v2-base-multilingual | `jina-reranker.sh` | Cross-encoder reranking for RAG |
 | `:8087` | `embed` | one-of-many (2) | bge-small-en-v1.5 | `bge-small.sh` | Vector embeddings for RAG and semantic caching |
-| `:8088` | `gui-grounding` | single (1) | DeskForge-Qwen3.5-4B | `deskforge-qwen.sh` | Visual grounding of canvas / SVG / Shadow DOM targets for the browser |
 
 | Port | Infra | Service | Role |
 |---|---|---|---|
