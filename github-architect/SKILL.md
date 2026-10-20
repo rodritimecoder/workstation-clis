@@ -68,7 +68,39 @@ github-architect bootstrap [--dest ~/workspace]
 
 # 9. Clone any GitHub repository via the gh CLI
 github-architect clone <repo-name> [dest]
+
+# 10. Gate a public bundle publication — secrets, oversized blobs, archived status markers
+github-architect guard --source DIR [--source DIR ...] [--published PATH] [--exclude PATTERN] [--label NAME] [--json]
 ```
+
+---
+
+## 🛡️ Publication Guard
+
+The hub (`my-agent-skills`) is private; the spokes (`workstation-clis`,
+`glitch-cat-skills`, `academic-agent-skills`, `free-frontier-skills`) are
+public. Everything the bundle sync copies from a hub into a spoke is a
+one-way trip, so a mistake made in the hub becomes permanent and public on
+the next push.
+
+`github-architect guard` runs before each spoke publication and **blocks** the
+bundle when it finds:
+
+- a secret-shaped filename (`.env`, `*.pem`, `*.key`, `id_rsa`, `credentials.json`)
+- credential content in a text file (GitHub, OpenAI, Anthropic, Google, HuggingFace,
+  Slack and AWS token shapes, plus generic `api_key = "..."` assignments)
+- a file above the 50 MB blob ceiling
+- a skill published from an `archived/` path whose `SKILL.md` declares no
+  archived status — so a retired tool cannot read as a supported one
+
+The guard takes the same `--exclude` list the publishing rsync uses, so it
+models exactly what will be published. A drifted exclude set is a hole
+straight through the gate.
+
+The same module reaps what a spoke used to publish and no longer does. The
+bundle sync records the managed directories in `.bundle-managed.json` at the
+spoke root, and any directory that leaves the manifest is removed on the next
+sync instead of freezing in place.
 
 ---
 
