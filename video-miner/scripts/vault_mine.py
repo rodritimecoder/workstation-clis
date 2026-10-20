@@ -267,6 +267,7 @@ def fast_mine_video(
     vault_dir: Path = DEFAULT_VAULT_DIR,
     run_ocr: str = "auto",  # auto, never, always
     asr_model: str = "crisperwhisper",
+    prefer_asr: bool = False,
 ) -> Path:
     """High-speed single-pass video mining pipeline."""
     t_start = time.perf_counter()
@@ -345,13 +346,18 @@ def fast_mine_video(
         source_mp4.unlink(missing_ok=True)
 
         # 2. Extract Transcript (Subtitles first, fallback to audiocpp ASR)
+        # YouTube's rolling auto-captions repeat each line three times with a
+        # sliding overlap, so prefer_asr=True forces the local ASR path even
+        # when a subtitle track exists.
         vtt_candidates = list(tmp_scratch.glob("*.vtt")) + list(tmp_scratch.glob("*.srt"))
         transcript_text = ""
-        if vtt_candidates:
+        if vtt_candidates and not prefer_asr:
             print(f"📄 Found downloaded subtitles ({vtt_candidates[0].name}), parsing directly...")
             vtt_parsed = parse_vtt_to_transcript(vtt_candidates[0])
             if vtt_parsed:
                 transcript_text = f"# Audio Transcript: {title_name}\n\n" + vtt_parsed
+        elif vtt_candidates:
+            print(f"📄 Ignoring downloaded subtitles ({vtt_candidates[0].name}) - prefer_asr is set")
 
         if not transcript_text:
             print(f"🎙️ [2/4] Extracting audio and transcribing with {asr_model}...")
@@ -595,6 +601,9 @@ def main() -> int:
     p_add.add_argument("--vault-dir", default=str(DEFAULT_VAULT_DIR), help="Path to vault root")
     p_add.add_argument("--ocr", choices=["auto", "never", "always"], default="auto", help="OCR mode: auto (if :8085 live), never, or always")
     p_add.add_argument("--model", "-m", default="crisperwhisper", help="ASR model slug (crisperwhisper [default], nemotron)")
+    p_add.add_argument("--prefer-asr", action="store_true",
+                       help="transcribe locally even when a subtitle track exists "
+                            "(YouTube auto-captions repeat each line three times)")
 
     # 2. import
     p_import = sub.add_parser("import", help="Import an existing videomine ICM workspace into the vault")
@@ -627,6 +636,7 @@ def main() -> int:
             vault_dir=v_dir,
             run_ocr=args.ocr,
             asr_model=args.model,
+        prefer_asr=args.prefer_asr,
         )
         return 0
     elif args.cmd == "import":
