@@ -2,86 +2,124 @@
 name: jev-decision
 
 description: >
-  Calibrated decision engine and sub-second visual UAT runner (Glitch Cat Club / Kem Glitch;
-  Reels DdjOqRYNZZi, DeMSV1jNYem, DeKBMCQNRXU). Decouples perception from open-ended generative tokens
-  into 3 universal primitives: bool (binary), choice (constrained enum), and score (scalar magnitude 0.0-1.0).
-  Delivers high-throughput context de-duplication (41k decisions in 7 mins for $0.37) and frontend acceptance testing.
+  Calibrated, non-generative decision engine (Glitch Cat Club / Kem Glitch; Reel DdjOqRYNZZi).
+  Turns a judgement into one of four typed answers — bool (binary), choice (constrained enum),
+  score (scalar 0.0-1.0) or composite (gate + action + quality) — with a probability from the
+  local vllm-d3-mini model on :8083, no generated tokens. Use when something must be judged,
+  triaged, routed, gated, scored, or classified; for context de-duplication and superseding
+  claims; or for any yes/no question about a screenshot. Fast and near-free, so it suits
+  high-volume loops.
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
-compatibility: "Requires the local vllm-d3-mini endpoint on :8083."
+compatibility: "Requires the local vllm-d3-mini endpoint on :8083 (native /v1/systemone, vision projector loaded)."
 metadata:
   creator: "kem_glitch"
-  source_reels_1_id: "DdjOqRYNZZi"
-  source_reels_1_url: "https://www.instagram.com/reel/DdjOqRYNZZi/"
-  source_reels_1_vault_note: "kem_glitch/2026-10-16_jev_decision_engine/notes.md"
-  source_reels_2_id: "DeMSV1jNYem"
-  source_reels_2_url: "https://www.instagram.com/reel/DeMSV1jNYem/"
-  source_reels_2_vault_note: "kem_glitch/2026-10-16_jev_review_and_decision_types/notes.md"
-  source_reels_3_id: "DeKBMCQNRXU"
-  source_reels_3_url: "https://www.instagram.com/reel/DeKBMCQNRXU/"
-  source_reels_3_vault_note: "kem_glitch/2026-10-16_fast_frontend_uat_with_jev/notes.md"
+  source_reel_id: "DdjOqRYNZZi"
+  source_reel_url: "https://www.instagram.com/reel/DdjOqRYNZZi/"
+  source_reel_vault_note: "kem_glitch/2026-10-16_jev_decision_engine/notes.md"
 allowed-tools: "Bash(jev-decision:*) Bash(python3:*) Read Write"
 ---
 
 # JEV Decision Engine (`jev-decision`)
 
-A calibrated, non-generative decision system implementing Kem's (Glitch Cat Club) **3 Universal Decision Primitives**, backed by **vllm-d3-mini with vision** (`ggml-org/vllm-d3-mini-GGUF`, 5B + `mmproj-vllm-d3-mini-Q8_0`, native `/v1/systemone` on `:8083`). It is the single decision model: calibrated probabilities come back from the server in one shot, with no generated tokens. Solves the latency, cost, and stochastic drift of asking frontier generative models to answer discrete, structured questions.
+A decision model, not a generative one. It never writes prose: it takes facts and a
+question, and returns a probability over a closed answer set. That is why a decision
+costs milliseconds and a fraction of a cent, and why the same input gives the same
+answer.
 
-Because the server loads the vision projector, `--image` is a first-class input on every primitive — screenshot gating costs the same as text gating.
-
----
-
-## 🏛️ The Universal Decision Primitives
-
-| Primitive | Output Type | Representation | Example Decision Question |
-| :--- | :--- | :--- | :--- |
-| **`bool`** | Binary boolean | `true` / `false` + confidence | *"Does claim B supersede or negate claim A?"* |
-| **`choice`** | Discrete enum | `selection` from candidate set | *"Which worker lane should run: A, B, or C?"* |
-| **`score`** | Continuous scalar | Float in `[0.0000, 1.0000]` | *"Urgency / quality score from 0 to 1"* |
-| **`composite`** | Typed decision card | `{gate: bool, action: choice, score: float}` | Single-shot triage card combining all 3 primitives |
+**The rule:** if the answer is one of *yes/no*, *which one of these*, or *how much
+0–1*, ask this — do not ask a chat model.
 
 ---
 
-## 🛠️ CLI Quickstart
+## 🏛️ The Four Primitives
+
+| Primitive | Answer shape | Reach for it when |
+| :--- | :--- | :--- |
+| **`bool`** | `{decision, confidence, probabilities{true,false}}` | Gating, verifying, superseding, "did X happen?" |
+| **`choice`** | `{selection, confidence, probabilities{...}}` | Routing, classifying, picking one of N |
+| **`score`** | `{score, probabilities{...}}` | Grading, urgency, quality, risk on `[0,1]` |
+| **`composite`** | `{gate, action, quality_score}` | One triage card carrying all three |
+
+`--image PATH` works on every primitive: the vision projector is loaded, so a
+question about a screenshot costs the same as a question about text.
+
+---
+
+## 🛠️ CLI
+
+Run from this skill's directory (the harness resolves paths from the skill root).
 
 ```bash
-JEV="python3 /run/media/rodri/AI/skills/jev-decision/jev_decision.py"
+JEV="python3 jev_decision.py"
 
-# 1. Binary Decision (Bool)
-$JEV bool --context "Postgres was deprecated and replaced with SQLite." \
-          --question "Does SQLite supersede Postgres?"
-# Output: ⚖️ [JEV Bool] -> YES (Confidence: 92.0%) [vllm_d3_mini_systemone]
+# Is the server up?
+$JEV doctor                                  # ONLINE http://127.0.0.1:8083
 
-# 2. Constrained Enum Selection (Choice)
-$JEV choice --context "Integration tests must run in parallel across 16 CPU cores." \
-            --question "Which runner lane?" \
-            --options sequential_lane parallel_worker_lane skip_tests
-# Output: 🎯 [JEV Choice] -> 'parallel_worker_lane' (Confidence: 89.5%) [vllm_d3_mini_systemone]
+# The four primitives — one compact line each
+$JEV bool    --context "Postgres was deprecated and replaced by SQLite." \
+             --question "Does SQLite supersede Postgres?"
+$JEV choice  --context "Tests must run in parallel across 16 cores." \
+             --question "Which runner lane?" \
+             --options sequential_lane parallel_worker_lane skip_tests
+$JEV score   --context "100% coverage, zero failing assertions." \
+             --criteria "test coverage and zero failures"
+$JEV composite --context "40 new passing tests, clean diff." \
+             --question "Can this merge?" --options merge_now request_changes block
 
-# 3. Scalar Magnitude Score (Score)
-$JEV score --context "Unit tests achieve 100% coverage with zero failures." \
-           --criteria "test coverage and zero failures"
-# Output: 📊 [JEV Score] -> 1.0000 / 1.0000 [vllm_d3_mini_systemone]
-
-# 4. Composite Decision Card (Single-Shot Triage)
-$JEV composite --context "Refactored test suite with 100% pass rate." \
-               --question "Is this pull request safe and high quality?" \
-               --options merge_now request_changes block --json
-
-# 5. Multimodal Vision Decision (--image)
-$JEV bool --context "Visual screen inspection of order page." \
-          --question "Is order confirmation banner visible?" \
-          --image /path/to/screenshot.png
-
-# 6. Pairwise Context Cleaning & De-duplication
-$JEV clean-context --claims-file claims.json
-
-# 7. Frontend Visual UAT Action Selection (<500ms)
-$JEV uat --intent "Click the checkout button" --dom-file dom_elements.json --image screen.png
-
-# 8. Remote Fleet & Tailscale Execution
-# Automatic Base64 inlining for images; works from laptop over Tailscale HTTPS:
-export JEV_HOST="rodri-x870-taichi-creator.tail2975a8.ts.net"
-jev-decision bool --context "Cluster health check" --question "Is network healthy?"
-jev-decision bool --context "Inspection" --question "Is banner visible?" --image /path/to/local/screenshot.png
+# Vision: any primitive accepts a screenshot
+$JEV bool --context "Order page screenshot." --question "Is the confirmation banner visible?" \
+          --image /tmp/order.png
 ```
+
+### Two habits that save the caller tokens
+
+```bash
+# Facts on disk, not in the transcript
+$JEV bool --context-file /tmp/facts.md --question "Does the new config supersede the old one?"
+
+# Many answers in ONE request; result to disk, one line on stdout
+$JEV batch /tmp/questions.json --out /tmp/answers.json
+```
+
+```json
+{"state": "facts every question shares",
+ "questions": {
+   "ship":   {"type": "bool",   "instructions": "Should this ship?"},
+   "target": {"type": "choice", "instructions": "Which button finishes the purchase?",
+              "options": ["Back to catalog", "Complete purchase"]},
+   "risk":   {"type": "score",  "instructions": "How risky is this?",
+              "levels": ["none", "low", "medium", "high"]}}}
+```
+
+`--json` prints the structured result. `--out FILE` writes it and prints a pointer,
+which keeps stdout to one line. `--context-file` and `batch` keep bulk facts and bulk
+answers off the caller's token stream.
+
+**Exit codes:** `0` answered · `2` usage error · `3` `--require-server` and no server.
+
+---
+
+## ⚠️ Gotchas
+
+- **`confidence` is not a probability.** It is the model's concentration on its answer
+  (entropy-based), so a 2-way choice can show `confidence 0.31` while the winner holds
+  `p=0.82`. Read `probabilities[selection]` when the actual probability matters.
+- **The server has 4 slots.** More than four concurrent calls queue; sequential calls
+  are bit-identical, concurrent ones differ in the last decimal. Use `batch` instead of
+  fanning out.
+- **There is a silent fallback.** If the server is unreachable, the CLI answers from a
+  keyword heuristic and says so on **stderr** (`source: heuristic_fallback`). Pass
+  `--require-server` when a guess is worse than an error.
+- **`score` needs numeric levels to weight, named levels to order.** Numeric levels
+  (`["0.0","0.5","1.0"]`) are averaged by value; named levels (`["none","low","high"]`)
+  map to an expected level index. Both return a scalar in `[0,1]`.
+- **`choice` needs at least two options, and `score` 2–10 levels.** The server rejects
+  a malformed question with a 400; the CLI validates first and explains what it wanted.
+
+---
+
+## 📚 Reference
+
+`references/cli.md` — every flag, the JSON shapes, remote/Tailscale use, and the
+`clean-context` recipe for pruning superseded claims.

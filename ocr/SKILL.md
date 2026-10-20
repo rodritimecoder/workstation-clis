@@ -94,4 +94,4 @@ ocr server stop --engine all
 | Capability | Engine | Port | Format | Specialty |
 |---|---|---|---|---|
 | **Document / PDF / Slide** | **LightOnOCR-3-1B** | `:8085` | Structured Markdown | ~16,000 t/s prefill, ~330 t/s gen, flagship text OCR |
-| **Spatial Scene Text / UI** | **CrispEmbed (PP-OCRv6)** | `:8084` | 2D Bounding Boxes `[x1, y1, x2, y2]` | Sub-second spatial UI detection for `jev-decision uat` |
+| **Spatial Scene Text / UI** | **CrispEmbed (PP-OCRv6)** | `:8084` | 2D Bounding Boxes `[x1, y1, x2, y2]` | Sub-second spatial UI detection for `frontend-uat` |

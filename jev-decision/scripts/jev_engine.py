@@ -96,6 +96,24 @@ class JevEngine:
         if data_url:
             payload["images"] = [data_url]
 
+        answers = self._post(payload)
+        if answers is None:
+            return None
+        ans = answers.get("answer")
+        if not ans:
+            return None
+        return self._map_answer(ans, typ, levels)
+
+    def _post(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """POST one /v1/systemone request. None means "not a decision server".
+
+        The single place the engine talks to the server, so one call and a batch
+        cannot drift apart in their error handling.
+        """
+        if self._systemone_supported is False:
+            return None
+        if not self.is_online():
+            return None
         try:
             req = urllib.request.Request(
                 self.systemone_url,
@@ -113,9 +131,12 @@ class JevEngine:
             return None
 
         self._systemone_supported = True
-        ans = (data.get("answers") or {}).get("answer")
-        if not ans:
-            return None
+        return data.get("answers") or {}
+
+    @staticmethod
+    def _map_answer(ans: Dict[str, Any], typ: str,
+                    levels: Optional[List[str]]) -> Dict[str, Any]:
+        """One server answer -> the engine's result shape."""
         source = "vllm_d3_mini_systemone"
 
         if typ == "noul":
@@ -133,16 +154,27 @@ class JevEngine:
             probs_raw = ans.get("probabilities") or {}
             dist: Dict[str, float] = {}
             scalar = 0.0
+            labels = levels or []
+            numeric = bool(labels)
+            for lv in labels:
+                try:
+                    float(lv)
+                except (TypeError, ValueError):
+                    numeric = False
+                    break
+            n = len(labels)
             for k, v in probs_raw.items():
                 if not str(k).isdigit():
                     continue
                 i = int(k)
-                if levels and i < len(levels):
-                    try:
-                        scalar += float(levels[i]) * float(v)
-                        dist[levels[i]] = round(float(v), 4)
-                    except ValueError:
-                        dist[str(k)] = round(float(v), 4)
+                if n and i < n:
+                    dist[labels[i]] = round(float(v), 4)
+                    if numeric:
+                        scalar += float(labels[i]) * float(v)
+                    elif n > 1:                      # named levels: expected level index
+                        scalar += (i / (n - 1)) * float(v)
+                else:
+                    dist[str(k)] = round(float(v), 4)
             return {
                 "primitive": "score",
                 "score": round(min(1.0, max(0.0, scalar)), 4),
@@ -161,6 +193,59 @@ class JevEngine:
             "confidence": round(float(conf), 4),
             "probabilities": probs,
             "source": source,
+        }
+
+    def decide_batch(self, state: str, questions: Dict[str, Dict[str, Any]],
+                     image: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+        """Many typed questions in ONE forward pass.
+
+        ``questions`` maps an id to ``{"type": "bool"|"choice"|"score",
+        "instructions": str, "options": [...], "levels": [...]}``. The server
+        takes them all at once, so N decisions cost one round trip instead of N.
+
+        Raises ValueError for an unusable question (no options, no levels) rather
+        than sending a request the server will reject with a 400.
+        """
+        built: Dict[str, Any] = {}
+        levels_by_id: Dict[str, Optional[List[str]]] = {}
+        for qid, spec in questions.items():
+            kind = str(spec.get("type", "bool")).lower()
+            typ = {"bool": "noul", "noul": "noul", "choice": "choice", "score": "score"}.get(kind)
+            if typ is None:
+                raise ValueError(
+                    f"question {qid!r}: type must be 'bool', 'choice' or 'score' (got {kind!r})"
+                )
+            q: Dict[str, Any] = {
+                "type": typ,
+                "instructions": str(spec.get("instructions") or spec.get("question") or ""),
+            }
+            levels: Optional[List[str]] = None
+            if typ == "choice":
+                opts = spec.get("options") or []
+                if not opts:
+                    raise ValueError(f"question {qid!r}: a choice needs a non-empty 'options' list")
+                q["criteria"] = {str(o): None for o in opts}
+            elif typ == "score":
+                levels = [str(x) for x in (spec.get("levels")
+                                           or ["0.0", "0.25", "0.5", "0.75", "1.0"])]
+                q["criteria"] = levels
+            built[qid] = q
+            levels_by_id[qid] = levels
+
+        payload: Dict[str, Any] = {"state": state, "questions": built}
+        data_url = self._data_url(image)
+        if data_url:
+            payload["images"] = [data_url]
+
+        answers = self._post(payload)
+        if answers is None:
+            raise RuntimeError(
+                "the decision server did not answer /v1/systemone — check "
+                f"{self.systemone_url.rsplit('/v1/', 1)[0]}/health"
+            )
+        return {
+            qid: self._map_answer(ans, built[qid]["type"], levels_by_id[qid])
+            for qid, ans in answers.items() if qid in built
         }
 
     def decide_bool(self, context: str, question: str, image: Optional[str] = None) -> Dict[str, Any]:
@@ -287,19 +372,4 @@ class JevEngine:
             "superseded_count": len(superseded_pairs),
             "active": active_claims,
             "superseded": superseded_pairs,
-        }
-
-    def evaluate_uat_target(self, dom_elements: List[Dict[str, str]], user_intent: str, image: Optional[str] = None) -> Dict[str, Any]:
-        options = [f"{elem.get('id', 'unknown')}: {elem.get('text', '')}" for elem in dom_elements]
-        q = f"Which UI element satisfies user intent: '{user_intent}'?"
-        choice = self.decide_choice(user_intent, q, options, image=image)
-        selected_str = choice["selection"]
-        selected_id = selected_str.split(":", 1)[0].strip()
-        matched_elem = next((e for e in dom_elements if e.get("id") == selected_id), None)
-        return {
-            "user_intent": user_intent,
-            "selected_id": selected_id,
-            "element": matched_elem,
-            "confidence": choice["confidence"],
-            "source": choice["source"],
         }

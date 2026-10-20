@@ -1,11 +1,29 @@
 #!/usr/bin/env python3
+"""Tests for the JEV decision primitives and CLI.
+
+The engine tests answer against the live decision server; the CLI tests pin the
+contract other skills rely on (`--json` before the subcommand, `--context-file`,
+`--require-server`, the batch schema).
+"""
 import json
+import socket
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
-import sys
 
-sys.path.append(str(Path(__file__).resolve().parent.parent / "scripts"))
-from jev_engine import JevEngine
+SKILL_DIR = Path(__file__).resolve().parent.parent
+CLI = SKILL_DIR / "jev_decision.py"
+
+sys.path.append(str(SKILL_DIR / "scripts"))
+from jev_engine import JevEngine  # noqa: E402
+
+
+def _closed_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
 
 
 class TestJevDecision(unittest.TestCase):
@@ -59,18 +77,45 @@ class TestJevDecision(unittest.TestCase):
         self.assertGreaterEqual(res["active_claims_retained"], 1)
         print("  ✓ context clean · verified")
 
-    def test_06_uat_action_selection(self):
-        dom = [
-            {"id": "btn_cancel", "text": "Cancel and Return"},
-            {"id": "btn_submit_order", "text": "Confirm & Place Order"},
-            {"id": "nav_help", "text": "Help Center"},
-        ]
-        intent = "Submit the order now"
-        res = self.engine.evaluate_uat_target(dom, intent)
-        self.assertIn(res["selected_id"], ["btn_cancel", "btn_submit_order", "nav_help"])
-        print(f"  ✓ uat action target '{res['selected_id']}' · verified")
+    def test_06_batch_is_one_request(self):
+        """Three typed answers, one round trip."""
+        if not self.engine.is_online():
+            print("  ⚠️ decision server offline, skipping batch")
+            return
+        res = self.engine.decide_batch(
+            "Order review page with buttons: Back to catalog, Complete purchase.",
+            {
+                "ship": {"type": "bool", "instructions": "Is the cart non-empty?"},
+                "target": {"type": "choice", "instructions": "Which button finishes the purchase?",
+                           "options": ["Back to catalog", "Complete purchase"]},
+                "risk": {"type": "score", "instructions": "How risky is this purchase?",
+                         "levels": ["none", "low", "medium", "high"]},
+            },
+        )
+        self.assertEqual(set(res), {"ship", "target", "risk"})
+        self.assertEqual(res["ship"]["primitive"], "bool")
+        self.assertEqual(res["target"]["selection"], "Complete purchase")
+        self.assertEqual(res["risk"]["primitive"], "score")
+        self.assertIn("risk", res)
+        self.assertEqual(set(res["risk"]["probabilities"]), {"none", "low", "medium", "high"})
+        print(f"  ✓ batch (target='{res['target']['selection']}', risk={res['risk']['score']}) · verified")
 
-    def test_07_vision_decision(self):
+    def test_07_named_score_levels_map_to_a_scalar(self):
+        """`levels: [none, low, medium, high]` must not collapse to 0.0."""
+        if not self.engine.is_online():
+            print("  ⚠️ decision server offline, skipping named levels")
+            return
+        res = self.engine.decide_batch("The change is a one-line docstring fix.", {
+            "risk": {"type": "score", "instructions": "How risky is this change?",
+                     "levels": ["none", "low", "medium", "high"]},
+        })
+        risk = res["risk"]
+        self.assertGreater(risk["score"], 0.0)
+        self.assertLess(risk["score"], 0.6)
+        self.assertEqual(set(risk["probabilities"]), {"none", "low", "medium", "high"})
+        print(f"  ✓ named levels -> {risk['score']} · verified")
+
+    def test_08_vision_decision(self):
         png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
         ctx = "Visual screen inspection of an empty canvas."
         q = "Is visual canvas element present?"
@@ -79,7 +124,7 @@ class TestJevDecision(unittest.TestCase):
         self.assertIn("confidence", res)
         print(f"  ✓ vision decision ({res['source']}) · verified")
 
-    def test_08_remote_tailscale_decision(self):
+    def test_09_remote_tailscale_decision(self):
         remote_engine = JevEngine(host="rodri-x870-taichi-creator.tail2975a8.ts.net", port=8083)
         if not remote_engine.is_online():
             print("  ⚠️ Remote vllm-d3-mini host offline, skipping")
@@ -91,9 +136,84 @@ class TestJevDecision(unittest.TestCase):
         print(f"  ✓ remote tailscale bool decision ({res['decision']}, conf={res['confidence']*100:.1f}%) · verified")
 
 
+class TestCliContract(unittest.TestCase):
+    """What other skills call, pinned."""
+
+    def test_10_json_before_subcommand(self):
+        """academic-icm invokes `jev_decision.py --json bool --context …`."""
+        proc = subprocess.run(
+            [sys.executable, str(CLI), "--json", "bool",
+             "--context", "The deployment was cancelled and replaced by v2.",
+             "--question", "Is the v1 config superseded?"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        res = json.loads(proc.stdout)
+        self.assertEqual(res["primitive"], "bool")
+        self.assertIn("decision", res)
+
+    def test_11_context_file_keeps_facts_on_disk(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+            fh.write("The deployment was cancelled and replaced by v2.")
+            path = fh.name
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(CLI), "bool", "--context-file", path,
+                 "--question", "Is the v1 config superseded?", "--json"],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["primitive"], "bool")
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_12_require_server_fails_instead_of_heuristics(self):
+        """An unreachable server is an error, not a silent keyword guess."""
+        proc = subprocess.run(
+            [sys.executable, str(CLI), "bool", "--context", "anything at all",
+             "--question", "Is this decided?", "--port", str(_closed_port()),
+             "--require-server"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertIn("did not answer", proc.stderr)
+
+    def test_13_heuristic_fallback_warns_but_answers(self):
+        proc = subprocess.run(
+            [sys.executable, str(CLI), "bool", "--context", "anything at all",
+             "--question", "Is this decided?", "--port", str(_closed_port())],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("heuristic", proc.stderr)
+
+    def test_14_batch_rejects_an_unusable_question(self):
+        """A choice with no options must fail with guidance, before any request."""
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump({"state": "x", "questions": {"pick": {"type": "choice",
+                                                           "instructions": "Which?"}}}, fh)
+            path = fh.name
+        try:
+            proc = subprocess.run([sys.executable, str(CLI), "batch", path],
+                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("non-empty 'options'", proc.stderr)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_15_out_writes_json_and_prints_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "res.json"
+            proc = subprocess.run(
+                [sys.executable, str(CLI), "bool", "--context", "The build passed all tests.",
+                 "--question", "Did the build succeed?", "--out", str(out)],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(len(proc.stdout.strip().splitlines()), 1, proc.stdout)
+            self.assertIn(str(out), proc.stdout)
+            self.assertEqual(json.loads(out.read_text())["primitive"], "bool")
+
+
 if __name__ == "__main__":
     print("\n🧪 Running vllm-d3-mini (vision) Decision Test Suite:")
     suite = unittest.TestLoader().loadTestsFromTestCase(TestJevDecision)
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestCliContract))
     runner = unittest.TextTestRunner(verbosity=0)
     result = runner.run(suite)
     sys.exit(0 if result.wasSuccessful() else 1)
