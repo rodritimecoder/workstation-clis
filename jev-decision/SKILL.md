@@ -5,13 +5,13 @@ description: >
   Calibrated, non-generative decision engine (Glitch Cat Club / Kem Glitch; Reel DdjOqRYNZZi).
   Turns a judgement into one of four typed answers — bool (binary), choice (constrained enum),
   score (scalar 0.0-1.0) or composite (gate + action + quality) — with a probability from the
-  local vllm-d3-mini model on :8083, no generated tokens. Use when something must be judged,
+  local decision model on :8083, no generated tokens. Use when something must be judged,
   triaged, routed, gated, scored, or classified; for context de-duplication and superseding
   claims; or for any yes/no question about a screenshot. Fast and near-free, so it suits
   high-volume loops.
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
-compatibility: "Requires the local vllm-d3-mini endpoint on :8083 (native /v1/systemone, vision projector loaded)."
+compatibility: "Requires a local decision model on :8083. Speaks pplx-decider-flash v1.2 joint protocol v3, native llama.cpp /v1/systemone, and the legacy letter-logprob path; the engine picks the protocol from the served model."
 metadata:
   creator: "kem_glitch"
   source_reel_id: "DdjOqRYNZZi"

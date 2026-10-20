@@ -23,12 +23,12 @@
       "role": "Speech-to-text, text-to-speech, forced alignment, voice cloning"
     },
     "8083": {
-      "alias": "local-decide-vllm-d3",
-      "vram_mb": 3700,
+      "alias": "local-decide-pplx",
+      "vram_mb": 3100,
       "pinned": false,
-      "name": "vllm-d3-mini",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/vllm-d3-mini.sh",
-      "role": "The single decision engine \u2014 bool / choice / score primitives"
+      "name": "pplx-decider-flash-v1.2",
+      "cmd": "sh /run/media/rodri/AI/skills/launchers/pplx-decider-flash.sh",
+      "role": "The decision engine slot - bool / choice / score primitives"
     },
     "8084": {
       "alias": "local-ocr-crispembed",

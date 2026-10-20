@@ -53,13 +53,41 @@ models:
     ttl: 0
 
   # ============================================================
-  # 2. Premier Vision/Decision: vllm-d3-mini (~3.5 GB) — JEV DECISION MODEL
+  # 2. Premier Decision: pplx-decider-flash v1.2 (4B) — JEV DECISION MODEL
+  #    Native llama.cpp decision model (qwen35.decision.type=pplx-decider).
+  #    Needs non-causal attention and runs in embedding mode: the readout head
+  #    is applied client-side at each <|fim_suffix|> marker.
   # ============================================================
-  "vllm-d3-mini":
+  "pplx-decider-flash":
     aliases:
       - "agent-classifier"
       - "local-classifier-jev"
       - "jev-decision"
+      - "pplx-decider"
+    cmd: >
+      ${server_upstream_vulkan}
+      -m /run/media/rodri/AI/models/perplexity-ai/pplx-decider-flash-v1.2/pplx-decider-flash-v1.2-Q4_K_M.gguf
+      --mmproj /run/media/rodri/AI/models/perplexity-ai/pplx-decider-flash-v1.2/mmproj-decider-flash-v1.2-f16.gguf
+      --override-kv qwen35.attention.causal=bool:false
+      --embeddings
+      --pooling none
+      --host 127.0.0.1
+      --port ${PORT}
+      -ngl 99
+      -c 8192
+      -b 8192
+      -ub 8192
+      -np 1
+    proxy: "http://127.0.0.1:${PORT}"
+    ttl: 600
+
+  # ============================================================
+  # 3. Auxiliary Vision/Decision: vllm-d3-mini (~3.5 GB) — Legacy
+  # ============================================================
+  "vllm-d3-mini":
+    aliases:
+      - "agent-classifier-legacy"
+      - "local-classifier-jev-legacy"
       - "vllm-d3"
     cmd: >
       ${server_upstream_vulkan}
@@ -74,12 +102,12 @@ models:
     ttl: 600
 
   # ============================================================
-  # 3. Auxiliary Vision/Decision: Imajev-4B (~3.5 GB) — Legacy
+  # 4. Auxiliary Vision/Decision: Imajev-4B (~3.5 GB) — Legacy
   # ============================================================
   "imajev-4b":
     aliases:
-      - "agent-classifier-legacy"
-      - "local-classifier-jev-legacy"
+      - "agent-classifier-imajev"
+      - "local-classifier-jev-imajev"
       - "imajev"
     cmd: >
       ${server_upstream_vulkan}
@@ -94,7 +122,7 @@ models:
     ttl: 600
 
   # ============================================================
-  # 4. Auxiliary Flagship OCR: LightOnOCR-3-1B (~1.5 GB)
+  # 5. Auxiliary Flagship OCR: LightOnOCR-3-1B (~1.5 GB)
   # ============================================================
   "lighton-ocr":
     aliases:
@@ -176,6 +204,7 @@ swap:
   matrix:
     vars:
       q: "qwen3.6-35b"
+      p: "pplx-decider-flash"
       v: "vllm-d3-mini"
       i: "imajev-4b"
       l: "lighton-ocr"
@@ -186,16 +215,17 @@ swap:
       q: 100 # Highest cost - keep the primary coder resident
       g: 40
       d: 15
+      p: 10
       v: 10
       i: 10
       l: 10
 
     sets:
-      # Pinned King (22G) + Premier Decision vllm-d3-mini (3.5G) + OCR (1.5G) = 27 GB <= 32 GB
-      standard_trio: "q & v & l"
+      # Pinned King (22G) + Premier Decision pplx-decider-flash (3.1G) + OCR (1.5G) = 27 GB <= 32 GB
+      standard_trio: "q & p & l"
 
       # Pinned King (22G) + GUI Browser Grounding (3.5G) + OCR (1.5G) = 27 GB <= 32 GB
       browser_agent: "q & d & l"
 
-      # Alternative heavy model with auxiliary tools (18G + 3.5G + 1.5G = 23 GB)
-      gemma_suite: "g & v & l"
+      # Alternative heavy model with auxiliary tools (18G + 3.1G + 1.5G = 23 GB)
+      gemma_suite: "g & p & l"
