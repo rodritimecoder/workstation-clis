@@ -48,7 +48,8 @@ conversion can emit raw binary-looking text rather than failing cleanly.
 ## 🛠️ CLI Quickstart
 
 ```bash
-CLI=/run/media/rodri/AI/skills/markitdown-cli/scripts/markitdown_cli.py
+# Run from this skill's directory; the paths are relative to it.
+CLI=scripts/markitdown_cli.py
 
 # 1. One file to stdout
 python3 $CLI report.pdf

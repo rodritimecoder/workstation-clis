@@ -2,10 +2,11 @@
 """
 markitdown-cli - convert documents to Markdown via Microsoft's MarkItDown.
 
-Runs against the skill-local virtualenv in .venv/ (created once with
-`python3 -m venv .venv && .venv/bin/pip install 'markitdown[all]'`); this
-script re-execs itself into that interpreter if markitdown isn't importable,
-so plain `python3 markitdown_cli.py ...` works regardless of environment.
+Runs against a virtualenv that already has markitdown installed, preferring
+`~/.venvs/markitdown-cli` over a skill-local `.venv/` (ephemeral venvs do not
+belong on the model volume). This script re-execs itself into the first
+interpreter that can actually import markitdown, so plain
+`python3 markitdown_cli.py ...` works regardless of environment.
 
 OCR / image description uses any OpenAI-compatible *vision* endpoint, including
 one you host locally (Ollama, llama.cpp, LM Studio, vLLM). No system packages
@@ -17,14 +18,24 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 
 
+def _imports_markitdown(python: Path) -> bool:
+    """Is this interpreter actually usable, not merely present?"""
+    try:
+        return subprocess.run([str(python), "-c", "import markitdown"],
+                              capture_output=True, timeout=120).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _bootstrap() -> None:
-    """Re-exec into the skill's .venv if markitdown isn't importable here.
+    """Re-exec into a venv that has markitdown, if this environment does not.
 
     Only when run as a script: importing this module (e.g. from the test
     suite) must not re-exec and hijack the caller's argv.
@@ -36,19 +47,23 @@ def _bootstrap() -> None:
         pass
     if os.environ.get("_MARKITDOWN_CLI_REEXEC") == "1":
         return
+    # A venv that exists but lacks the package would re-exec into a dead end,
+    # so probe each candidate instead of taking the first that exists. The
+    # ext4 venv is preferred: the model volume is not for ephemeral venvs.
     candidates = (
-        SKILL_DIR / ".venv" / "bin" / "python",
         Path.home() / ".venvs" / SKILL_DIR.name / "bin" / "python",
+        SKILL_DIR / ".venv" / "bin" / "python",
     )
-    py = next((c for c in candidates if c.exists()), None)
+    py = next((c for c in candidates if c.is_file() and _imports_markitdown(c)), None)
     if py is not None:
         os.environ["_MARKITDOWN_CLI_REEXEC"] = "1"
         os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
+    ext4 = Path.home() / ".venvs" / SKILL_DIR.name
     sys.exit(
         f"ERROR: markitdown is not installed.\n"
-        f"Create the skill's virtualenv once:\n"
-        f"  python3 -m venv {SKILL_DIR / '.venv'}\n"
-        f"  {SKILL_DIR / '.venv' / 'bin' / 'pip'} install 'markitdown[all]'\n"
+        f"Create the skill's virtualenv once (on ext4, not the model volume):\n"
+        f"  python3 -m venv {ext4}\n"
+        f"  {ext4 / 'bin' / 'pip'} install 'markitdown[all]'\n"
         f"or install it into your active environment with: pip install 'markitdown[all]'"
     )
 
