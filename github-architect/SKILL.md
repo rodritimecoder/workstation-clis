@@ -71,6 +71,9 @@ github-architect clone <repo-name> [dest]
 
 # 10. Gate a public bundle publication — secrets, oversized blobs, archived status markers
 github-architect guard --source DIR [--source DIR ...] [--published PATH] [--exclude PATTERN] [--label NAME] [--json]
+
+# 11. Guarded commit — stage by path and refuse to commit a file carrying a credential
+git-sync guarded-commit --repo PATH -m "message" [--exclude PATTERN] [--json]
 ```
 
 ---
@@ -101,6 +104,29 @@ The same module reaps what a spoke used to publish and no longer does. The
 bundle sync records the managed directories in `.bundle-managed.json` at the
 spoke root, and any directory that leaves the manifest is removed on the next
 sync instead of freezing in place.
+
+### Two layers, both fail-closed
+
+The private hub is guarded too. `git-sync guarded-commit` replaces the raw
+`git add -A` in the bundle sync: it stages by path and refuses to commit a
+file that carries a credential or an oversized blob. Its content scan reads
+**whole files**, not diffs — a brand-new file is untracked, so `git diff HEAD`
+shows nothing for it and a secret planted in a new file would sail through a
+diff-based guard.
+
+A planted secret is caught twice, independently:
+
+```
+🛡️  [guard] Blocked files from staging:
+   ❌ academic/canvas-cli/planted-leak.py — GitHub Personal Access Token: ghp_AA...AAAA
+🛑 [guard] 1 file(s) blocked; nothing committed.
+🛡️  [publication-guard] academic-agent-skills: 1 blocked file(s)
+🛑 [bundle-sync] BLOCKED: academic-agent-skills not published.
+🛑 One or more bundles were blocked and left untouched.
+```
+
+The hub commit is refused, the spoke is never copied, and the sync reports
+the block instead of claiming success.
 
 ---
 
