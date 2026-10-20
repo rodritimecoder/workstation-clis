@@ -84,7 +84,11 @@ class TestAudiocppDeterministic(unittest.TestCase):
             print("  ⚠️ Tailscale remote host offline or inaccessible, skipping")
             return
         doc_data = json.loads(res_doc.stdout)
-        self.assertEqual(doc_data["status"], "online")
+        # A logged-out node still answers doctor with status "offline" and rc 0,
+        # so reachability has to be read from the payload, not the exit code.
+        if doc_data.get("status") != "online":
+            print("  ⚠️ Tailscale remote host reported offline, skipping")
+            return
         self.assertTrue(doc_data["remote"])
 
         remote_wav = "/tmp/test_audiocpp_remote.wav"

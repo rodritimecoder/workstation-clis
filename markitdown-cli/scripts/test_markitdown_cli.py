@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -25,8 +26,24 @@ try:
 except ModuleNotFoundError:
     if os.environ.get("_MD_TEST_REEXEC") != "1":
         os.environ["_MD_TEST_REEXEC"] = "1"
-        os.execv(str(SKILL_DIR / ".venv" / "bin" / "python"),
-                 [str(SKILL_DIR / ".venv" / "bin" / "python"), str(Path(__file__).resolve()), *sys.argv[1:]])
+        # Bundle copies are rsynced with `--exclude .venv`, so the in-tree symlink
+        # is absent there; fall back to the machine-wide location it points at.
+        venv_py = next(
+            (c for c in (
+                SKILL_DIR / ".venv" / "bin" / "python",
+                Path.home() / ".venvs" / SKILL_DIR.name / "bin" / "python",
+            ) if c.is_file()),
+            None,
+        )
+        if venv_py is None:
+            sys.exit("markitdown is not installed and no skill venv was found")
+        if __name__ == "__main__":
+            os.execv(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]])
+        # Imported by a runner (`python3 -m unittest test_markitdown_cli`): the
+        # re-exec must re-enter that runner, not replay its arguments as a test
+        # name -- which is how this used to fail with a confusing AttributeError.
+        os.chdir(Path(__file__).resolve().parent)
+        os.execv(str(venv_py), [str(venv_py), "-m", "unittest", Path(__file__).stem])
     sys.exit("markitdown is not installed in the skill venv")
 
 CLI = [sys.executable, str(SKILL_DIR / "scripts" / "markitdown_cli.py")]
@@ -40,11 +57,20 @@ def run(*args, stdin=None):
 
 
 class TestBasics(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
     def test_reexec_uses_skill_venv(self):
         """Plain python3 must transparently run the skill's venv interpreter."""
         r = run("--doctor")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(str(SKILL_DIR / ".venv"), r.stdout)
+        self.assertTrue(
+            str(SKILL_DIR / ".venv") in r.stdout or ".venvs/" in r.stdout,
+            r.stdout,
+        )
 
     def test_list_formats_runs(self):
         r = run("--list-formats")
@@ -421,13 +447,4 @@ class TestTokenShieldingAndInspection(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # Each TestBasics method needs a temp dir; give the class one lazily.
-    import tempfile
-    _orig = TestBasics.setUp
-
-    def _setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-
-    TestBasics.setUp = _setUp
-    TestBasics.tearDown = lambda self: self.tmp.cleanup()
     unittest.main(verbosity=2)
