@@ -151,6 +151,23 @@ class JevEngine:
             pass
         return f"data:{mime};base64,{raw}"
 
+    def _pplx_images(self, image: Optional[str]) -> Optional[list[bytes]]:
+        """Accept a file path or a base64 blob; the client wants raw bytes."""
+        if not image:
+            return None
+        path = Path(image)
+        if path.exists() and path.is_file():
+            return [path.read_bytes()]
+        raw = self._encode_image(image)
+        if not raw:
+            return None
+        import base64
+
+        try:
+            return [base64.b64decode(raw)]
+        except Exception:
+            return None
+
     def _call_pplx(
         self,
         state: str,
@@ -178,7 +195,9 @@ class JevEngine:
             spec = {"type": "noul", "instructions": question}
 
         try:
-            answers = self._pplx().decide(state, {"answer": spec})["answers"]
+            answers = self._pplx().decide(
+                state, {"answer": spec}, images=self._pplx_images(image)
+            )["answers"]
         except Exception:
             return None
         answer = answers.get("answer")
@@ -389,7 +408,7 @@ class JevEngine:
             payload["images"] = [data_url]
 
         if self.backend() == BACKEND_PPLX:
-            return self._pplx_batch(state, built, levels_by_id)
+            return self._pplx_batch(state, built, levels_by_id, image)
 
         answers = self._post(payload)
         if answers is None:
@@ -402,9 +421,12 @@ class JevEngine:
             for qid, ans in answers.items() if qid in built
         }
     def _pplx_batch(self, state: str, built: Dict[str, Any],
-                    levels_by_id: Dict[str, Optional[List[str]]]) -> Dict[str, Dict[str, Any]]:
+                    levels_by_id: Dict[str, Optional[List[str]]],
+                    image: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
         """Many typed questions in ONE pplx-decider sequence (joint protocol v3)."""
-        answers = self._pplx().decide(state, built)["answers"]
+        answers = self._pplx().decide(
+            state, built, images=self._pplx_images(image)
+        )["answers"]
         out: Dict[str, Dict[str, Any]] = {}
         for qid, answer in answers.items():
             if qid not in built:
