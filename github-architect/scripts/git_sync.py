@@ -316,7 +316,7 @@ def cmd_guarded_commit(args) -> int:
         if result["blocked"]:
             print(f"🛑 [guard] {len(result['blocked'])} file(s) blocked; nothing committed.")
         else:
-            print(f"✅ [guard] committed {len(result['committed'])} change(s) in {args.repo}")
+            print(f"✅ [guard] committed {len(result['safe'])} file(s) in {args.repo}")
     return 1 if result["blocked"] else 0
 
 
