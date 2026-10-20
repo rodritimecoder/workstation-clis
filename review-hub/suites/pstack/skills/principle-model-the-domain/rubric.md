@@ -21,18 +21,4 @@ Reach for:
 
 Do not force an abstraction. Prefer boring code if the current shape is already clear, local, and unlikely to grow. Be skeptical of an abstraction that adds indirection without removing branches, duplicated rules, invalid states, or lifecycle risk.
 
-## Pre-Implementation State Matrix
-
-For any stateful feature, async pipeline, or UI interaction with more than two states, write an explicit state transition matrix before writing logic:
-
-| Current State | Event / Trigger | Guard Condition | Next State | Error / Rollback |
-| :--- | :--- | :--- | :--- | :--- |
-| `idle` | `SUBMIT` | payload valid | `submitting` | stays `idle`, displays error |
-| `submitting` | `SUCCESS` | response ok | `success` | n/a |
-| `submitting` | `TIMEOUT` | time > 30s | `failed` | retry count incremented |
-| `submitting` | `CANCEL` | user action | `cancelled` | abort controller signal fired |
-
-Every cell in Next State and Error must map to a discriminated union variant in code. If an event cannot happen in a state, document whether it is dropped or throws an assertion.
-
 The sign that you skipped this is a new feature that grows an existing if/else chain by one more branch, or a second boolean that must stay in sync with the first. Temporal decomposition is another sign. Phase-named modules repeat the same domain rules across steps.
-

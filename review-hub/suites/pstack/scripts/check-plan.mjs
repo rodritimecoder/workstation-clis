@@ -131,10 +131,10 @@ for (const pr of prSections) {
 	for (const l of pr.body) {
 		if (l.code) continue;
 		const m = l.text.match(/^\*\*([^*]+)\*\*(.*)$/);
-		if (m && (SUB_BLOCKS.includes(m[1]) || m[1] === "Traceability.")) heads.push({ name: m[1], n: l.n, rest: m[2].trim(), lines: [] });
+		if (m && SUB_BLOCKS.includes(m[1])) heads.push({ name: m[1], n: l.n, rest: m[2].trim(), lines: [] });
 		else if (heads.length) heads.at(-1).lines.push(l);
 	}
-	const names = heads.map((h) => h.name).filter((n) => n !== "Traceability.");
+	const names = heads.map((h) => h.name);
 	if (names.join("|") !== SUB_BLOCKS.join("|")) {
 		fail(pr.n, `${pr.title}: sub-blocks are [${names.join(", ")}], expected [${SUB_BLOCKS.join(", ")}]`);
 	}
@@ -144,8 +144,6 @@ for (const pr of prSections) {
 
 	const depends = block("Depends on.");
 	if (depends && depends.rest === "") fail(depends.n, `${pr.title}: Depends on names nothing`);
-	const trace = block("Traceability.");
-	if (trace && trace.rest === "") fail(trace.n, `${pr.title}: Traceability names nothing`);
 	for (const name of ["Files.", "Build.", "You see.", "Verify, unit.", "Merge."]) {
 		const b = block(name);
 		if (b && boxes(b.lines).length === 0) fail(b.n, `${pr.title}: ${name} has no box`);
