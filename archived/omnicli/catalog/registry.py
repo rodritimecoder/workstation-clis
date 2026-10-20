@@ -597,27 +597,6 @@ def _is_cli_entry(path: Path) -> bool:
         return False
 
 
-def _is_nested_in_sub_skill(script: Path, skill_dir: Path) -> bool:
-    """True when a script belongs to a sub-skill vendored inside this one.
-
-    ``review-hub`` vendors pstack, and pstack carries its own helper scripts
-    — ``worktree-audit.sh``, ``log.sh``. Those are pstack's implementation
-    detail, not commands an agent should be offered: the suite is reached
-    through ``review-hub review pstack``, and the suite's own scripts are
-    addressed by the suite, not by the parent skill.
-
-    A directory is a sub-skill when it carries a ``SKILL.md`` or a
-    ``rubric.md``. The vendored suites use the latter, because
-    ``review_hub.resolve_suite_file`` resolves through ``rubric.md``.
-    """
-    for ancestor in script.parents:
-        if ancestor == skill_dir:
-            return False
-        if (ancestor / "SKILL.md").is_file() or (ancestor / "rubric.md").is_file():
-            return True
-    return False
-
-
 def discover_tools(skill: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the tool records for one skill."""
     tools: list[dict[str, Any]] = []
@@ -631,8 +610,6 @@ def discover_tools(skill: dict[str, Any]) -> list[dict[str, Any]]:
 
     for script in _iter_scripts(skill_dir):
         if not _is_cli_entry(script):
-            continue
-        if _is_nested_in_sub_skill(script, skill_dir):
             continue
         try:
             rel = script.relative_to(skill_dir)
