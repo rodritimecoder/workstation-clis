@@ -22,6 +22,7 @@ from .textutil import expand_cjk
 HERE = Path(__file__).resolve().parent
 SCHEMA_PATH = HERE / "schema.sql"
 ALIASES_PATH = HERE / "aliases.json"
+SKILL_ROOT = HERE.parent
 
 # Where the built catalog lives. ext4 by design: SQLite locking on the NTFS3
 # mount is unreliable, and this is a rebuildable cache.
@@ -460,7 +461,7 @@ def build(
 
     # The local inference endpoints belong to the catalog as a whole, so they
     # are registered once — not once per skill.
-    for t in registry.endpoint_tools():
+    for t in registry.endpoint_tools(SKILL_ROOT):
         tool_rows.append((
             t["id"], t["skill"], t["kind"], t["summary"], t["path"],
             json.dumps(t["argv"]), json.dumps(t["contract"]), t["parent"], now,

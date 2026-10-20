@@ -67,6 +67,12 @@ PROBE_TIMEOUT = 1.0
 RERANK_TIMEOUT = 5.0
 PROBE_TTL = 30.0
 RERANK_CANDIDATES = 20
+# Lexical confidence gate. BM25 is near-saturated on the golden set (60/61
+# top-1) and the semantic re-ranker changes #1 on none of those cases, so
+# paying ~130ms of embedding latency on every query buys nothing. The re-ranker
+# only fires when BM25 itself is unsure: the gap between the top two hits is
+# a small fraction of the top score.
+RERANK_GATE_MARGIN = 0.25
 
 
 # --------------------------------------------------------------------------
@@ -306,6 +312,22 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b)) / (na * nb)
 
 
+def needs_rerank(results: list[dict[str, Any]]) -> bool:
+    """Is BM25 unsure enough to be worth the embedding round trip?
+
+    Confidence is the relative gap between the best and second-best hit. A
+    single hit cannot be reordered, so it never qualifies.
+    """
+    if len(results) < 2:
+        return False
+    top = results[0].get("score", 0.0)
+    second = results[1].get("score", 0.0)
+    if top <= 0:
+        return True
+    margin = (top - second) / top
+    return margin < RERANK_GATE_MARGIN
+
+
 def rerank(con: sqlite3.Connection, query: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     """Reorder BM25 candidates by semantic similarity.
 
@@ -364,7 +386,7 @@ def search(
     query: str,
     limit: int = DEFAULT_LIMIT,
     *,
-    rerank_enabled: bool = True,
+    rerank_enabled: bool | str = "auto",
     explain: bool = False,
 ) -> dict[str, Any]:
     """Search the catalog. Returns a dict with results and retrieval metadata."""
@@ -385,10 +407,18 @@ def search(
 
     tier = "bm25"
     if rerank_enabled and results:
-        reordered = rerank(con, query, results)
-        if reordered is not None:
-            results = reordered
-            tier = "bm25+rerank"
+        # rerank_enabled may be True (always), False (never) or "auto" (only
+        # when the lexical ranking is unsure).
+        wants = rerank_enabled is True or (rerank_enabled == "auto" and needs_rerank(results))
+        if wants:
+            reordered = rerank(con, query, results)
+            if reordered is not None:
+                results = reordered
+                tier = "bm25+rerank"
+            elif rerank_enabled == "auto":
+                tier = "bm25(gated)"
+        elif rerank_enabled == "auto":
+            tier = "bm25(gated:confident)"
 
     results = results[:limit]
 

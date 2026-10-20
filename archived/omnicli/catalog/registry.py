@@ -57,7 +57,7 @@ ENDPOINTS = {
         "argv": ["{python}", "{skill}/scripts/ocr.py"],
     },
     "local/decide": {
-        "summary": "Calibrated decision primitives (bool/choice/score) via vllm-d3-mini (:8083).",
+        "summary": "Calibrated decision primitives (bool/choice/score) via the decision model on :8083.",
         "argv": ["{python}", "{skill}/scripts/decide.py"],
     },
     "local/asr": {
@@ -78,7 +78,7 @@ VIRTUAL_SKILLS = {
         "description": (
             "Local LLM and inference endpoints on this workstation: Genesis 35B "
             "coder for writing code (:8080), LightOnOCR document vision (:8085), "
-            "vllm-d3-mini calibrated decisions (:8083), Nemotron speech-to-text "
+            "calibrated decisions (:8083), Nemotron speech-to-text "
             "(:8081), and the optional embedding server (:8087) used to re-rank "
             "catalog search. Use for running a model locally, offline, or on device."
         ),
@@ -587,18 +587,44 @@ def discover_tools(skill: dict[str, Any]) -> list[dict[str, Any]]:
     return tools
 
 
-def endpoint_tools() -> list[dict[str, Any]]:
-    """The local inference endpoints, as first-class tools."""
+def endpoint_tools(skill_dir: Path | None = None) -> list[dict[str, Any]]:
+    """The local inference endpoints, as first-class tools.
+
+    Their contract is extracted from the script that backs them, exactly as a
+    script tool's is. An endpoint with an empty contract tells the agent
+    nothing about how to call it, which is the one thing a contract is for.
+    """
     out = []
     for eid, meta in ENDPOINTS.items():
+        argv = meta["argv"]
+        contract: dict[str, Any] = {}
+        if skill_dir is not None:
+            backing = _endpoint_script(argv, skill_dir)
+            if backing is not None:
+                try:
+                    contract = extract_contract(backing) or {}
+                except Exception:
+                    contract = {}
         out.append({
             "id": eid,
             "skill": "local",
             "kind": "endpoint",
             "summary": meta["summary"],
             "path": None,
-            "argv": meta["argv"],
-            "contract": {},
+            "argv": argv,
+            "contract": contract,
             "parent": None,
         })
     return out
+
+
+def _endpoint_script(argv: list[str], skill_dir: Path) -> Path | None:
+    """Resolve an endpoint's argv template to the script that backs it."""
+    for token in argv:
+        if not token.endswith(".py"):
+            continue
+        candidate = token.replace("{skill}", str(skill_dir))
+        path = Path(candidate)
+        if path.is_file():
+            return path
+    return None

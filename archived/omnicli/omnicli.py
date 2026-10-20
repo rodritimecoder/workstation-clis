@@ -186,7 +186,7 @@ SERVICES = [
     {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper"},
     {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU flagship coder"},
     {"port": 8081, "name": "audio.cpp ASR & TTS", "role": "Streaming speech-to-text / TTS"},
-    {"port": 8083, "name": "vllm-d3-mini Decision Gating", "role": "Premier calibrated decisions"},
+    {"port": 8083, "name": "Decision Gating", "role": "Premier calibrated decisions (protocol auto-detected)"},
     {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection"},
     {"port": 8085, "name": "LightOnOCR Flagship OCR", "role": "Document and slide OCR"},
     {"port": 8087, "name": "Embedding Server (BGE / EmbeddingGemma)", "role": "Optional re-ranker for catalog search"},
@@ -264,9 +264,10 @@ def cmd_status(as_json: bool = False):
 # --------------------------------------------------------------------------
 
 def cmd_search(query: str, as_json: bool = False, limit: int = 6,
-               explain: bool = False, no_rerank: bool = False):
+               explain: bool = False, no_rerank: bool = False, rerank: str = "auto"):
     con = _require_catalog()
-    res = search.search(con, query, limit=limit, rerank_enabled=not no_rerank, explain=explain)
+    mode = "never" if no_rerank else rerank
+    res = search.search(con, query, limit=limit, rerank_enabled=mode, explain=explain)
 
     if as_json:
         print(json.dumps(res, indent=2, ensure_ascii=False))
@@ -347,12 +348,69 @@ def cmd_tools(skill_name: str, as_json: bool = False):
     print(f"   Execute :  omnicli invoke <tool_id> [args...]\n")
 
 
-def cmd_describe(tool_id: str, as_json: bool = False):
-    """Return the exact input contract for ONE tool."""
+def _describe_skill(con, name: str, section_name: str, as_json: bool = False):
+    """A skill id: frontmatter + outline, or one section on request."""
+    from catalog import skilldoc
+
+    row = con.execute("SELECT * FROM skills WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        sys.exit(f"❌ Error: no skill named {name!r}.")
+    md_path = row["md_path"]
+    if not md_path or not Path(md_path).is_file():
+        sys.exit(f"❌ Error: skill {name!r} has no readable SKILL.md.")
+
+    doc = skilldoc.load_skill_doc(md_path)
+    tools = con.execute(
+        "SELECT id, kind FROM tools WHERE skill = ? ORDER BY kind, id", (name,)
+    ).fetchall()
+
+    if section_name:
+        section = skilldoc.pick_section(doc, section_name)
+        if section is None:
+            sys.exit(f"❌ Error: no section {section_name!r} in {name!r}. Available: "
+                     + ", ".join(s["heading"] for s in doc["sections"] if s["heading"]))
+        if as_json:
+            print(json.dumps({
+                "skill": name, "section": section["heading"],
+                "tokens": section["tokens"], "body": section["body"],
+            }, indent=2, ensure_ascii=False))
+            return
+        print(f"\n📖 [{name}] section: {section['heading']}  (~{section['tokens']} tokens)\n")
+        print(section["body"])
+        return
+
+    payload = {
+        "skill": name,
+        "kind": "skill",
+        "path": doc["path"],
+        "frontmatter": doc["frontmatter"],
+        "body_tokens": doc["tokens"],
+        "outline": skilldoc.outline(doc),
+        "tools": [{"id": t["id"], "kind": t["kind"]} for t in tools],
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    print(f"\n📖 [{name}]  ~{doc['tokens']} tokens, {len(doc['sections'])} sections, {len(tools)} tools")
+    print(f"   {doc['path']}\n")
+    print("   Sections:")
+    for s in skilldoc.outline(doc):
+        indent = "   " + "  " * s["level"]
+        print(f"{indent}{s['heading'] or '(preamble)':<58} {s['tokens']:>5} tok")
+    print(f"\n   Read one:  omnicli describe {name} --section \"<heading>\"")
+    print(f"   Tool ids:  omnicli tools {name}")
+
+
+def cmd_describe(tool_id: str, as_json: bool = False, section: str = ""):
+    """Return the exact input contract for ONE tool, or a skill's body."""
     con = _require_catalog()
     row = con.execute("SELECT * FROM tools WHERE id = ?", (tool_id,)).fetchone()
     if row is None:
-        # Allow a bare skill name: describe the skill's primary script.
+        # A skill name gives the skill itself, checked before the legacy
+        # "fall back to the skill's primary script" path.
+        if con.execute("SELECT 1 FROM skills WHERE name = ?", (tool_id,)).fetchone():
+            return _describe_skill(con, tool_id, section, as_json)
         cands = con.execute(
             "SELECT id FROM tools WHERE skill = ? AND kind = 'script' LIMIT 1", (tool_id,)
         ).fetchall()
@@ -642,11 +700,11 @@ def cmd_index(rebuild: bool = False, with_contracts: bool = True, as_json: bool 
     print(f"   {elapsed * 1000:.0f} ms\n")
 
 
-def cmd_eval(verbose: bool = False, as_json: bool = False):
+def cmd_eval(verbose: bool = False, as_json: bool = False, rerank: str = "never"):
     runner = SKILL_DIR / "tests" / "eval_runner.py"
     if not runner.is_file():
         sys.exit("❌ Error: tests/eval_runner.py not found next to omnicli.")
-    args = [sys.executable, str(runner)]
+    args = [sys.executable, str(runner), f"--rerank={rerank}"]
     if verbose:
         args.append("--verbose")
     if as_json:
@@ -788,6 +846,9 @@ def main():
     p.add_argument("--limit", type=int, default=6)
     p.add_argument("--explain", action="store_true", help="Show matched terms and the winning chunk")
     p.add_argument("--no-rerank", action="store_true", help="Skip the optional embedding re-ranker")
+    p.add_argument("--rerank", choices=["auto", "always", "never"], default="auto",
+                   help="auto=only re-rank when the lexical ranking is unsure (default), "
+                        "always=re-rank every query, never=never re-rank")
 
     p = sub.add_parser("list", help="List every skill in the registry")
     p.add_argument("--json", action="store_true")
@@ -797,9 +858,10 @@ def main():
     p.add_argument("skill")
     p.add_argument("--json", action="store_true")
 
-    p = sub.add_parser("describe", help="Show the exact input contract for ONE tool")
+    p = sub.add_parser("describe", help="Show the exact input contract for ONE tool, or a skill's body")
     p.add_argument("tool_id")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--section", default="", help="With a skill name: the heading of the section to read")
 
     p = sub.add_parser("invoke", help="Execute a tool with bounded output",
                        add_help=False)
@@ -832,6 +894,9 @@ def main():
     p = sub.add_parser("eval", help="Run the golden routing evaluation")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--rerank", choices=["auto", "always", "never"], default="never",
+                   help="re-ranker mode used during the eval (default: never; the "
+                        "catalog's own default is auto)")
 
     sub.add_parser("mcp", help="Run the MCP stdio server (4 meta-tools)")
 
@@ -867,13 +932,13 @@ def main():
         sys.exit(subprocess.run([fast_cdp] + args.args).returncode)
     elif args.action == "search":
         cmd_search(args.query, as_json=args.json, limit=args.limit,
-                   explain=args.explain, no_rerank=args.no_rerank)
+                   explain=args.explain, no_rerank=args.no_rerank, rerank=args.rerank)
     elif args.action == "list":
         cmd_list(as_json=args.json, show_all=args.all)
     elif args.action == "tools":
         cmd_tools(args.skill, as_json=args.json)
     elif args.action == "describe":
-        cmd_describe(args.tool_id, as_json=args.json)
+        cmd_describe(args.tool_id, as_json=args.json, section=args.section)
     elif args.action == "index":
         cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts,
                   as_json=args.json, check=args.check)
@@ -881,7 +946,7 @@ def main():
         cmd_alias(skill=args.skill, aliases=args.aliases, tags=args.tags,
                   remove=args.remove, show_all=args.list, as_json=args.json)
     elif args.action == "eval":
-        cmd_eval(verbose=args.verbose, as_json=args.json)
+        cmd_eval(verbose=args.verbose, as_json=args.json, rerank=args.rerank)
     elif args.action == "mcp":
         cmd_mcp()
     elif args.action in ("status", "health"):

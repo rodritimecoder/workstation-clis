@@ -4,7 +4,7 @@ name: omnicli
 description: "Unified late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skills, pull one tool's exact contract, and invoke it with a bounded response. Also exposes the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081)."
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
-compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085."
+compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085, plus the optional embedding server :8087 used to re-rank search results (the catalog works without it). The decision port speaks either native /v1/systemone or the pplx-decider joint protocol v3; the protocol is auto-detected from the served model."
 metadata:
   author: "rodri"
 allowed-tools: "Bash(omnicli:*) Read"
@@ -50,13 +50,31 @@ separately weighted column. A curated alias ("podcast" → audio tooling) is
 deliberate author intent and outranks incidental prose.
 
 ```
-🔍 [omnicli] intent: 'transcribe a zoom lecture recording'   tier=bm25
+🔍 [omnicli] intent: 'transcribe a zoom lecture recording'   tier=bm25(gated)
 
-  1. zoom-recorder   score=29.20  coord=0.77  chunks=20
+  1. zoom-recorder   score=0.91  lex=34.25  coord=0.75  chunks=22
        zoom-recorder/scripts/zoom_download
        Download transcripts, audio, and visual keyframe slides from Zoom cloud...
        → omnicli tools zoom-recorder
 ```
+
+### The re-ranker is gated, not always on
+
+BM25 plus curated aliases is near-saturated on the golden set (60/61 top-1),
+and the semantic re-ranker changes the top hit on **none** of those 61 cases.
+So it runs only when the lexical ranking is unsure: the gap between the top two
+hits, relative to the top score, falls below `RERANK_GATE_MARGIN` (0.25).
+
+| mode | latency | golden top-1 | fires on |
+|---|---|---|---|
+| `--rerank never` | 2.5 ms | 60/61 | 0/61 |
+| `--rerank auto` (default) | 17 ms | 60/61 | 7/61 |
+| `--rerank always` | 118 ms | 60/61 | 61/61 |
+
+Same accuracy, 7x less latency. The re-ranker itself is `bge-small-en-v1.5`
+on the local embedding endpoint, running with `-ngl 0` — **CPU only, zero
+VRAM** — at 11 ms per embed. When the embedding server is down, `auto` falls
+back to `bm25(gated)` and the catalog stays fully usable.
 
 ### 2. `omnicli describe <tool_id>` — get one contract
 
@@ -66,6 +84,31 @@ omnicli describe zoom-recorder/scripts/zoom_download
 
 Returns the usage line, every flag, positionals and subcommands — extracted
 from the tool's own `--help` at index time. **One** tool per call.
+
+Given a **skill name** instead of a tool id, it returns the skill itself: its
+frontmatter and a section outline, with a token estimate per section. Add
+`--section "<heading>"` to read just that one section.
+
+```bash
+omnicli describe canvas-cli
+# 📖 [canvas-cli]  ~739 tokens, 13 sections, 22 tools
+#    Sections:
+#      Canvas LMS (`canvas-cli`)                          60 tok
+#        🏛️ The Command Groups                            187 tok
+#        🛡️ Token Shielding                               121 tok
+#    Read one:  omnicli describe canvas-cli --section "token shield"
+
+omnicli describe canvas-cli --section "token shield"
+# 📖 [canvas-cli] section: 🛡️ Token Shielding  (~121 tokens)
+```
+
+This is the spec's progressive disclosure, routed through the gateway: the
+outline first, then one section. A skill's body is never fetched whole unless
+that is what you ask for.
+
+The skills themselves are **never modified**. The catalog is an index over
+them: it reads the files, it does not own them. Delete `catalog.db` and every
+skill still works exactly as before.
 
 ### 3. `omnicli invoke <tool_id> [args]` — run it, bounded
 
@@ -110,8 +153,8 @@ startup instead of 150,000:
 
 | Tool | Input | Returns |
 |---|---|---|
-| `omni_discover` | `intent`, `limit` | ranked skill + tool ids, one line each |
-| `omni_describe` | `tool_id` | the exact contract for that one tool |
+| `omni_discover` | `intent`, `limit`, `rerank` | ranked skill + tool ids, one line each |
+| `omni_describe` | `tool_id`, `section` | the exact contract for that one tool, or a skill's outline / one section |
 | `omni_invoke` | `tool_id`, `args`, `projection` | bounded, projected result |
 | `omni_status` | — | endpoint health, catalog freshness, retrieval tier |
 
@@ -132,7 +175,7 @@ Available both as subcommands and as tools in the catalog:
 |---|---|---|
 | `omnicli llm "<prompt>"` | `local/llm` | Qwen3.6-35B Genesis, dual-GPU (:8080) |
 | `omnicli ocr <file>` | `local/ocr` | LightOnOCR-3-1B (:8085) |
-| `omnicli decide "<state>" "<q>"` | `local/decide` | vllm-d3-mini, calibrated (:8083) |
+| `omnicli decide "<state>" "<q>"` | `local/decide` | the decision model on :8083, protocol auto-detected (pplx-decider-flash v1.2 or vllm-d3-mini) |
 | `omnicli asr transcribe <audio>` | `local/asr` | Nemotron-3.5 ASR (:8081) |
 
 ```bash
@@ -163,6 +206,25 @@ legacy scorer   top1 34/53 (64.2%)   top3 40/53 (75.5%)
 The alias set is audited against the eval set (`omnicli eval` / 
 `tests/overfit_check.py`) so a router handed the answer key cannot be
 mistaken for a router that works.
+
+The set has since grown to 61 cases; the current numbers are 60/61 (98.4%)
+against the legacy scorer's 40/61 (65.6%). `omnicli eval --rerank
+auto|always|never` re-runs it under any re-ranker mode, and all three
+currently score 60/61.
+
+### Token cost (measured)
+
+`tests/measure_tokens.py` counts what actually lands in the model's context,
+using the local Qwen3.5 tokenizer against the 38-skill library:
+
+| | prompt shelf | omnicli | |
+|---|---|---|---|
+| selection phase | 8,208 tok | 691 tok | **91.6% smaller** |
+| to invoke one tool | 9,326 tok | 2,890 tok | **69.0% smaller** |
+
+The second row's saving comes from the 8 KB response cap, not from the
+discovery itself. The selection-phase number is the one that matters, because
+it is paid on every turn whether or not a tool gets used.
 
 ---
 

@@ -21,7 +21,7 @@ from catalog import builder, legacy, search  # noqa: E402
 GOLDEN = HERE / "golden_eval.json"
 
 
-def run(verbose: bool = False, as_json: bool = False) -> dict:
+def run(verbose: bool = False, as_json: bool = False, rerank: str = "never") -> dict:
     cases = json.loads(GOLDEN.read_text(encoding="utf-8"))["cases"]
     con = builder.connect()
     builder.ensure_built(con, progress=False)
@@ -33,7 +33,7 @@ def run(verbose: bool = False, as_json: bool = False) -> dict:
 
     for case in cases:
         q = case["query"]
-        res = search.search(con, q, limit=3, rerank_enabled=False)
+        res = search.search(con, q, limit=3, rerank_enabled=rerank)
         new_ids = [r["skill"] for r in res["results"]]
         new_scores = {r["skill"]: r["score"] for r in res["results"]}
 
@@ -129,7 +129,7 @@ def run(verbose: bool = False, as_json: bool = False) -> dict:
     b1, b3 = summary["bm25"]["top1_raw"], summary["bm25"]["top3_raw"]
     l1, l3 = summary["legacy"]["top1_raw"], summary["legacy"]["top3_raw"]
     print("=" * 66)
-    print(f"  GOLDEN ROUTING EVAL   ({total} cases)")
+    print(f"  GOLDEN ROUTING EVAL   ({total} cases)   rerank={rerank}")
     print("=" * 66)
     print(f"  BM25 catalog    top1 {b1:>3}/{total} ({100.0*b1/total:5.1f}%)   top3 {b3:>3}/{total} ({100.0*b3/total:5.1f}%)")
     print(f"  legacy scorer   top1 {l1:>3}/{total} ({100.0*l1/total:5.1f}%)   top3 {l3:>3}/{total} ({100.0*l3/total:5.1f}%)")
@@ -156,4 +156,8 @@ def run(verbose: bool = False, as_json: bool = False) -> dict:
 
 
 if __name__ == "__main__":
-    run(verbose="--verbose" in sys.argv, as_json="--json" in sys.argv)
+    mode = "never"
+    for arg in sys.argv[1:]:
+        if arg.startswith("--rerank="):
+            mode = arg.split("=", 1)[1]
+    run(verbose="--verbose" in sys.argv, as_json="--json" in sys.argv, rerank=mode)

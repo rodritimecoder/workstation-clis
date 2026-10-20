@@ -101,20 +101,33 @@ def tool_discover(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_describe(args: dict[str, Any]) -> dict[str, Any]:
-    """Return the exact input contract for a single tool."""
+    """Return the exact input contract for a single tool, or a skill's body.
+
+    A tool id gives that tool's usage, flags, positionals and subcommands.
+    A skill name gives the skill itself: its frontmatter and a section
+    outline, so the agent can pull one section rather than the whole body.
+    """
     tool_id = (args.get("tool_id") or "").strip()
     if not tool_id:
         return _json_result({"error": "tool_id is required"})
+    section_name = (args.get("section") or "").strip()
 
     con = _con()
     row = con.execute("SELECT * FROM tools WHERE id = ?", (tool_id,)).fetchone()
     if row is None:
+        # A skill name gives the skill itself. This is checked before the
+        # legacy "fall back to the skill's primary script" path, because a
+        # skill name and a script contract are different things and the
+        # caller asked for the skill.
+        if con.execute("SELECT 1 FROM skills WHERE name = ?", (tool_id,)).fetchone():
+            return _describe_skill(con, tool_id, section_name)
         cands = con.execute(
             "SELECT id FROM tools WHERE skill = ? AND kind = 'script' LIMIT 1", (tool_id,)
         ).fetchall()
-        if not cands:
-            return _text_result(f"No tool named {tool_id!r}.", is_error=True)
-        row = con.execute("SELECT * FROM tools WHERE id = ?", (cands[0]["id"],)).fetchone()
+        if cands:
+            row = con.execute("SELECT * FROM tools WHERE id = ?", (cands[0]["id"],)).fetchone()
+        else:
+            return _text_result(f"No tool or skill named {tool_id!r}.", is_error=True)
 
     contract = json.loads(row["contract"] or "{}")
     return _json_result({
@@ -125,6 +138,54 @@ def tool_describe(args: dict[str, Any]) -> dict[str, Any]:
         "argv": json.loads(row["argv"] or "[]"),
         "contract": contract,
         "next": f"Call omni_invoke with tool_id={row['id']!r} and your arguments.",
+    })
+
+
+def _describe_skill(con, name: str, section_name: str) -> dict[str, Any]:
+    """A skill id: frontmatter + outline, or one section on request."""
+    from catalog import skilldoc
+
+    row = con.execute("SELECT * FROM skills WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        return _text_result(f"No tool or skill named {name!r}.", is_error=True)
+    md_path = row["md_path"]
+    if not md_path or not Path(md_path).is_file():
+        return _text_result(f"Skill {name!r} has no readable SKILL.md.", is_error=True)
+
+    doc = skilldoc.load_skill_doc(md_path)
+    front = doc["frontmatter"]
+
+    if section_name:
+        section = skilldoc.pick_section(doc, section_name)
+        if section is None:
+            return _text_result(
+                f"No section {section_name!r} in {name!r}. Available: "
+                + ", ".join(s["heading"] for s in doc["sections"] if s["heading"]),
+                is_error=True,
+            )
+        return _json_result({
+            "skill": name,
+            "section": section["heading"],
+            "tokens": section["tokens"],
+            "body": section["body"],
+            "next": "Call omni_discover or omni_describe for anything else you need.",
+        })
+
+    tools = con.execute(
+        "SELECT id, kind FROM tools WHERE skill = ? ORDER BY kind, id", (name,)
+    ).fetchall()
+    return _json_result({
+        "skill": name,
+        "kind": "skill",
+        "path": doc["path"],
+        "frontmatter": front,
+        "body_tokens": doc["tokens"],
+        "outline": skilldoc.outline(doc),
+        "tools": [{"id": t["id"], "kind": t["kind"]} for t in tools],
+        "next": (
+            f"Call omni_describe with tool_id={name!r} and section=\"<heading>\" to read "
+            f"one section, or omni_describe with a tool id for its input contract."
+        ),
     })
 
 
@@ -221,7 +282,8 @@ TOOLS = [
         "description": (
             "Find the right tool for a natural-language intent. Returns ranked skill "
             "names with their tool ids and a one-line reason. Start here. Call "
-            "omni_describe with one of the returned tool ids to get its input contract."
+            "omni_describe with a returned skill name for that skill's section "
+            "outline, or with a tool id for its input contract."
         ),
         "inputSchema": {
             "type": "object",
@@ -229,6 +291,12 @@ TOOLS = [
                 "intent": {"type": "string", "description": "What you want to do, in plain language."},
                 "limit": {"type": "integer", "description": "Max results (default 8).", "default": 8},
                 "no_rerank": {"type": "boolean", "description": "Skip the optional embedding re-ranker."},
+                "rerank": {
+                    "type": "string",
+                    "enum": ["auto", "always", "never"],
+                    "description": "Re-ranker mode. auto (default) only re-ranks when the "
+                                   "lexical ranking is unsure.",
+                },
             },
             "required": ["intent"],
         },
@@ -238,12 +306,18 @@ TOOLS = [
         "description": (
             "Get the exact input contract for ONE tool: usage, flags, positionals and "
             "subcommands. Call this before invoking. Only one tool's contract is "
-            "returned per call."
+            "returned per call. Given a skill name instead of a tool id, returns the "
+            "skill's frontmatter and section outline; add section=\"<heading>\" to "
+            "read that one section of its body."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "tool_id": {"type": "string", "description": "A tool id from omni_discover."},
+                "tool_id": {"type": "string", "description": "A tool id from omni_discover, or a skill name."},
+                "section": {
+                    "type": "string",
+                    "description": "Optional. Heading of the skill section to read.",
+                },
             },
             "required": ["tool_id"],
         },

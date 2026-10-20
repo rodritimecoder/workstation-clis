@@ -42,6 +42,7 @@ ENGINE_PORT = int(os.environ.get("JPT_ENGINE_PORT", "8090"))
 # questions in one forward pass, so there is no letter readout or temperature
 # divide - the server's numbers are already calibrated.
 VLLM_PORT = int(os.environ.get("VLLM_PORT", "8083"))
+PPLX_PORT = int(os.environ.get("PPLX_PORT", "8083"))
 VLLM_BASE = f"http://127.0.0.1:{VLLM_PORT}"
 
 # ---- OneJev1.5-4B / Imajev-4B decision backend -------------------------------
@@ -218,7 +219,114 @@ def ask_vllm(state, question, opts, typ, port=VLLM_PORT, timeout=180, images=Non
     return _map_systemone(ans, levels=opts if typ == "score" else None)
 
 
-def _map_systemone(ans, levels=None):
+def _served_decision_type(port=VLLM_PORT):
+    """Which decision model is actually on the port, and does it need a special client?
+
+    pplx-decider checkpoints speak joint protocol v3, not the /v1/systemone
+    layout, so the caller has to know which one is serving.
+    """
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models")
+        data = json.load(urllib.request.urlopen(req, timeout=5))
+    except Exception:
+        return None
+    entries = data.get("data") or []
+    if not entries:
+        return None
+    entry = entries[0]
+    modalities = ((entry.get("architecture") or {}).get("output_modalities")) or []
+    if "decisions" not in modalities:
+        return None
+    path = entry.get("id")
+    if not path:
+        return None
+    for directory in (
+        pathlib.Path("/run/media/rodri/AI/skills/pplx-decider/scripts"),
+        pathlib.Path.home() / ".pi/agent/skills/pplx-decider/scripts",
+        pathlib.Path.home() / ".gemini/config/skills/pplx-decider/scripts",
+    ):
+        if not (directory / "gguf_meta.py").is_file():
+            continue
+        if str(directory) not in sys.path:
+            sys.path.append(str(directory))
+        try:
+            import importlib
+
+            return importlib.import_module("gguf_meta").decision_type(path)
+        except Exception:
+            continue
+    return None
+
+
+def _pplx_client():
+    """Import the pplx-decider client (stdlib only) from the installed skill."""
+    import importlib
+
+    for directory in (
+        pathlib.Path("/run/media/rodri/AI/skills/pplx-decider/scripts"),
+        pathlib.Path.home() / ".pi/agent/skills/pplx-decider/scripts",
+        pathlib.Path.home() / ".gemini/config/skills/pplx-decider/scripts",
+    ):
+        if not (directory / "pplx_decider.py").is_file():
+            continue
+        if str(directory) not in sys.path:
+            sys.path.append(str(directory))
+        try:
+            return importlib.import_module("pplx_decider")
+        except Exception:
+            continue
+    return None
+
+
+def ensure_pplx(port=PPLX_PORT, timeout=10):
+    if _health(f"http://127.0.0.1:{port}/health"):
+        return
+    launcher = pathlib.Path("/run/media/rodri/AI/sh/pplx-decider-flash.sh")
+    if not launcher.exists():
+        raise SystemExit(f"pplx-decider launcher missing: {launcher}")
+    subprocess.Popen([str(launcher)], stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _health(f"http://127.0.0.1:{port}/health"):
+            return
+        time.sleep(1.0)
+    raise SystemExit(f"pplx-decider did not come up on :{port} - start sh/pplx-decider-flash.sh")
+
+
+def ask_pplx(state, question, opts, typ, port=PPLX_PORT, timeout=180, images=None):
+    """pplx-decider-flash v1.2: joint protocol v3, readout at each marker.
+
+    The stock /v1/systemone path targets the older v1 prompt layout, so this
+    backend drives the v1.2 protocol directly through the pplx-decider skill.
+    """
+    module = _pplx_client()
+    if module is None:
+        raise SystemExit("pplx-decider skill not found (expected scripts/pplx_decider.py)")
+    client = module.PplxDecider(port=port, timeout=timeout)
+    spec = _systemone_question(question, opts, typ)
+    try:
+        answers = client.decide(state, {"answer": spec})["answers"]
+    except Exception as e:
+        raise SystemExit(f"pplx-decider failed: {e}")
+    ans = answers.get("answer")
+    if not ans:
+        raise SystemExit(f"pplx-decider returned no answer: {str(answers)[:300]}")
+    return _map_systemone(
+        {
+            "type": typ,
+            "noul": ans.get("noul"),
+            "choice": ans.get("argmax"),
+            "score": ans.get("score"),
+            "confidence": _concentration(list(ans.get("probs", []))),
+            "probabilities": {str(i): p for i, p in enumerate(ans.get("probs", []))},
+        },
+        levels=opts if typ == "score" else None,
+        keys=ans.get("keys"),
+    )
+
+
+def _map_systemone(ans, levels=None, keys=None):
     """systemone answer object -> the internal backend shape.
 
     A systemone score is the expected *level index* (e.g. 2.28 of 4 levels), so
@@ -248,9 +356,19 @@ def _map_systemone(ans, levels=None):
                 "score": ans.get("score"),
                 "probabilities": probs,
                 "confidence": ans.get("confidence", 0.0)}
+    probs = ans.get("probabilities") or {}
+    if keys and typ != "score":
+        # index-keyed probabilities -> option-keyed
+        remapped = {}
+        for k, v in probs.items():
+            try:
+                remapped[str(keys[int(k)])] = round(float(v), 4)
+            except (IndexError, ValueError, TypeError):
+                remapped[str(k)] = round(float(v), 4)
+        probs = remapped
     return {"type": "choice",
             "answer": ans.get("choice"),
-            "probabilities": ans.get("probabilities") or {},
+            "probabilities": probs,
             "confidence": ans.get("confidence", 0.0)}
 
 
@@ -537,6 +655,10 @@ def _run_one(model, state, question, opts, typ, a):
         port = VLLM_PORT if a.port is None else a.port
         ensure_vllm(port, a.timeout)
         raw = ask_vllm(state, question, opts, typ, port=port, timeout=a.timeout)
+    elif model == "pplx":
+        port = PPLX_PORT if a.port is None else a.port
+        ensure_pplx(port, a.timeout)
+        raw = ask_pplx(state, question, opts, typ, port=port, timeout=a.timeout)
     elif model in ("onejev", "imajev"):
         ensure_imajev(IMAJEV_PORT, a.timeout)
         port = IMAJEV_PORT if a.port is None else a.port
@@ -564,10 +686,12 @@ def main():
     ap.add_argument("--state", help="same as the first positional")
     ap.add_argument("--question", help="same as the second positional")
     ap.add_argument("--options", help="same as the third positional")
-    ap.add_argument("--model", default=os.environ.get("JEV_CLI_MODEL", "vllm"),
-                    choices=["vllm", "d3", "onejev", "imajev", "jev", "jpt"],
-                    help="vllm=vllm-d3-mini native /v1/systemone on :8083 (default, premier), "
+    ap.add_argument("--model", default=os.environ.get("JEV_CLI_MODEL", "auto"),
+                    choices=["auto", "vllm", "d3", "pplx", "onejev", "imajev", "jev", "jpt"],
+                    help="auto=pick the protocol from the model actually serving :8083 (default), "
+                         "vllm=vllm-d3-mini native /v1/systemone, "
                          "d3=alias for vllm, "
+                         "pplx=pplx-decider-flash v1.2 joint protocol v3 (highest accuracy), "
                          "onejev=OneJev1.5-4B vision+decision fallback on :8089, "
                          "imajev=Imajev-4B alias on :8089, "
                          "jev=Jev-Style-2B on :8085, jpt=JPT-4B System One on :8090")
@@ -651,12 +775,19 @@ def main():
         q["criteria"] = opts
 
     if a.port is None:
-        a.port = {"vllm": VLLM_PORT, "d3": VLLM_PORT,
+        a.port = {"auto": VLLM_PORT, "vllm": VLLM_PORT, "d3": VLLM_PORT, "pplx": PPLX_PORT,
                   "onejev": IMAJEV_PORT, "imajev": IMAJEV_PORT, "jev": JEVSTYLE_PORT}.get(a.model, DEFAULT_PORT)
+
+    if a.model == "auto":
+        served = _served_decision_type(a.port)
+        a.model = "pplx" if served == "pplx-decider" else "vllm"
 
     if a.model in ("vllm", "d3"):
         ensure_vllm(a.port, a.timeout)
         ans = ask_vllm(state, question, opts, typ, port=a.port, timeout=a.timeout)
+    elif a.model == "pplx":
+        ensure_pplx(a.port, a.timeout)
+        ans = ask_pplx(state, question, opts, typ, port=a.port, timeout=a.timeout)
     elif a.model == "jpt":
         ensure_jpt(a.port, a.timeout)
         ans = ask_jpt(a.port, state, question, opts, typ)
