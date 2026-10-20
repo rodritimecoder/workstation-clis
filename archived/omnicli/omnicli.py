@@ -292,7 +292,12 @@ def cmd_search(query: str, as_json: bool = False, limit: int = 6,
             print(f"       {r['chunks'][0]['snippet'][:180]}")
         else:
             print(f"       {r['chunks'][0]['snippet'][:150]}")
-        print(f"       → omnicli tools {r['skill']}")
+        top = r["chunks"][0]
+        if top.get("kind") == "doc":
+            rel = top["path"].split("/suites/")[-1]
+            print(f"       → omnicli describe {r['skill']} --doc \"{rel}\"")
+        else:
+            print(f"       → omnicli tools {r['skill']}")
         print()
     print("   Next: `omnicli describe <tool_id>` for one contract, "
           "`omnicli invoke <tool_id> --args ...` to run it.\n")
@@ -348,7 +353,63 @@ def cmd_tools(skill_name: str, as_json: bool = False):
     print(f"   Execute :  omnicli invoke <tool_id> [args...]\n")
 
 
-def _describe_skill(con, name: str, section_name: str, as_json: bool = False):
+def _describe_doc(con, name: str, query: str, as_json: bool = False):
+    """Read one document the skill declared as part of its searchable body.
+
+    The query is matched loosely: an exact title, a path suffix, a path
+    fragment, or the file's stem. An agent that saw a snippet in a search
+    result should be able to name the document the way the result named it.
+    """
+    q = query.strip().lower()
+    rows = con.execute(
+        "SELECT title, path, body, kind FROM docs WHERE skill = ? AND kind = 'doc'",
+        (name,),
+    ).fetchall()
+    if not rows:
+        sys.exit(f"❌ Error: {name!r} declares no documents. "
+                 "Use `omnicli describe " + name + "` to see the skill itself.")
+
+    scored = []
+    for title, path, body, kind in rows:
+        t = (title or "").lower()
+        p = (path or "").lower()
+        stem = Path(p).stem.lower()
+        rel = "/".join(p.split("/suites/")[-1].split("/")) if "/suites/" in p else p
+        score = 0
+        if t == q or rel == q:
+            score = 100
+        elif t.startswith(q) or rel.startswith(q):
+            score = 80
+        elif t.endswith("/" + q) or rel.endswith("/" + q):
+            score = 70
+        elif q and q in t:
+            score = 50
+        elif q and q in p:
+            score = 40
+        elif stem == q:
+            score = 30
+        if score:
+            scored.append((score, title, path, body))
+    if not scored:
+        sys.exit(f"❌ Error: no document matching {query!r} in {name!r}.")
+
+    scored.sort(key=lambda r: -r[0])
+    best = scored[0]
+    _, title, path, body = best
+    payload = {"skill": name, "title": title, "path": path,
+               "tokens": len(body) // 4, "body": body}
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    print(f"\n📖 [{name}] document: {title}  (~{payload['tokens']} tokens)\n")
+    print(body)
+    print(f"\n   source: {path}")
+    if len(scored) > 1:
+        others = ", ".join(sorted({t for _, t, _, _ in scored[1:5]}))
+        print(f"   also matched: {others}")
+
+
+def _describe_skill(con, name: str, section_name: str, as_json: bool = False, doc_name: str = ""):
     """A skill id: frontmatter + outline, or one section on request."""
     from catalog import skilldoc
 
@@ -363,6 +424,9 @@ def _describe_skill(con, name: str, section_name: str, as_json: bool = False):
     tools = con.execute(
         "SELECT id, kind FROM tools WHERE skill = ? ORDER BY kind, id", (name,)
     ).fetchall()
+
+    if doc_name:
+        return _describe_doc(con, name, doc_name, as_json)
 
     if section_name:
         section = skilldoc.pick_section(doc, section_name)
@@ -402,7 +466,7 @@ def _describe_skill(con, name: str, section_name: str, as_json: bool = False):
     print(f"   Tool ids:  omnicli tools {name}")
 
 
-def cmd_describe(tool_id: str, as_json: bool = False, section: str = ""):
+def cmd_describe(tool_id: str, as_json: bool = False, section: str = "", doc: str = ""):
     """Return the exact input contract for ONE tool, or a skill's body."""
     con = _require_catalog()
     row = con.execute("SELECT * FROM tools WHERE id = ?", (tool_id,)).fetchone()
@@ -410,7 +474,7 @@ def cmd_describe(tool_id: str, as_json: bool = False, section: str = ""):
         # A skill name gives the skill itself, checked before the legacy
         # "fall back to the skill's primary script" path.
         if con.execute("SELECT 1 FROM skills WHERE name = ?", (tool_id,)).fetchone():
-            return _describe_skill(con, tool_id, section, as_json)
+            return _describe_skill(con, tool_id, section, as_json, doc)
         cands = con.execute(
             "SELECT id FROM tools WHERE skill = ? AND kind = 'script' LIMIT 1", (tool_id,)
         ).fetchall()
@@ -862,6 +926,7 @@ def main():
     p.add_argument("tool_id")
     p.add_argument("--json", action="store_true")
     p.add_argument("--section", default="", help="With a skill name: the heading of the section to read")
+    p.add_argument("--doc", default="", help="With a skill name: the path or title of a document to read")
 
     p = sub.add_parser("invoke", help="Execute a tool with bounded output",
                        add_help=False)
@@ -938,7 +1003,7 @@ def main():
     elif args.action == "tools":
         cmd_tools(args.skill, as_json=args.json)
     elif args.action == "describe":
-        cmd_describe(args.tool_id, as_json=args.json, section=args.section)
+        cmd_describe(args.tool_id, as_json=args.json, section=args.section, doc=args.doc)
     elif args.action == "index":
         cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts,
                   as_json=args.json, check=args.check)

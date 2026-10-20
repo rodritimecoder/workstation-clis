@@ -13,6 +13,9 @@ license: "Proprietary. Complete terms are in the LICENSE file at the repository 
 compatibility: "Requires Python 3.10+. No network access needed."
 metadata:
   author: "rodri"
+  docs:
+    - "suites/pstack/playbooks/*.md"
+    - "suites/*/*.md"
 allowed-tools: "Bash(review-hub:*) Bash(python3:*) Read Write"
 ---
 

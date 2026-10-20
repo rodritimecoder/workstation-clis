@@ -248,8 +248,21 @@ def chunk_markdown(text: str, base_title: str) -> list[tuple[str, str]]:
 # --------------------------------------------------------------------------
 
 def fingerprint(skills: dict[str, dict[str, Any]]) -> str:
-    """Cheap hash of the skill collection, used to detect staleness."""
+    """Cheap hash of the skill collection, used to detect staleness.
+
+    The builder's own source is part of the fingerprint. Without it, editing
+    a rule in the builder — which script counts as a tool, how a contract is
+    extracted — leaves the existing catalog in place, and ``omnicli index``
+    reports success while nothing was rebuilt. The rule that decides what a
+    tool is lives in the builder, so the builder's mtime is the signal.
+    """
     h = hashlib.sha256()
+    for source in (Path(__file__), Path(__file__).with_name("registry.py")):
+        try:
+            st = os.stat(source)
+            h.update(f"builder:{source.name}:{st.st_mtime_ns}:{st.st_size}".encode())
+        except OSError:
+            h.update(f"builder:{source.name}:missing".encode())
     for name in sorted(skills):
         s = skills[name]
         md_path = s.get("md_path")
@@ -455,6 +468,30 @@ def build(
                 continue
             for title, chunk in chunk_markdown(ref_text, ref.stem):
                 doc_rows.append((name, "reference", f"{ref.stem}/{title}", str(ref), expand_cjk(chunk), ""))
+
+        # Markdown the skill explicitly declared as part of its searchable
+        # body. A skill that vendors rubrics or playbooks declares them with
+        # `metadata.docs` globs; nothing is indexed that was not asked for.
+        for globs in [s.get("doc_globs") or []]:
+            if not globs or not s.get("path"):
+                continue
+            base = Path(s["path"])
+            for pattern in globs:
+                try:
+                    matches = sorted(base.glob(pattern))
+                except (ValueError, OSError):
+                    continue
+                for md_file in matches:
+                    if not md_file.is_file() or md_file.suffix != ".md":
+                        continue
+                    try:
+                        text = md_file.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    rel = md_file.relative_to(base).with_suffix("")
+                    for title, chunk in chunk_markdown(text, md_file.stem):
+                        doc_rows.append((name, "doc", f"{rel.as_posix()}/{title}",
+                                         str(md_file), expand_cjk(chunk), ""))
 
         if progress:
             print(f"  indexed {name:<28} {tool_count:>3} tools", flush=True)

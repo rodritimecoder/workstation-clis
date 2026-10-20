@@ -111,6 +111,7 @@ def tool_describe(args: dict[str, Any]) -> dict[str, Any]:
     if not tool_id:
         return _json_result({"error": "tool_id is required"})
     section_name = (args.get("section") or "").strip()
+    doc_name = (args.get("doc") or "").strip()
 
     con = _con()
     row = con.execute("SELECT * FROM tools WHERE id = ?", (tool_id,)).fetchone()
@@ -120,6 +121,8 @@ def tool_describe(args: dict[str, Any]) -> dict[str, Any]:
         # skill name and a script contract are different things and the
         # caller asked for the skill.
         if con.execute("SELECT 1 FROM skills WHERE name = ?", (tool_id,)).fetchone():
+            if doc_name:
+                return _describe_doc(con, tool_id, doc_name)
             return _describe_skill(con, tool_id, section_name)
         cands = con.execute(
             "SELECT id FROM tools WHERE skill = ? AND kind = 'script' LIMIT 1", (tool_id,)
@@ -138,6 +141,54 @@ def tool_describe(args: dict[str, Any]) -> dict[str, Any]:
         "argv": json.loads(row["argv"] or "[]"),
         "contract": contract,
         "next": f"Call omni_invoke with tool_id={row['id']!r} and your arguments.",
+    })
+
+
+def _describe_doc(con, name: str, query: str) -> dict[str, Any]:
+    """Read one document the skill declared as part of its searchable body."""
+    from pathlib import Path as _Path
+
+    q = (query or "").strip().lower()
+    rows = con.execute(
+        "SELECT title, path, body FROM docs WHERE skill = ? AND kind = 'doc'", (name,)
+    ).fetchall()
+    if not rows:
+        return _text_result(
+            f"Skill {name!r} declares no documents. Call omni_describe with "
+            f"tool_id={name!r} to see the skill itself.", is_error=True)
+
+    scored = []
+    for title, path, body in rows:
+        t = (title or "").lower()
+        p = (path or "").lower()
+        stem = _Path(p).stem.lower()
+        rel = p.split("/suites/")[-1] if "/suites/" in p else p
+        score = 0
+        if t == q or rel == q:
+            score = 100
+        elif t.startswith(q) or rel.startswith(q):
+            score = 80
+        elif t.endswith("/" + q) or rel.endswith("/" + q):
+            score = 70
+        elif q and q in t:
+            score = 50
+        elif q and q in p:
+            score = 40
+        elif stem == q:
+            score = 30
+        if score:
+            scored.append((score, title, path, body))
+    if not scored:
+        return _text_result(f"No document matching {query!r} in {name!r}.", is_error=True)
+
+    scored.sort(key=lambda r: -r[0])
+    _, title, path, body = scored[0]
+    return _json_result({
+        "skill": name,
+        "title": title,
+        "path": path,
+        "tokens": len(body) // 4,
+        "body": body,
     })
 
 
@@ -308,7 +359,8 @@ TOOLS = [
             "subcommands. Call this before invoking. Only one tool's contract is "
             "returned per call. Given a skill name instead of a tool id, returns the "
             "skill's frontmatter and section outline; add section=\"<heading>\" to "
-            "read that one section of its body."
+            "read that one section of its body, or doc=\"<path>\" to read one of the "
+            "documents the skill declares as searchable (rubrics, playbooks, guides)."
         ),
         "inputSchema": {
             "type": "object",
@@ -317,6 +369,10 @@ TOOLS = [
                 "section": {
                     "type": "string",
                     "description": "Optional. Heading of the skill section to read.",
+                },
+                "doc": {
+                    "type": "string",
+                    "description": "Optional. Path or title of a document the skill declares, e.g. \"pstack/playbooks/hillclimb.md\".",
                 },
             },
             "required": ["tool_id"],

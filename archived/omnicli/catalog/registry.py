@@ -145,6 +145,55 @@ def parse_frontmatter(content: str) -> tuple[str, str]:
     return name, desc
 
 
+_METADATA_BLOCK_RE = re.compile(r"^metadata:[ \t]*\n(?P<meta>(?:[ \t]+[^\n]*\n?)*)", re.MULTILINE)
+
+
+def parse_doc_globs(content: str) -> list[str]:
+    """Return the ``metadata.docs`` glob patterns declared by a SKILL.md.
+
+    A skill that vendors a body of guidance — rubrics, playbooks, checklists —
+    needs those files searchable, but a blanket "index every markdown file in
+    the skill" dilutes the BM25 index for every other skill. So the skill
+    declares what it wants indexed, and nothing is indexed that was not asked
+    for.
+
+    Deliberately not a YAML parser, in line with the rest of this module: the
+    frontmatter here uses folded scalars and nested maps, and the control
+    plane carries no dependencies. Both a block list and an inline list are
+    accepted.
+    """
+    m = _METADATA_BLOCK_RE.search(content)
+    if not m:
+        return []
+    meta = m.group("meta")
+
+    d = re.search(r"^[ \t]+docs:[ \t]*(?P<inline>\[[^\]]*\])?[ \t]*$", meta, re.MULTILINE)
+    if not d:
+        return []
+    globs: list[str] = []
+
+    inline = d.group("inline")
+    if inline:
+        globs.extend(g.strip().strip("\"'") for g in inline.strip("[]").split(",") if g.strip())
+        return globs
+
+    # A block list: the "- item" lines that follow the key, at its indent.
+    tail = meta[d.end():]
+    key_indent = len(re.match(r"[ \t]*", d.group(0)).group(0))
+    for line in tail.splitlines():
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= key_indent:
+            break
+        item = re.match(r"^[ \t]*-[ \t]*(.+?)[ \t]*$", line)
+        if item:
+            value = item.group(1).strip().strip("\"'")
+            if value:
+                globs.append(value)
+    return globs
+
+
 def _iter_skill_dirs(root: Path, include_sidelined: bool):
     if not root.is_dir():
         return
@@ -182,6 +231,7 @@ def load_all_skills(include_sidelined: bool = False) -> dict[str, dict[str, Any]
             "path": str(item),
             "md_path": str(md),
             "description": desc,
+            "doc_globs": parse_doc_globs(content),
             "status": status,
             "cli": shim,
         }
@@ -540,6 +590,27 @@ def _is_cli_entry(path: Path) -> bool:
         return False
 
 
+def _is_nested_in_sub_skill(script: Path, skill_dir: Path) -> bool:
+    """True when a script belongs to a sub-skill vendored inside this one.
+
+    ``review-hub`` vendors pstack, and pstack carries its own helper scripts
+    — ``worktree-audit.sh``, ``log.sh``. Those are pstack's implementation
+    detail, not commands an agent should be offered: the suite is reached
+    through ``review-hub review pstack``, and the suite's own scripts are
+    addressed by the suite, not by the parent skill.
+
+    A directory is a sub-skill when it carries a ``SKILL.md`` or a
+    ``rubric.md``. The vendored suites use the latter, because
+    ``review_hub.resolve_suite_file`` resolves through ``rubric.md``.
+    """
+    for ancestor in script.parents:
+        if ancestor == skill_dir:
+            return False
+        if (ancestor / "SKILL.md").is_file() or (ancestor / "rubric.md").is_file():
+            return True
+    return False
+
+
 def discover_tools(skill: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the tool records for one skill."""
     tools: list[dict[str, Any]] = []
@@ -553,6 +624,8 @@ def discover_tools(skill: dict[str, Any]) -> list[dict[str, Any]]:
 
     for script in _iter_scripts(skill_dir):
         if not _is_cli_entry(script):
+            continue
+        if _is_nested_in_sub_skill(script, skill_dir):
             continue
         try:
             rel = script.relative_to(skill_dir)
