@@ -7,7 +7,7 @@ from pathlib import Path
 class TestOpenRouterFree(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.cli = "/run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py"
+        cls.cli = str(Path(__file__).resolve().parent.parent / "scripts" / "or_agent.py")
 
     def test_01_doctor_json_contract(self):
         res = subprocess.run(
@@ -81,6 +81,38 @@ class TestOpenRouterFree(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(res.returncode, 0)
+
+
+class TestVerdictNormalization(unittest.TestCase):
+    """Offline pin for the chat-fallback contract: a verdict, not a paragraph."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        path = Path(__file__).resolve().parent.parent / "scripts" / "or_agent.py"
+        spec = importlib.util.spec_from_file_location("or_agent_under_test", path)
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+
+    def norm(self, text, options=("yes", "no")):
+        return self.mod._normalize_verdict(text, list(options))
+
+    def test_chatty_completion_reduces_to_the_option(self):
+        self.assertEqual(self.norm("yes  \nConfidence: 1.0")[0], "yes")
+        self.assertEqual(self.norm("**no**")[0], "no")
+        self.assertEqual(self.norm("Confidence: 0.9\nVerdict: yes")[0], "yes")
+
+    def test_confidence_is_parsed_not_dropped(self):
+        self.assertEqual(self.norm("yes\nConfidence: 1.0")[1], 1.0)
+        self.assertEqual(self.norm("no\nProbability: 0.12")[1], 0.12)
+        self.assertIsNone(self.norm("yes")[1])
+
+    def test_option_is_not_matched_inside_a_word(self):
+        self.assertEqual(self.norm("not sure")[0], "not sure")
+
+    def test_canonical_option_spelling_is_preserved(self):
+        self.assertEqual(self.norm("Needs Review", ["needs review", "ok"])[0], "needs review")
 
 
 if __name__ == "__main__":

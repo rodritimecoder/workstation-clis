@@ -3,6 +3,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -390,6 +391,40 @@ def run_single_chat(prompt: str, preferred_model: str = None, out_file: str = No
     return res
 
 
+_CONF_RE = re.compile(r"\b(?:confidence|probability|score)\b\s*[:=]?\s*([-+]?\d*\.?\d+)", re.I)
+
+
+def _normalize_verdict(text: str, options: list = None) -> tuple:
+    """Split a chatty completion into (verdict, confidence).
+
+    The chat fallback asks for a verdict *with confidence*, so a free endpoint
+    answers "yes\\nConfidence: 1.0". Callers comparing against an option need
+    "yes", and the confidence is worth keeping rather than discarding.
+    """
+    confidence = None
+    match = _CONF_RE.search(text)
+    if match:
+        try:
+            confidence = float(match.group(1))
+        except ValueError:
+            confidence = None
+
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    cleaned = _CONF_RE.sub("", first_line).strip(" \t\"'`.,;:-—*")
+
+    if options:
+        choices = sorted((o.strip() for o in options if o and o.strip()), key=len, reverse=True)
+        for choice in choices:
+            if cleaned.lower() == choice.lower():
+                return choice, confidence
+        # The option may be mentioned on a different line than the first.
+        haystack = _CONF_RE.sub("", text)
+        for choice in choices:
+            if re.search(rf"(?<![\w-]){re.escape(choice)}(?![\w-])", haystack, re.I):
+                return choice, confidence
+    return cleaned, confidence
+
+
 def run_decide(query: str, options: list = None, preferred_model: str = None):
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
@@ -449,7 +484,14 @@ def run_decide(query: str, options: list = None, preferred_model: str = None):
     }
     data = _http_post_json("https://openrouter.ai/api/v1/chat/completions", payload, api_key, timeout=45)
     content = data["choices"][0]["message"].get("content", "")
-    return {"status": "success", "model": "nvidia/nemotron-3.5-lightning:free", "verdict": content.strip()}
+    verdict, confidence = _normalize_verdict(content, options)
+    return {
+        "status": "success",
+        "model": "nvidia/nemotron-3.5-lightning:free",
+        "verdict": verdict,
+        "confidence": confidence,
+        "raw_text": content.strip(),
+    }
 
 
 def run_batched_embeddings(inputs: list, preferred_model: str = None, out_json: str = None):

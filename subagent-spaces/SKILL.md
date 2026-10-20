@@ -1,7 +1,7 @@
 ---
 name: subagent-spaces
 
-description: "Isolated CPU-pinned containerized sandbox environments for autonomous subagents using rootless Podman. Partitions 16 CPU threads into dedicated worker slots, mounts disposable workspaces, isolates untrusted builds and scripts, and connects directly to local inference endpoints."
+description: "Isolated CPU-pinned containerized sandbox environments for autonomous subagents using rootless Podman. Partitions 16 CPU threads into dedicated worker slots, mounts disposable workspaces, isolates untrusted builds and scripts, and connects directly to local inference endpoints. Use when a build, a test suite, or an untrusted script must run locally without touching the host, or when parallel workers need pinned CPU and memory — for a throwaway cloud VM instead, use gh-action-subagent."
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires the Podman container runtime, configured for rootless operation."

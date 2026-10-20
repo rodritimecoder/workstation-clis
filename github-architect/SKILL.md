@@ -5,7 +5,9 @@ description: >
   Synchronize, audit, and bootstrap GitHub repositories across a fleet of
   machines. Disciplined git-sync protocol (Look, Guard, Commit, Gate, Pull,
   Push, Report), secret and blob shielding, and zero-drive workstation
-  onboarding.
+  onboarding. Use when committing or pushing work, syncing repositories
+  between machines, making a repo private, shielding secrets before a push, or
+  bootstrapping a fresh workstation from GitHub.
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires git and an authenticated GitHub CLI."

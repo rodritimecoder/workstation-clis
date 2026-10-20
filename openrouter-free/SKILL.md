@@ -5,7 +5,10 @@ description: >
   Delegate autonomous coding subagent loops, compound bash batching, text embeddings,
   calibrated decision routing, and TTS audio synthesis to verified free OpenRouter endpoints
   (NVIDIA Nemotron Ultra/Lightning, Inception Mercury Decide, Fish Audio, LFM Embed)
-  with Homelab priority and Gemini failover.
+  with Homelab priority and Gemini failover. Use when a task needs hosted inference without
+  spending paid quota — free-tier coding loops, embeddings, speech synthesis or bulk
+  decisions — or when the local GPU is busy. For frontier-quality hosted models, use
+  nvidia-nim instead.
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires network access to openrouter.ai and an API key (OPENROUTER_API_KEY). The optional Gemini tier needs GEMINI_API_KEY."
@@ -41,7 +44,7 @@ Use this skill to delegate self-contained coding loops, multi-command bash workf
 
 1. **Compound Script Batching (`run_bash_batch`)**: Subagents execute ordered arrays of shell commands inside a single compound bash environment (`set -eo pipefail`). Commands share working directory context (`cd` sticks) and halt on fatal errors.
 2. **Response Projection & Disk Buffering**: Never blast large embedding vectors or verbose subagent traces into primary LLM context. Use `--out`, `--project <fields>`, or `--jq <expr>` to buffer results to disk (e.g. `/tmp/`), keeping the main conversation lean.
-3. **Canonical Executable**: `openrouter-free` in `~/.local/bin/openrouter-free` (symlinked from `/run/media/rodri/AI/skills/openrouter-free/scripts/or_agent.py`).
+3. **Canonical Executable**: `openrouter-free` in `~/.local/bin/openrouter-free`, symlinked from this skill's `scripts/or_agent.py`.
 
 ---
 

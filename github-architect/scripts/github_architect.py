@@ -188,8 +188,12 @@ SECRET_PATTERNS = [
 
 MAX_BLOB_SIZE_MB = 50.0
 
+# Where this machine keeps the AI volume. It is a genuine default, not a
+# portability bug: override it with AI_ROOT on a machine that mounts elsewhere.
+AI_ROOT = Path(os.environ.get("AI_ROOT", "/run/media/rodri/AI"))
+
 FLEET_SEARCH_PATHS = [
-    Path("/run/media/rodri/AI"),
+    AI_ROOT,
     Path.home() / "workspace",
     Path.home(),
 ]
@@ -793,8 +797,7 @@ def cmd_clone(repo: str, dest: Optional[Path] = None):
 
 def cmd_bootstrap(dest_dir: Optional[Path] = None):
     if dest_dir is None:
-        ai_mount = Path("/run/media/rodri/AI")
-        dest_dir = ai_mount if ai_mount.is_dir() else (Path.home() / "workspace")
+        dest_dir = AI_ROOT if AI_ROOT.is_dir() else (Path.home() / "workspace")
 
     print(f"\n🚀 [Bootstrap] Setting up agent environment in: {dest_dir.resolve()}")
     dest_dir.mkdir(parents=True, exist_ok=True)

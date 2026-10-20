@@ -37,7 +37,9 @@ def take_screenshot_and_snapshot(target_url, output_dir="./artifacts", name="sna
     fast_cdp_candidates = [
         shutil.which("fast-cdp"),
         str(Path.home() / ".local/bin/fast-cdp"),
-        "/run/media/rodri/AI/skills/hybrid-browser/bin/fast-cdp",
+        # The sibling skill in this collection, without assuming where the
+        # collection is mounted: scripts/ -> skill -> domain -> <skills root>.
+        str(Path(__file__).resolve().parents[2] / "multimodal" / "hybrid-browser" / "bin" / "fast-cdp"),
         "./hybrid-browser/bin/fast-cdp",
         "../hybrid-browser/bin/fast-cdp",
     ]
