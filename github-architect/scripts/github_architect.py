@@ -958,6 +958,16 @@ def main():
     p_ins = subparsers.add_parser("insights", help="Scan machine transcripts and configs to generate model docs")
     p_ins.add_argument("path", type=str, nargs="?", default=".", help="Target directory")
 
+    # guard
+    p_guard = subparsers.add_parser(
+        "guard",
+        help="Gate a public bundle publication: secrets, oversized blobs, and archived status markers",
+    )
+    p_guard.add_argument("--source", action="append", required=True, help="Directory to scan (repeatable)")
+    p_guard.add_argument("--published", action="append", default=[], help="Published relative path of a source (repeatable)")
+    p_guard.add_argument("--label", default="bundle", help="Name of the bundle being published")
+    p_guard.add_argument("--json", action="store_true")
+
     # git-sync
     p_gitsync = subparsers.add_parser("git-sync", help="Run disciplined 6-stage branch synchronization (git-sync protocol)")
     p_gitsync.add_argument("-m", "--message", help="Commit message (default: auto conventional summary)")
@@ -998,6 +1008,26 @@ def main():
             raw_args.append("--json")
         gitsync_main(raw_args)
         return
+
+    if args.command == "guard":
+        try:
+            from publication_guard import main as guard_main
+        except ImportError:
+            import importlib.util
+            script_path = Path(__file__).resolve().parent / "publication_guard.py"
+            spec = importlib.util.spec_from_file_location("publication_guard", script_path)
+            guard_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(guard_mod)
+            guard_main = guard_mod.main
+        raw = ["scan"]
+        for s in args.source:
+            raw += ["--source", s]
+        for p in args.published:
+            raw += ["--published", p]
+        raw += ["--label", args.label]
+        if args.json:
+            raw.append("--json")
+        sys.exit(guard_main(raw))
 
     if args.command == "status-all":
         project_keys = [k.lower() for k in args.project] if args.project else None

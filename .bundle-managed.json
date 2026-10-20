@@ -1,0 +1,23 @@
+{
+  "managed": [
+    "archived/omnicli",
+    "audiocpp",
+    "gh-action-subagent",
+    "github-architect",
+    "guard-hooks",
+    "hybrid-browser",
+    "icm-architect",
+    "jev-decision",
+    "litellm-vram-switcher",
+    "local-llm",
+    "markitdown-cli",
+    "nvidia-nim",
+    "ocr",
+    "openrouter-free",
+    "review-hub",
+    "subagent-spaces",
+    "tailscale-ops",
+    "video-miner",
+    "worktree-harness"
+  ]
+}

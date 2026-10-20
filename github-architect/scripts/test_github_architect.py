@@ -1,8 +1,10 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -13,6 +15,7 @@ sys.path.insert(0, str(HERE))
 
 import github_architect
 import git_sync
+import publication_guard
 
 
 class TestGitHubArchitect(unittest.TestCase):
@@ -136,6 +139,94 @@ class TestGitSync(unittest.TestCase):
         table = git_sync.render_table(rows, ["step", "status", "details"])
         self.assertIn("| Step   | Status  | Details         |", table)
         self.assertIn("| Branch | main    | origin/main     |", table)
+
+
+class TestPublicationGuard(unittest.TestCase):
+    # Built at runtime, never written as a literal: a PAT-shaped string in
+    # this file would be published to the public spokes and the gate would
+    # (correctly) block the bundle.
+    FAKE_PAT = "ghp_" + "A" * 36
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _skill(self, name="skill", frontmatter="---\nname: s\ndescription: d\n---\n\nbody\n"):
+        d = self.tmp / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(frontmatter, encoding="utf-8")
+        return d
+
+    def test_clean_skill_passes(self):
+        d = self._skill()
+        findings = publication_guard.scan_source(d, "t")
+        self.assertEqual([f for f in findings if f["severity"] == "block"], [])
+
+    def test_archived_without_status_marker_is_blocked(self):
+        d = self._skill()
+        findings = publication_guard.scan_status_marker(d, "archived/s", "t")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "missing-status-marker")
+
+    def test_archived_with_status_marker_passes(self):
+        d = self._skill(frontmatter="---\nname: s\nstatus: archived\n---\n\nbody\n")
+        findings = publication_guard.scan_status_marker(d, "archived/s", "t")
+        self.assertEqual(findings, [])
+
+    def test_non_archived_path_needs_no_marker(self):
+        d = self._skill()
+        self.assertEqual(publication_guard.scan_status_marker(d, "skill", "t"), [])
+
+    def test_secret_filename_is_blocked(self):
+        d = self._skill()
+        (d / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+        findings = publication_guard.scan_source(d, "t")
+        self.assertEqual([f["kind"] for f in findings], ["secret-filename"])
+
+    def test_env_example_is_allowed(self):
+        d = self._skill()
+        (d / ".env.example").write_text("TOKEN=x\n", encoding="utf-8")
+        findings = publication_guard.scan_source(d, "t")
+        self.assertEqual([f for f in findings if f["severity"] == "block"], [])
+
+    def test_secret_content_is_blocked_and_masked(self):
+        d = self._skill()
+        (d / "leak.txt").write_text(self.FAKE_PAT + "\n", encoding="utf-8")
+        findings = publication_guard.scan_source(d, "t")
+        self.assertEqual(len(findings), 1)
+        self.assertNotIn(self.FAKE_PAT, findings[0]["detail"])
+
+    def test_placeholder_credential_is_allowed(self):
+        d = self._skill()
+        (d / "doc.md").write_text('api_key = "YOUR_API_KEY_HERE"\n', encoding="utf-8")
+        findings = publication_guard.scan_source(d, "t")
+        self.assertEqual([f for f in findings if f["severity"] == "block"], [])
+
+    def test_excluded_paths_are_not_scanned(self):
+        d = self._skill()
+        (d / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+        findings = publication_guard.scan_source(d, "t", excludes=[".env"])
+        self.assertEqual([f for f in findings if f["severity"] == "block"], [])
+
+    def test_reap_removes_only_stale_managed_dirs(self):
+        (self.tmp / "old").mkdir()
+        (self.tmp / "old" / "f.txt").write_text("x", encoding="utf-8")
+        (self.tmp / "keep").mkdir()
+        (self.tmp / "keep" / "f.txt").write_text("x", encoding="utf-8")
+        managed = self.tmp / ".bundle-managed.json"
+        managed.write_text(json.dumps({"managed": ["old", "keep"]}), encoding="utf-8")
+        result = publication_guard.reap(self.tmp, managed, ["keep"])
+        self.assertEqual(result["removed"], ["old"])
+        self.assertFalse((self.tmp / "old").exists())
+        self.assertTrue((self.tmp / "keep").exists())
+
+    def test_reap_is_idempotent(self):
+        managed = self.tmp / ".bundle-managed.json"
+        managed.write_text(json.dumps({"managed": ["gone"]}), encoding="utf-8")
+        first = publication_guard.reap(self.tmp, managed, [])
+        second = publication_guard.reap(self.tmp, managed, [])
+        self.assertEqual(first["removed"], ["gone"])
+        self.assertEqual(second["removed"], [])
 
 
 if __name__ == "__main__":

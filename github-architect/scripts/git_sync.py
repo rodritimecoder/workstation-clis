@@ -56,15 +56,23 @@ SECRET_FILE_PATTERNS = [
 ]
 
 SECRET_CONTENT_PATTERNS = [
-    (r"ghp_[a-zA-Z0-9]{36}", "GitHub Personal Access Token"),
+    (r"ghp_[A-Za-z0-9]{36}", "GitHub Personal Access Token"),
+    (r"gho_[A-Za-z0-9]{36}", "GitHub OAuth Token"),
+    (r"ghu_[A-Za-z0-9]{36}", "GitHub User-to-Server Token"),
+    (r"ghs_[A-Za-z0-9]{36}", "GitHub Server-to-Server Token"),
+    (r"github_pat_[A-Za-z0-9_]{22,}", "GitHub Fine-Grained Token"),
+    (r"sk-ant-[A-Za-z0-9\-_]{20,}", "Anthropic API Key"),
     (r"sk-[a-zA-Z0-9]{20,}", "OpenAI / API Secret Key"),
     (r"AIza[0-9A-Za-z-_]{35}", "Google API Key"),
+    (r"hf_[A-Za-z0-9]{34}", "HuggingFace Token"),
+    (r"xox[baprs]-[A-Za-z0-9\-]{10,}", "Slack Token"),
+    (r"AKIA[0-9A-Z]{16}", "AWS Access Key ID"),
     (r"-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----", "Private Key Header"),
 ]
 
 
-def run_git(args: list[str], check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git"] + args, check=check, text=True, capture_output=capture)
+def run_git(args: list[str], check: bool = True, capture: bool = True, cwd=None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git"] + args, check=check, text=True, capture_output=capture, cwd=cwd)
 
 
 def stage1_look() -> dict:
@@ -112,7 +120,7 @@ def stage1_look() -> dict:
     }
 
 
-def stage2_guard(changed_files: list[str]) -> list[str]:
+def stage2_guard(changed_files: list[str], repo: str = None) -> list[str]:
     safe_files = []
     blocked_files = []
 
@@ -134,7 +142,7 @@ def stage2_guard(changed_files: list[str]) -> list[str]:
         # 3. Diff content secret scan
         if p.is_file():
             try:
-                diff_res = run_git(["diff", "HEAD", "--", f_str], check=False)
+                diff_res = run_git(["diff", "HEAD", "--", f_str], check=False, cwd=repo)
                 diff_text = diff_res.stdout
                 leak_found = False
                 for pat, label in SECRET_CONTENT_PATTERNS:

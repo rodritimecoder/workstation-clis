@@ -1,7 +1,8 @@
 ---
 name: omnicli
 
-description: "Unified late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skills, pull one tool's exact contract, and invoke it with a bounded response. Also exposes the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081)."
+description: "ARCHIVED. Unified late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skills, pull one tool's exact contract, and invoke it with a bounded response. Also exposes the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). Retired 2026-10-20 in favour of the plain Agent Skills specification; kept as a measured, switchable front line via `skills-frontline gateway`."
+status: archived
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085, plus the optional embedding server :8087 used to re-rank search results (the catalog works without it). The decision port speaks either native /v1/systemone or the pplx-decider joint protocol v3; the protocol is auto-detected from the served model."
@@ -11,6 +12,14 @@ allowed-tools: "Bash(omnicli:*) Read"
 ---
 
 # `omnicli` — The Uber OmniCLI
+
+> **Archived.** Retired 2026-10-20 in favour of the plain Agent Skills
+> specification, which is the default front line. This copy is kept as a
+> measured, switchable alternative: `skills-frontline gateway` routes a
+> harness through this gateway, `skills-frontline shelf` restores the plain
+> specification. The two were compared on 61 golden routing queries with the
+> same model picking both ways — shelf 58/61, gateway 60/61. See
+> `docs/front-line-shelf-vs-gateway.md` in the canonical repository.
 
 One gateway, two faces, one catalog. An agent discovers a tool by *intent*,
 pulls the contract for that one tool, invokes it, and gets a bounded response.
