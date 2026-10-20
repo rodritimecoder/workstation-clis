@@ -167,7 +167,7 @@ def parse_doc_globs(content: str) -> list[str]:
         return []
     meta = m.group("meta")
 
-    d = re.search(r"^[ \t]+docs:[ \t]*(?P<inline>\[[^\]]*\])?[ \t]*$", meta, re.MULTILINE)
+    d = re.search(r"^[ \t]+docs:[ \t]*(?P<inline>\[[^\]]*\])?[ \t]*(?P<scalar>[^\n]*)$", meta, re.MULTILINE)
     if not d:
         return []
     globs: list[str] = []
@@ -175,6 +175,13 @@ def parse_doc_globs(content: str) -> list[str]:
     inline = d.group("inline")
     if inline:
         globs.extend(g.strip().strip("\"'") for g in inline.strip("[]").split(",") if g.strip())
+        return globs
+
+    # A scalar value. The collection's frontmatter convention keeps every
+    # metadata value a string, so the patterns are comma separated.
+    scalar = (d.group("scalar") or "").strip().strip("\"'")
+    if scalar:
+        globs.extend(g.strip().strip("\"'") for g in scalar.split(",") if g.strip())
         return globs
 
     # A block list: the "- item" lines that follow the key, at its indent.
