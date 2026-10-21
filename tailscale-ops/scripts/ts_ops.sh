@@ -119,7 +119,8 @@ except Exception as e:
 SERVICES=(
   "8080:llm — Qwen3.6-35B-A3B-Uncensored-Genesis-Final"
   "8081:audio — nemotron-asr"
-  "8083:decision — pplx-decider-flash-v1.2"
+  "8083:decision — StartLux-Decision-v1.1-4B-Instant"
+  "8082:decision-engine — StartLux-Decision-v1.1-4B-Instant"
   "8084:ocr-crispembed — CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec)"
   "8085:ocr-lighton — LightOnOCR-3-1B"
   "8086:reranker — jina-reranker-v2-base-multilingual"

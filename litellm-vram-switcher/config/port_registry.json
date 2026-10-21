@@ -23,12 +23,20 @@
       "role": "Speech-to-text, text-to-speech, forced alignment, voice cloning"
     },
     "8083": {
-      "alias": "local-decide-pplx",
-      "vram_mb": 3100,
+      "alias": "local-decide",
+      "vram_mb": 8200,
       "pinned": false,
-      "name": "pplx-decider-flash-v1.2",
-      "cmd": "sh $HOME/src/my-agent-skills/launchers/pplx-decider-flash.sh",
+      "name": "StartLux-Decision-v1.1-4B-Instant",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/startlux-decision.sh",
       "role": "The decision engine slot - bool / choice / score primitives"
+    },
+    "8082": {
+      "alias": "local-decide-engine",
+      "vram_mb": 0,
+      "pinned": false,
+      "name": "StartLux-Decision-v1.1-4B-Instant",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/startlux-decision.sh",
+      "role": "Internal engine of the :8083 decision slot - prompts in one micro-batch, not a client-facing API"
     },
     "8084": {
       "alias": "local-ocr-crispembed",

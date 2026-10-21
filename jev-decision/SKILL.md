@@ -11,7 +11,7 @@ description: >
   high-volume loops.
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
-compatibility: "Requires a local decision model on :8083. Speaks pplx-decider-flash v1.2 joint protocol v3, native llama.cpp /v1/systemone, and the legacy letter-logprob path; the engine picks the protocol from the served model."
+compatibility: "Requires a local decision model on :8083. Speaks the TypeSafe /v1/systemone API (StartLux-Decision, vllm-d3-mini), pplx-decider-flash v1.2 joint protocol v3, and the legacy letter-logprob path; the engine picks the protocol from the served model and names it in every result's `source`."
 metadata:
   creator: "kem_glitch"
   source_reel_id: "DdjOqRYNZZi"

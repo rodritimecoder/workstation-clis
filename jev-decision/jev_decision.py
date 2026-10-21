@@ -45,6 +45,19 @@ def _out(args, res: dict, compact: str) -> None:
         print(compact)
 
 
+def _split_options(values: list) -> list:
+    """`--options a,b,c` and `--options a b c` both mean three options.
+
+    A comma inside one token is always a separator: a single option that still
+    holds commas is a typo, and reading it as one option answers 100% confident
+    nonsense instead of failing.
+    """
+    out = []
+    for value in values:
+        out.extend(part.strip() for part in str(value).split(",") if part.strip())
+    return out
+
+
 def _check_source(args, res: dict) -> None:
     """The server is the point. Say so when it was not the one answering."""
     if res.get("source") == "heuristic_fallback":
@@ -154,6 +167,8 @@ def main():
     args = parser.parse_args()
     args.port = getattr(args, "port", 8083)
     args.json = getattr(args, "json", False)
+    if getattr(args, "options", None):
+        args.options = _split_options(args.options)
     engine = JevEngine(host=getattr(args, "host", None), port=args.port)
 
     if args.command == "doctor":

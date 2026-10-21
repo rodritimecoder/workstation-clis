@@ -67,6 +67,7 @@ class JevEngine:
         self.health_url = f"{self.scheme}://{self.host}:{self.port}/health"
 
         self._systemone_supported: Optional[bool] = None
+        self.model_name: Optional[str] = None
 
     # ---- backend selection ------------------------------------------------------
 
@@ -124,9 +125,26 @@ class JevEngine:
             req = urllib.request.Request(self.health_url)
             ctx = self.ssl_ctx if self.scheme == "https" else None
             with urllib.request.urlopen(req, timeout=0.8, context=ctx) as resp:
-                return resp.status == 200
+                if resp.status != 200:
+                    return False
+                self._learn_model_name(resp.read())
+                return True
         except Exception:
             return False
+
+    def _learn_model_name(self, body: bytes) -> None:
+        """A server that names itself is named in every `source` field."""
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return
+        if isinstance(payload, dict):
+            name = payload.get("model") or (payload.get("engine") or {}).get("name")
+            if name:
+                self.model_name = str(name)
+
+    def source_label(self) -> str:
+        return self.model_name or "systemone"
 
     def _encode_image(self, image: Optional[str]) -> Optional[str]:
         if not image:
@@ -303,11 +321,11 @@ class JevEngine:
         self._systemone_supported = True
         return data.get("answers") or {}
 
-    @staticmethod
-    def _map_answer(ans: Dict[str, Any], typ: str,
+    def _map_answer(self, ans: Dict[str, Any], typ: str,
                     levels: Optional[List[str]],
-                    source: str = "vllm_d3_mini_systemone") -> Dict[str, Any]:
+                    source: Optional[str] = None) -> Dict[str, Any]:
         """One server answer -> the engine's result shape."""
+        source = source or self.source_label()
 
         if typ == "noul":
             p_true = round(float(ans.get("noul", 0.0)), 4)

@@ -16,7 +16,8 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 |---|---|---|---|---|---|
 | `:8080` | `llm` | many (7) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
 | `:8081` | `audio` | many (3) | nemotron-asr | `run-audiocpp.sh` | Speech-to-text, text-to-speech, forced alignment, voice cloning |
-| `:8083` | `decision` | one-of-many (2) | pplx-decider-flash-v1.2 | `pplx-decider-flash.sh` | The decision engine slot - bool / choice / score primitives |
+| `:8083` | `decision` | one-of-many (3) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | The decision engine slot - bool / choice / score primitives |
+| `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Internal engine of the :8083 decision slot - prompts in one micro-batch, not a client-facing API |
 | `:8084` | `ocr-crispembed` | single (1) | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `crispembed-ocr.sh` | Scene text — 2D bounding boxes and structured markdown |
 | `:8085` | `ocr-lighton` | single (1) | LightOnOCR-3-1B | `lighton-ocr.sh` | Documents, PDFs and slides — fast prefill, high-throughput markdown |
 | `:8086` | `reranker` | single (1) | jina-reranker-v2-base-multilingual | `jina-reranker.sh` | Cross-encoder reranking for RAG |

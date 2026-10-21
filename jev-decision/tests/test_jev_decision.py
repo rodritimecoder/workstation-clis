@@ -36,7 +36,7 @@ class TestJevDecision(unittest.TestCase):
         res = self.engine.decide_bool(ctx, q)
         self.assertIn("decision", res)
         self.assertIn("confidence", res)
-        self.assertIn(res["source"], ["vllm_d3_mini_systemone", "heuristic_fallback"])
+        self.assertTrue(res["source"], "every answer names where it came from")
         print("  ✓ bool · verified")
 
     def test_02_choice_primitive(self):
@@ -132,7 +132,7 @@ class TestJevDecision(unittest.TestCase):
         res = remote_engine.decide_bool("Tailscale cluster state verification.", "Is cluster network operational?")
         self.assertIn("decision", res)
         self.assertIn("confidence", res)
-        self.assertEqual(res["source"], "vllm_d3_mini_systemone")
+        self.assertNotEqual(res["source"], "heuristic_fallback")
         print(f"  ✓ remote tailscale bool decision ({res['decision']}, conf={res['confidence']*100:.1f}%) · verified")
 
 
@@ -210,8 +210,31 @@ class TestCliContract(unittest.TestCase):
             self.assertEqual(json.loads(out.read_text())["primitive"], "bool")
 
 
+    def test_16_comma_separated_options_are_split(self):
+        """`--options a,b,c` means three options, not one option with commas."""
+        proc = subprocess.run(
+            [sys.executable, str(CLI), "--json", "choice",
+             "--context", "The certificate expired at 03:00 and payments stopped.",
+             "--question", "Which team owns this?",
+             "--options", "infra,payments,docs"],
+            capture_output=True, text=True, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        res = json.loads(proc.stdout)
+        self.assertIn(res["selection"], ["infra", "payments", "docs"])
+        self.assertEqual(sorted(res["probabilities"]), ["docs", "infra", "payments"])
+
+    def test_17_source_names_the_served_model(self):
+        engine = JevEngine()
+        if not engine.is_online():
+            self.skipTest("no decision server online")
+        res = engine.decide_bool("The build passed every test.", "Did the build succeed?")
+        self.assertNotEqual(res["source"], "heuristic_fallback")
+        if engine.model_name:
+            self.assertEqual(res["source"], engine.model_name)
+
+
 if __name__ == "__main__":
-    print("\n🧪 Running vllm-d3-mini (vision) Decision Test Suite:")
+    print("\n🧪 Running the decision test suite:")
     suite = unittest.TestLoader().loadTestsFromTestCase(TestJevDecision)
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(TestCliContract))
     runner = unittest.TextTestRunner(verbosity=0)
