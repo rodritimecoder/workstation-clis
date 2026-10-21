@@ -192,7 +192,12 @@ MAX_BLOB_SIZE_MB = 50.0
 # portability bug: override it with AI_ROOT on a machine that mounts elsewhere.
 AI_ROOT = Path(os.environ.get("AI_ROOT", "/run/media/rodri/AI"))
 
+# The skills hub is checked out once per machine at this path on every OS; the
+# AI volume only exists on the Linux box, so the hub must not live inside it.
+SKILLS_CHECKOUT = Path(os.environ.get("SKILLS_CANONICAL", Path.home() / "src" / "my-agent-skills"))
+
 FLEET_SEARCH_PATHS = [
+    SKILLS_CHECKOUT.parent,
     AI_ROOT,
     Path.home() / "workspace",
     Path.home(),
@@ -812,7 +817,7 @@ def cmd_bootstrap(dest_dir: Optional[Path] = None):
 
     for repo in CORE_REPOSITORIES:
         repo_name = repo["name"]
-        target_path = dest_dir / repo["target"]
+        target_path = SKILLS_CHECKOUT if repo_name == "my-agent-skills" else dest_dir / repo["target"]
         repo_slug = f"{user}/{repo_name}"
 
         if (target_path / ".git").is_dir():
@@ -830,9 +835,11 @@ def cmd_bootstrap(dest_dir: Optional[Path] = None):
     local_bin = Path.home() / ".local" / "bin"
     local_bin.mkdir(parents=True, exist_ok=True)
 
-    skills_dir = dest_dir / "skills"
-    if not skills_dir.exists():
-        skills_dir = dest_dir / "my-agent-skills"
+    skills_dir = SKILLS_CHECKOUT
+    if not (skills_dir / "sync_skills.sh").is_file():
+        skills_dir = dest_dir / "skills"
+        if not skills_dir.exists():
+            skills_dir = dest_dir / "my-agent-skills"
 
     if skills_dir.is_dir():
         sync_script = skills_dir / "sync_skills.sh"

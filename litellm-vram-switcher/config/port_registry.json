@@ -11,7 +11,7 @@
       "vram_mb": 20500,
       "pinned": true,
       "name": "Qwen3.6-35B-A3B-Uncensored-Genesis-Final",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/luffy_nothink.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/luffy_nothink.sh",
       "role": "Primary generative LLM \u2014 chat, code, long-form writing, prose projection"
     },
     "8081": {
@@ -19,7 +19,7 @@
       "vram_mb": 2500,
       "pinned": false,
       "name": "nemotron-asr",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/run-audiocpp.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/run-audiocpp.sh",
       "role": "Speech-to-text, text-to-speech, forced alignment, voice cloning"
     },
     "8083": {
@@ -27,7 +27,7 @@
       "vram_mb": 3100,
       "pinned": false,
       "name": "pplx-decider-flash-v1.2",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/pplx-decider-flash.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/pplx-decider-flash.sh",
       "role": "The decision engine slot - bool / choice / score primitives"
     },
     "8084": {
@@ -35,7 +35,7 @@
       "vram_mb": 1200,
       "pinned": false,
       "name": "CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec)",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/crispembed-ocr.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/crispembed-ocr.sh",
       "role": "Scene text \u2014 2D bounding boxes and structured markdown"
     },
     "8085": {
@@ -43,7 +43,7 @@
       "vram_mb": 1500,
       "pinned": false,
       "name": "LightOnOCR-3-1B",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/lighton-ocr.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/lighton-ocr.sh",
       "role": "Documents, PDFs and slides \u2014 fast prefill, high-throughput markdown"
     },
     "8086": {
@@ -51,7 +51,7 @@
       "vram_mb": null,
       "pinned": false,
       "name": "jina-reranker-v2-base-multilingual",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/jina-reranker.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/jina-reranker.sh",
       "role": "Cross-encoder reranking for RAG"
     },
     "8087": {
@@ -59,7 +59,7 @@
       "vram_mb": null,
       "pinned": false,
       "name": "bge-small-en-v1.5",
-      "cmd": "sh /run/media/rodri/AI/skills/launchers/bge-small.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/bge-small.sh",
       "role": "Vector embeddings for RAG and semantic caching"
     }
   }
