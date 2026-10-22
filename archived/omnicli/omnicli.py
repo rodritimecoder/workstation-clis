@@ -224,8 +224,8 @@ SERVICES = [
     {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection", "probe": "/health"},
     {"port": 8085, "name": "LightOnOCR Flagship OCR", "role": "Document and slide OCR", "probe": "/health"},
     {"port": 8087, "name": "Embedding Server (BGE / EmbeddingGemma)", "role": "Optional re-ranker for catalog search", "probe": "/health"},
-    {"port": 8089, "name": "OneJev1.5-4B Decision Fallback", "role": "Calibrated decision fallback", "probe": "/health"},
-    {"port": 8090, "name": "JPT-4B Decision Engine", "role": "System One gating with vision", "probe": "/health"},
+    {"port": 8089, "name": "Decision Fallback (Imajev-4B)", "role": "Second opinion / A-B against :8083", "probe": "/health"},
+    {"port": 8090, "name": "JPT-4B (retired)", "role": "Archived slot; shown until the port is reused", "probe": "/health"},
     {"port": 9222, "name": "Chromium CDP DevTools", "role": "Direct WebSocket/CDP browser control", "probe": "/json/version"},
 ]
 
