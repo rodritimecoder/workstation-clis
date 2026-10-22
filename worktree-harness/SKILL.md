@@ -76,6 +76,8 @@ swarm-dispatch \
 
 ---
 
+---
+
 ## AGENTS.md rule
 
 ## Parallel edits: worktrees and file ranges

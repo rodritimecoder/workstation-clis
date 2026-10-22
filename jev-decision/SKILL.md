@@ -128,11 +128,13 @@ answers off the caller's token stream.
 
 ---
 
+---
+
 ## AGENTS.md rule
 
 ## Decisions: use the calibrated engine
 When a question is a judgement (is this true, which option, how good, pass or fail), run:
-jev bool --context "<context>"      # or: choice, score, composite
+jev bool --context "<context>" --question "<question>"   # or: choice, score, composite
 - Use the returned probability, not your own confidence.
 - A boolean needs a decision, not a hedge. If the probability is low, say why.
 - The engine never invents facts: give it the context it needs, in the file's own words.

@@ -66,6 +66,8 @@ python3 $GH install-git-hook
 
 ---
 
+---
+
 ## AGENTS.md rule
 
 ## Guardrails
