@@ -61,3 +61,16 @@ python3 $GH wrap git push --force origin main
 # 5. Install the git hook so every commit and push is checked
 python3 $GH install-git-hook
 ```
+
+---
+
+---
+
+## AGENTS.md rule
+
+## Guardrails
+Before running anything destructive, run it through the guard:
+python3 <path>/guard_hooks.py check "<command>"
+- `rm -rf`, force push, `drop table` and similar are refused by the hook, not by you.
+- Protected files (KeepMD, STATE.md, .env, secrets) are never deleted or edited without an explicit instruction.
+- If the guard refuses, stop and report. Do not find another way to do it.

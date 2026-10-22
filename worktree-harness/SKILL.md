@@ -71,3 +71,16 @@ swarm-dispatch \
 ## Reference
 
 - `references/architecture.md` — how the run directory, worktrees and event log fit together
+
+---
+
+---
+
+## AGENTS.md rule
+
+## Parallel edits: worktrees and file ranges
+When more than one agent will edit this repository, run:
+worktree-harness start ...
+worktree-harness claim --run-id <run> --worker <agent> --file "<path>" --lines "<range>"
+- Two agents never write the same file range. Claims are enforced, not trusted.
+- Every branch is gated on the project's own tests before it is integrated.
