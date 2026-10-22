@@ -38,6 +38,14 @@
       "cmd": "sh $HOME/src/my-agent-skills/launchers/startlux-decision.sh",
       "role": "Internal engine of the :8083 decision slot - prompts in one micro-batch, not a client-facing API"
     },
+    "8089": {
+      "alias": "local-decide-fallback",
+      "vram_mb": 0,
+      "pinned": false,
+      "name": "Imajev-4B",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/imajev-decider.sh",
+      "role": "Secondary decision engine \u2014 Imajev-4B chat path, or letter/readout with READOUT=1"
+    },
     "8084": {
       "alias": "local-ocr-crispembed",
       "vram_mb": 1200,
