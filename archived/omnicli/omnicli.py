@@ -19,13 +19,17 @@ tools, and as a direct subcommand for interactive use.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as futures
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -168,46 +172,78 @@ def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.35) -> boo
         return False
 
 
-def _service_online(port: int, ts_addr: str | None) -> bool:
-    """A service counts as online if loopback *or* the tailnet answers.
+def _http_status(port: int, path: str, host: str = "127.0.0.1", timeout: float = 0.8) -> int | None:
+    try:
+        request = urllib.request.Request(f"http://{host}:{port}{path}", method="GET")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
 
-    Several daemons on this box bind only the Tailscale interface, so a
-    loopback-only probe reports them as dead while they are serving.
+
+def _serve_proxied_ports() -> set[int]:
+    """Ports where `tailscale serve` owns the tailnet listener.
+
+    On those, an open tailnet port proves the proxy is alive, not the backend:
+    a proxied port with a dead local service still accepts connections.
     """
+    try:
+        proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=6)
+        if proc.returncode != 0:
+            return set()
+        return {int(port) for port in re.findall(r"^https://\S+:(\d+) \(", proc.stdout, re.MULTILINE)}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return set()
+
+
+def _service_state(service: dict, ts_addr: str | None, proxied: set[int]) -> str:
+    """HTTP on loopback is authoritative; TCP alone is never proof of health.
+
+    Returns ONLINE (2xx), DEGRADED (process reachable but not answering
+    healthily) or OFFLINE (nothing there).
+    """
+    port = service["port"]
+    code = _http_status(port, service.get("probe", "/health"))
+    if code is not None:
+        return "ONLINE" if 200 <= code < 300 else "DEGRADED"
     if _port_open(port):
-        return True
-    if ts_addr and _port_open(port, ts_addr):
-        return True
-    return False
+        return "DEGRADED"
+    if ts_addr and port not in proxied and _port_open(port, ts_addr):
+        return "ONLINE"
+    return "OFFLINE"
 
 
 SERVICES = [
-    {"port": 4000, "name": "LiteLLM Dynamic Gateway", "role": "Multi-model proxy & failover"},
-    {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper"},
-    {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU flagship coder"},
-    {"port": 8081, "name": "audio.cpp ASR & TTS", "role": "Streaming speech-to-text / TTS"},
-    {"port": 8083, "name": "Decision Gating", "role": "Premier calibrated decisions (protocol auto-detected)"},
-    {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection"},
-    {"port": 8085, "name": "LightOnOCR Flagship OCR", "role": "Document and slide OCR"},
-    {"port": 8087, "name": "Embedding Server (BGE / EmbeddingGemma)", "role": "Optional re-ranker for catalog search"},
-    {"port": 8089, "name": "OneJev1.5-4B Decision Fallback", "role": "Calibrated decision fallback"},
-    {"port": 8090, "name": "JPT-4B Decision Engine", "role": "System One gating with vision"},
-    {"port": 9222, "name": "Chromium CDP DevTools", "role": "Direct WebSocket/CDP browser control"},
+    {"port": 4000, "name": "LiteLLM Dynamic Gateway", "role": "Multi-model proxy & failover", "probe": "/health/liveliness"},
+    {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper", "probe": "/v1/models"},
+    {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU flagship coder", "probe": "/health"},
+    {"port": 8081, "name": "audio.cpp ASR & TTS", "role": "Streaming speech-to-text / TTS", "probe": "/health"},
+    {"port": 8083, "name": "Decision Gating", "role": "Premier calibrated decisions (protocol auto-detected)", "probe": "/health"},
+    {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection", "probe": "/health"},
+    {"port": 8085, "name": "LightOnOCR Flagship OCR", "role": "Document and slide OCR", "probe": "/health"},
+    {"port": 8087, "name": "Embedding Server (BGE / EmbeddingGemma)", "role": "Optional re-ranker for catalog search", "probe": "/health"},
+    {"port": 8089, "name": "OneJev1.5-4B Decision Fallback", "role": "Calibrated decision fallback", "probe": "/health"},
+    {"port": 8090, "name": "JPT-4B Decision Engine", "role": "System One gating with vision", "probe": "/health"},
+    {"port": 9222, "name": "Chromium CDP DevTools", "role": "Direct WebSocket/CDP browser control", "probe": "/json/version"},
 ]
 
 
 def cmd_status(as_json: bool = False):
     ts_addr = _tailscale_address()
+    proxied = _serve_proxied_ports()
+    with futures.ThreadPoolExecutor(max_workers=len(SERVICES)) as pool:
+        states = list(pool.map(lambda service: _service_state(service, ts_addr, proxied), SERVICES))
     results = []
-    for s in SERVICES:
-        online = _service_online(s["port"], ts_addr)
+    for service, state in zip(SERVICES, states):
         results.append({
-            "service": s["name"],
-            "port": s["port"],
-            "status": "ONLINE" if online else "OFFLINE",
-            "local_url": f"http://127.0.0.1:{s['port']}",
-            "tailnet_url": f"http://{ts_addr}:{s['port']}" if ts_addr else "",
-            "role": s["role"],
+            "service": service["name"],
+            "port": service["port"],
+            "status": state,
+            "local_url": f"http://127.0.0.1:{service['port']}",
+            "tailnet_url": f"http://{ts_addr}:{service['port']}" if ts_addr else "",
+            "role": service["role"],
         })
 
     catalog_info = {}
@@ -245,8 +281,8 @@ def cmd_status(as_json: bool = False):
     print("   " + f"{'SERVICE':<42} │ {'STATUS':<10} │ ENDPOINT")
     print("   " + "─" * 43 + "┼" + "─" * 12 + "┼" + "─" * 26)
     for r in results:
-        icon = "🟢 ONLINE " if r["status"] == "ONLINE" else "⚪ OFFLINE"
-        ep = r["local_url"] if r["status"] == "ONLINE" else ""
+        icon = {"ONLINE": "🟢 ONLINE", "DEGRADED": "🟡 DEGRADED"}.get(r["status"], "⚪ OFFLINE")
+        ep = r["local_url"] if r["status"] != "OFFLINE" else ""
         print(f"   {r['service']:<42} │ {icon:<10} │ {ep}")
 
     print()
