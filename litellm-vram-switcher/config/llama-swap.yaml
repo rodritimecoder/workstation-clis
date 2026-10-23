@@ -53,16 +53,38 @@ models:
     ttl: 0
 
   # ============================================================
-  # 2. Premier Decision: pplx-decider-flash v1.2 (4B) — JEV DECISION MODEL
-  #    Native llama.cpp decision model (qwen35.decision.type=pplx-decider).
-  #    Needs non-causal attention and runs in embedding mode: the readout head
-  #    is applied client-side at each <|fim_suffix|> marker.
+  # 2. Premier Decision: vllm-d3-nano (2.39B) — JEV DECISION MODEL
+  #    Native /v1/systemone decision model (qwen35 decision_type=vllm-d3).
+  #    Non-causal, calibrated probabilities, vision via mmproj.
   # ============================================================
-  "pplx-decider-flash":
+  "vllm-d3-nano":
     aliases:
       - "agent-classifier"
       - "local-classifier-jev"
       - "jev-decision"
+      - "local-decide"
+    cmd: >
+      ${server_upstream_vulkan}
+      -m /run/media/rodri/AI/models/ggml-org/vllm-d3-nano-GGUF/vllm-d3-nano-Q4_K_M.gguf
+      --mmproj /run/media/rodri/AI/models/ggml-org/vllm-d3-nano-GGUF/mmproj-vllm-d3-nano-Q8_0.gguf
+      --host 127.0.0.1
+      --port ${PORT}
+      -ngl 99
+      -c 8192
+      -b 8192
+      -ub 4096
+      --no-warmup
+    proxy: "http://127.0.0.1:${PORT}"
+    ttl: 600
+
+  # ============================================================
+  # 2b. Retired: pplx-decider-flash v1.2 (4B) — legacy pplx client only
+  #     Native llama.cpp decision model (qwen35.decision.type=pplx-decider).
+  #     Needs non-causal attention and runs in embedding mode: the readout head
+  #     is applied client-side at each <|fim_suffix|> marker.
+  # ============================================================
+  "pplx-decider-flash":
+    aliases:
       - "pplx-decider"
     cmd: >
       ${server_upstream_vulkan}
@@ -204,7 +226,7 @@ swap:
   matrix:
     vars:
       q: "qwen3.6-35b"
-      p: "pplx-decider-flash"
+      p: "vllm-d3-nano"
       v: "vllm-d3-mini"
       i: "imajev-4b"
       l: "lighton-ocr"
@@ -221,7 +243,7 @@ swap:
       l: 10
 
     sets:
-      # Pinned King (22G) + Premier Decision pplx-decider-flash (3.1G) + OCR (1.5G) = 27 GB <= 32 GB
+      # Pinned King (22G) + Premier Decision vllm-d3-nano (3.5G) + OCR (1.5G) = 27 GB <= 32 GB
       standard_trio: "q & p & l"
 
       # Pinned King (22G) + GUI Browser Grounding (3.5G) + OCR (1.5G) = 27 GB <= 32 GB

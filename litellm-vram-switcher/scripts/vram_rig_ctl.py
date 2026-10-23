@@ -90,6 +90,21 @@ def get_vram_info():
     return {"total_mb": budget, "used_mb": 0, "free_mb": budget, "backend": "simulated-budget"}
 
 
+def _binds_loopback(line, port):
+    """True when the listener's local address is loopback or a wildcard.
+
+    `ss` also reports remote proxies such as `tailscale serve`, which bind the
+    tailnet IP (e.g. `100.x.x.x%tailscale0:8083`) and would otherwise make a
+    stopped service look alive. Only loopback/wildcard binds are the real
+    service.
+    """
+    for tok in line.split():
+        if tok.endswith(f":{port}"):
+            addr = tok.rsplit(":", 1)[0].strip("[]")
+            return addr.startswith("127.") or addr in {"0.0.0.0", "::", "::1", "*", "localhost"}
+    return False
+
+
 def get_listening_ports(start_port=8080, end_port=8090):
     """Return dict of {port_str: {'pid': int, 'process': str}} for active TCP listeners."""
     active = {}
@@ -101,12 +116,14 @@ def get_listening_ports(start_port=8080, end_port=8090):
             out = subprocess.check_output(["ss", "-tulpn"], stderr=subprocess.DEVNULL, text=True)
             for line in out.splitlines():
                 for port in target_ports:
-                    if f":{port} " in line:
+                    if f":{port} " in line and _binds_loopback(line, port):
                         m = re.search(r'users:\(\("([^"]+)",pid=(\d+)', line)
                         if m:
-                            active[str(port)] = {"process": m.group(1), "pid": int(m.group(2))}
+                            entry = {"process": m.group(1), "pid": int(m.group(2))}
                         else:
-                            active[str(port)] = {"process": "unknown", "pid": None}
+                            entry = {"process": "unknown", "pid": None}
+                        if active.get(str(port), {}).get("pid") is None:
+                            active[str(port)] = entry
             return active
         except Exception:
             pass

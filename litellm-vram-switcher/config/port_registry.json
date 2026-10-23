@@ -24,10 +24,10 @@
     },
     "8083": {
       "alias": "local-decide",
-      "vram_mb": 8240,
+      "vram_mb": 3600,
       "pinned": false,
-      "name": "pplx-decider-flash-v1.2",
-      "cmd": "sh $HOME/src/my-agent-skills/launchers/pplx-decider-flash.sh",
+      "name": "vllm-d3-nano",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/vllm-d3-nano.sh",
       "role": "The decision engine slot - bool / choice / score primitives"
     },
     "8082": {
