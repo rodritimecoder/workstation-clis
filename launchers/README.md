@@ -31,6 +31,8 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:3010` | `kasmvnc` | KasmVNC (podman) | Live interactive web desktop for browser inspection |
 | `:9222` | `cdp` | Chromium DevTools | CDP endpoint used by fast-cdp and Playwright |
 | `:9223` | `cdp-internal` | labwc forwarder | Container-internal forwarder 0.0.0.0:9222 -> 127.0.0.1:9223 |
+| `:8761` | `clip-box` | h2o-lightning shim | Box grounding and typed decisions; Python shim, box questions need LIGHTNING_BOX_ENABLED=1 |
+| `:8621` | `clip-box-backend` | llama-server (private backend) | Pinned stock llama.cpp the h2o-lightning shim drives; one full-context slot, loopback only |
 <!-- ports:end -->
 
 ---

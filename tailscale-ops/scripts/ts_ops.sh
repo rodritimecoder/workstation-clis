@@ -131,6 +131,8 @@ SERVICES=(
   "3010:kasmvnc — KasmVNC (podman)"
   "9222:cdp — Chromium DevTools"
   "9223:cdp-internal — labwc forwarder"
+  "8761:clip-box — h2o-lightning shim"
+  "8621:clip-box-backend — llama-server (private backend)"
 )
 # ports:end
 
