@@ -106,7 +106,34 @@ CHAT_CASCADE = [
     },
 ]
 
+# JEV models speak OpenRouter's /api/alpha/decisions endpoint (typed noul/choice/score/box).
+JEV_DECISION_MODELS = [
+    "baseten/mammoth-1:free",   # 27B - heavier reasoning, complex multi-question decisions
+    "baseten/elephant-1:free",  # 9B  - fast, simple decisions
+    "inception/mercury-decide:free",
+]
+
+def _is_jev_model(model: str) -> bool:
+    m = (model or "").lower()
+    return (
+        "mammoth" in m
+        or "elephant" in m
+        or "inception" in m
+        or "decide" in m
+        or m in {x.lower() for x in JEV_DECISION_MODELS}
+    )
+
+
+def _jev_cascade_for(query: str, options: list = None) -> list:
+    # Optimise routing: fast 9B for simple/binary, 27B for richer multi-option decisions.
+    if options and len(options) >= 3:
+        return ["baseten/mammoth-1:free", "baseten/elephant-1:free", "inception/mercury-decide:free"]
+    return ["baseten/elephant-1:free", "baseten/mammoth-1:free", "inception/mercury-decide:free"]
+
+
 DECIDE_CASCADE = [
+    "baseten/elephant-1:free",
+    "baseten/mammoth-1:free",
     "inception/mercury-decide:free",
     "nvidia/nemotron-3.5-lightning:free",
     "openrouter/free",
@@ -425,57 +452,94 @@ def _normalize_verdict(text: str, options: list = None) -> tuple:
     return cleaned, confidence
 
 
-def run_decide(query: str, options: list = None, preferred_model: str = None):
+def run_decide(query: str, options: list = None, preferred_model: str = None,
+               state: str = None, questions: dict = None):
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is required for decide mode.")
 
-    model = preferred_model or DECIDE_CASCADE[0]
+    # Resolve the JEV candidate list (fast-first or complexity-optimised).
+    if preferred_model and _is_jev_model(preferred_model):
+        jev_candidates = [preferred_model]
+    elif preferred_model:
+        jev_candidates = []
+    else:
+        jev_candidates = _jev_cascade_for(query, options)
 
-    if "inception" in model or "decide" in model:
+    # Build the questions payload (full schema passthrough or derived from query/options).
+    effective_state = state or query
+    if questions is not None:
+        q_payload = questions
+    elif options:
+        criteria = {opt: "The option '%s' applies to: %s" % (opt, query) for opt in options}
+        q_payload = {
+            "decision": {
+                "type": "choice",
+                "instructions": query,
+                "criteria": criteria,
+            }
+        }
+    else:
+        q_payload = {
+            "decision": {
+                "type": "noul",
+                "instructions": query,
+                "criteria": {
+                    "true": "The condition or statement holds / is true.",
+                    "false": "The condition or statement does not hold / is false.",
+                },
+            }
+        }
+
+    alpha_url = "https://openrouter.ai/api/alpha/decisions"
+    for model in jev_candidates:
         try:
-            if options:
-                criteria = {opt: f"The option '{opt}' applies to: {query}" for opt in options}
-                questions = {
-                    "decision": {
-                        "type": "choice",
-                        "instructions": query,
-                        "criteria": criteria,
-                    }
-                }
-            else:
-                questions = {
-                    "decision": {
-                        "type": "bool",
-                        "instructions": query,
-                    }
-                }
-
             dec_payload = {
                 "model": model,
-                "state": query,
-                "questions": questions,
+                "state": effective_state,
+                "questions": q_payload,
             }
-            res = _http_post_json("https://openrouter.ai/api/alpha/decisions", dec_payload, api_key, timeout=45)
-            ans = res.get("answers", {}).get("decision", {})
-            return {
+            res = _http_post_json(alpha_url, dec_payload, api_key, timeout=45)
+            answers = res.get("answers", {})
+            ans = answers.get("decision", {}) if isinstance(answers, dict) else {}
+            # Normalise verdict across noul / choice / score / box answer shapes.
+            verdict = None
+            confidence = ans.get("confidence")
+            noul = ans.get("noul")
+            if "choice" in ans:
+                verdict = ans.get("choice")
+            elif noul is not None:
+                verdict = "true" if (noul >= 0.5) else "false"
+                confidence = confidence if confidence is not None else max(noul, 1.0 - noul)
+            elif "score" in ans:
+                verdict = ans.get("score")
+            else:
+                verdict = ans.get("verdict") or ans.get("decision")
+            result = {
                 "status": "success",
                 "model": res.get("model", model),
-                "verdict": ans.get("choice") or ans.get("verdict") or ans.get("decision"),
+                "verdict": verdict,
                 "probabilities": ans.get("probabilities", {}),
-                "confidence": ans.get("confidence"),
+                "confidence": confidence,
+                "answers": answers,
                 "raw": ans,
             }
-        except Exception:
-            pass
+            if noul is not None:
+                result["noul"] = noul
+            return result
+        except Exception as e:
+            sys.stderr.write("[openrouter-free decide] %s error: %s\n" % (model, str(e)[:200]))
+            continue
 
+    # Chat fallback (non-JEV or all JEV endpoints exhausted).
+    chat_model = preferred_model if (preferred_model and not _is_jev_model(preferred_model)) else "nvidia/nemotron-3.5-lightning:free"
     prompt_text = query
     if options:
-        opts_formatted = "\n".join(f"- {o}" for o in options)
-        prompt_text = f"{query}\n\nSelect strictly one of these options:\n{opts_formatted}"
+        opts_formatted = "\n".join("- %s" % o for o in options)
+        prompt_text = "%s\n\nSelect strictly one of these options:\n%s" % (query, opts_formatted)
 
     payload = {
-        "model": "nvidia/nemotron-3.5-lightning:free",
+        "model": chat_model,
         "messages": [
             {"role": "system", "content": "You are a calibrated zero-shot decision router. Give your verdict with confidence score."},
             {"role": "user", "content": prompt_text},
@@ -487,12 +551,11 @@ def run_decide(query: str, options: list = None, preferred_model: str = None):
     verdict, confidence = _normalize_verdict(content, options)
     return {
         "status": "success",
-        "model": "nvidia/nemotron-3.5-lightning:free",
+        "model": chat_model,
         "verdict": verdict,
         "confidence": confidence,
         "raw_text": content.strip(),
     }
-
 
 def run_batched_embeddings(inputs: list, preferred_model: str = None, out_json: str = None):
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
@@ -656,14 +719,25 @@ def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
     if live_probe and auth_ok:
         t0 = time.time()
         try:
-            dec_res = run_decide("Is 2+2=4?", options=["yes", "no"])
-            live_results["mercury_decide"] = {
+            dec_res = run_decide("Is 2+2=4?", options=["yes", "no"], preferred_model="baseten/elephant-1:free")
+            live_results["elephant_jev"] = {
                 "status": "online",
                 "verdict": dec_res.get("verdict"),
                 "latency_ms": int((time.time() - t0) * 1000),
             }
         except Exception as e:
-            live_results["mercury_decide"] = {"status": "error", "error": str(e)}
+            live_results["elephant_jev"] = {"status": "error", "error": str(e)}
+
+        t0 = time.time()
+        try:
+            dec_res = run_decide("Is 2+2=4?", options=["yes", "no"], preferred_model="baseten/mammoth-1:free")
+            live_results["mammoth_jev"] = {
+                "status": "online",
+                "verdict": dec_res.get("verdict"),
+                "latency_ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:
+            live_results["mammoth_jev"] = {"status": "error", "error": str(e)}
 
     status_str = "HEALTHY" if auth_ok else "UNHEALTHY"
 
@@ -745,10 +819,12 @@ def main():
     p_chat.add_argument("--project", default=None, help="Comma-separated fields to project")
     p_chat.add_argument("--jq", default=None, help="JQ filter expression")
 
-    p_decide = sub.add_parser("decide", help="Calibrated decision routing (Mercury Decide)")
-    p_decide.add_argument("--query", required=True, help="Question or routing prompt")
+    p_decide = sub.add_parser("decide", help="Calibrated decision routing (JEV: mammoth/elephant/mercury)")
+    p_decide.add_argument("--query", required=True, help="Question or routing prompt (also used as state if --state omitted)")
     p_decide.add_argument("--options", nargs="*", default=None, help="List of candidate options")
     p_decide.add_argument("--model", default=None, help="Specific model override")
+    p_decide.add_argument("--state", default=None, help="State text for the decision (defaults to --query)")
+    p_decide.add_argument("--questions-json", default=None, help="Full questions object as JSON or @file (multi-question JEV)")
     p_decide.add_argument("--out", default=None, help="Save output to file")
     p_decide.add_argument("--project", default=None, help="Comma-separated fields to project")
     p_decide.add_argument("--jq", default=None, help="JQ filter expression")
@@ -794,7 +870,13 @@ def main():
             print(out)
             sys.exit(0)
         elif args.mode == "decide":
-            raw = json.dumps(run_decide(args.query, args.options, args.model), indent=2)
+            questions = None
+            if args.questions_json:
+                qstr = args.questions_json
+                if qstr.startswith("@"):
+                    qstr = Path(qstr[1:]).read_text(encoding="utf-8")
+                questions = json.loads(qstr)
+            raw = json.dumps(run_decide(args.query, args.options, args.model, state=args.state, questions=questions), indent=2)
             out = apply_response_projection(raw, args.project, args.jq)
             if args.out:
                 Path(args.out).write_text(out, encoding="utf-8")

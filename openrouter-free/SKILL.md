@@ -27,7 +27,7 @@ Use this skill to delegate self-contained coding loops, multi-command bash workf
 - **Reasoning & Code (Heavy)**: `nvidia/nemotron-3-ultra-550b-a55b:free`
 - **Fast Subagent Coding**: `nvidia/nemotron-3.5-lightning:free`
 - **General Free Router**: `openrouter/free`
-- **Calibrated Decisions**: `inception/mercury-decide:free`
+- **Calibrated Decisions (JEV)**: `baseten/mammoth-1:free` (27B, heavy/complex), `baseten/elephant-1:free` (9B, fast/simple), `inception/mercury-decide:free`
 - **Vector Embeddings**: `liquid/lfm-2.5-embedding-350m:free` & `nvidia/llama-nemotron-embed-vl-1b-v2:free`
 - **Neural Reranking**: `nvidia/llama-nemotron-rerank-vl-1b-v2:free`
 - **TTS Speech Audio**: `fish-audio/s2.1-pro-free:free`
@@ -82,7 +82,7 @@ openrouter-free chat \
 ```
 
 ### 4. Calibrated Decision Routing (`decide`)
-Discrete triage and confidence scoring via Mercury Decide with optional field projection:
+Typed, non-generative decisions via the JEV models (`baseten/mammoth-1:free` 27B, `baseten/elephant-1:free` 9B) and Mercury Decide, with optional field projection. Routing is optimised: the fast 9B handles simple/binary decisions, the 27B handles richer multi-option decisions. Full multi-question payloads are supported via `--questions-json`:
 ```bash
 # Full response
 openrouter-free decide \
@@ -94,6 +94,13 @@ openrouter-free decide \
   --query "Is 100 greater than 10?" \
   --options "yes" "no" \
   --project verdict,confidence
+
+# Force a specific JEV model
+openrouter-free decide --query "Is this urgent?" --model baseten/mammoth-1:free
+
+# Multi-question typed decision (noul/choice/score) in one call
+openrouter-free decide --query "Triage this ticket" --state "Help! My payouts have been failing for 3 days." \
+  --questions-json '{"is_urgent":{"type":"noul","instructions":"Does this message convey urgency?","criteria":{"true":"Explicitly time-sensitive","false":"No urgency expressed"}},"department":{"type":"choice","instructions":"Which team should handle this?","criteria":{"billing":"Payments, invoicing, refunds","technical":"Bugs, outages, integrations","sales":"Pricing, upgrades, new accounts"}}}'
 ```
 
 ### 5. Batched Vector Embeddings (`embed`)
