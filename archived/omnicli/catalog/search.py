@@ -74,6 +74,27 @@ RERANK_CANDIDATES = 20
 # a small fraction of the top score.
 RERANK_GATE_MARGIN = 0.25
 
+# The re-ranker is a tri-state: off, gated, forced. Every caller passes it as
+# a string (`--rerank auto|always|never`), and `search` used to compare that
+# string against `True` — so `always` silently behaved like `never`. One
+# normaliser, called once, so a new caller cannot re-introduce the bug.
+RERANK_MODES = {
+    "always": True, "on": True, "true": True, "force": True,
+    "never": False, "off": False, "false": False, "none": False,
+    "auto": "auto",
+}
+
+
+def normalize_rerank(mode: bool | str | None) -> bool | str:
+    if isinstance(mode, bool):
+        return mode
+    if mode is None:
+        return False
+    if isinstance(mode, str):
+        return RERANK_MODES.get(mode.strip().lower(), "auto")
+    return "auto"
+
+
 
 # --------------------------------------------------------------------------
 # query construction
@@ -378,6 +399,34 @@ def embedding_available(max_age: float = PROBE_TTL) -> bool:
 
 
 # --------------------------------------------------------------------------
+# projections
+# --------------------------------------------------------------------------
+
+def compact(results: list[dict[str, Any]], *, why_chars: int = 140) -> list[dict[str, Any]]:
+    """A routing-sized view of the results.
+
+    The full result carries every matching chunk of every skill: 25 KB for a
+    ten-result query, about 6.3k tokens. An agent choosing a skill needs the
+    name, the score, the terms that matched, and one line of evidence — not
+    the evidence archive. `--chunks` returns the full shape when the caller
+    actually wants to read it.
+    """
+    out = []
+    for r in results:
+        chunks = r.get("chunks") or []
+        top = chunks[0] if chunks else {}
+        out.append({
+            "skill": r.get("skill"),
+            "score": r.get("score"),
+            "matched": r.get("matched_terms", []),
+            "why": (top.get("snippet") or "")[:why_chars],
+            "top": {"kind": top.get("kind"), "title": top.get("title")},
+            "chunk_count": len(chunks),
+        })
+    return out
+
+
+# --------------------------------------------------------------------------
 # public entry point
 # --------------------------------------------------------------------------
 
@@ -390,6 +439,7 @@ def search(
     explain: bool = False,
 ) -> dict[str, Any]:
     """Search the catalog. Returns a dict with results and retrieval metadata."""
+    rerank_enabled = normalize_rerank(rerank_enabled)
     tokens = tokenize(query)
     if not tokens:
         return {

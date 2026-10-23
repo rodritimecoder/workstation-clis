@@ -17,9 +17,22 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SERVER = HERE.parent / "scripts" / "mcp_server.py"
+SKILL_CLI = HERE.parent / "omnicli.py"
 
 PASS = "\033[92mPASS\033[0m"
 FAIL = "\033[91mFAIL\033[0m"
+
+
+def search_available() -> bool:
+    """Is the optional embedding re-ranker reachable?
+
+    The rerank assertions only mean something when the endpoint answers; a
+    skipped check is honest, a passing one against a dead port is not.
+    """
+    sys.path.insert(0, str(HERE.parent))
+    from catalog import search
+
+    return search.embedding_available()
 
 
 class Client:
@@ -115,19 +128,46 @@ def main() -> int:
         results.append(check("omni_discover returns tool ids",
                              bool(payload.get("results", [{}])[0].get("tools"))))
 
+        # 3b. the default reply is a routing view, not the chunk archive
+        r = c.call("tools/call", {
+            "name": "omni_discover",
+            "arguments": {"intent": "transcribe a zoom lecture recording"},
+        })
+        size = len(r["result"]["content"][0]["text"].encode())
+        results.append(check("omni_discover default reply is compact (< 4000 bytes)",
+                             size < 4000, f"{size} bytes"))
+
+        # 3c. rerank is honoured (it used to be swallowed by `not no_rerank`)
+        if search_available():
+            never = json.loads(c.call("tools/call", {
+                "name": "omni_discover",
+                "arguments": {"intent": "transcribe a zoom lecture", "rerank": "never"},
+            })["result"]["content"][0]["text"])
+            always = json.loads(c.call("tools/call", {
+                "name": "omni_discover",
+                "arguments": {"intent": "transcribe a zoom lecture", "rerank": "always"},
+            })["result"]["content"][0]["text"])
+            results.append(check("omni_discover rerank=never stays lexical",
+                                 never.get("tier") == "bm25", never.get("tier", "")))
+            results.append(check("omni_discover rerank=always reaches the re-ranker",
+                                 always.get("tier") == "bm25+rerank",
+                                 always.get("tier", "")))
+
         # 4. omni_describe — one contract, no schemas for everything
         r = c.call("tools/call", {
             "name": "omni_discover",
             "arguments": {"intent": "read text out of a screenshot", "limit": 1},
         })
         payload = json.loads(r["result"]["content"][0]["text"])
-        tool_id = payload["results"][0]["tools"][0]["id"]
+        tool_id = payload["results"][0]["tools"][0]
         r = c.call("tools/call", {"name": "omni_describe", "arguments": {"tool_id": tool_id}})
         desc = json.loads(r["result"]["content"][0]["text"])
         results.append(check("omni_describe returns a contract for exactly one tool",
                              desc.get("id") == tool_id))
         results.append(check("omni_describe includes the invocation contract",
                              "contract" in desc and "argv" in desc))
+        results.append(check("omni_describe reports the enable state",
+                             isinstance(desc.get("enabled"), bool)))
 
         # 5. omni_invoke — bounded output
         r = c.call("tools/call", {
@@ -138,8 +178,48 @@ def main() -> int:
         results.append(check("omni_invoke executes and returns output",
                              bool(out.get("output")) and out.get("exit_code") == 0))
         results.append(check("omni_invoke respects max_bytes",
-                             out.get("bytes", 0) <= 2000 or out.get("truncated") is True,
-                             f"{out.get('bytes')} bytes, truncated={out.get('truncated')}"))
+                             len(r["result"]["content"][0]["text"].encode()) <= 2000,
+                             f"{len(r['result']['content'][0]['text'].encode())} bytes"))
+
+        # 5b. small caps are a budget to fill, not a banner
+        for cap in (250, 400, 8000):
+            r = c.call("tools/call", {
+                "name": "omni_invoke",
+                "arguments": {"tool_id": "local/decide", "args": ["--help"],
+                              "max_bytes": cap},
+            })
+            text = r["result"]["content"][0]["text"]
+            body = json.loads(text)
+            size = len(text.encode())
+            results.append(check(f"omni_invoke cap {cap} is exact and non-empty",
+                                 size <= cap and len(body.get("output", "")) > 20,
+                                 f"{size} bytes, output {len(body.get('output', ''))}"))
+
+        # 5c. an unappliable projection says so instead of silently ignoring it
+        r = c.call("tools/call", {
+            "name": "omni_invoke",
+            "arguments": {"tool_id": "local/decide", "args": ["--help"],
+                          "projection": ["contract.flags"]},
+        })
+        body = json.loads(r["result"]["content"][0]["text"])
+        results.append(check("omni_invoke warns when projection cannot apply",
+                             body.get("projection_applied") is False
+                             and "projection_warning" in body))
+
+        # 5d. discovery does not imply exposure
+        disable = subprocess.run([sys.executable, str(SKILL_CLI), "disable", "local/decide"],
+                                 capture_output=True, text=True)
+        try:
+            r = c.call("tools/call", {"name": "omni_invoke",
+                                      "arguments": {"tool_id": "local/decide",
+                                                    "args": ["--help"]}})
+            body = json.loads(r["result"]["content"][0]["text"])
+            results.append(check("omni_invoke refuses a disabled tool",
+                                 body.get("error") == "tool is disabled",
+                                 str(body.get("error"))))
+        finally:
+            subprocess.run([sys.executable, str(SKILL_CLI), "enable", "local/decide"],
+                           capture_output=True, text=True)
 
         # 6. omni_status
         r = c.call("tools/call", {"name": "omni_status", "arguments": {}})
@@ -149,6 +229,17 @@ def main() -> int:
                              st.get("retrieval_tier", "")))
         results.append(check("omni_status reports catalog freshness",
                              st.get("catalog", {}).get("skills", 0) > 0))
+        results.append(check("omni_status reports the enable gate",
+                             st.get("catalog", {}).get("tools_enabled", 0) > 0,
+                             f"{st.get('catalog', {}).get('tools_enabled')} enabled"))
+        services = st.get("services", [])
+        ports = {s.get("port") for s in services}
+        results.append(check("omni_status uses the shared health probe "
+                             "(all services, with a tri-state)",
+                             {8084, 8086, 9222}.issubset(ports)
+                             and all(s.get("status") in ("ONLINE", "DEGRADED", "OFFLINE")
+                                     for s in services),
+                             f"{len(services)} services"))
 
         # 7. error handling
         r = c.call("tools/call", {"name": "omni_invoke",

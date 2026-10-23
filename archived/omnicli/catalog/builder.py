@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-from . import registry
+from . import policy, registry
 from .textutil import expand_cjk
 
 HERE = Path(__file__).resolve().parent
@@ -36,7 +36,7 @@ SECTION_RE = re.compile(r"^#{1,4}\s+(.*)$", re.MULTILINE)
 
 # Bump when the FTS5 column layout changes; the catalog is a derived
 # artifact, so the cheapest correct response is to rebuild it.
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 # --------------------------------------------------------------------------
@@ -196,6 +196,21 @@ def _ensure_docs_schema(con: sqlite3.Connection) -> None:
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
+def _ensure_tools_schema(con: sqlite3.Connection) -> None:
+    """Add the enablement column to a catalog built before the gate existed.
+
+    ALTER defaults to 1, so every tool that already existed is grandfathered:
+    installing the gate must not turn a working workstation into a dead one.
+    Tools discovered *after* this point start disabled (see `build`).
+    """
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(tools)")}
+    except sqlite3.OperationalError:
+        cols = set()
+    if cols and "enabled" not in cols:
+        con.execute("ALTER TABLE tools ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+
+
 # --------------------------------------------------------------------------
 # chunking
 # --------------------------------------------------------------------------
@@ -310,6 +325,20 @@ def build(
 
     now = time.time()
     _ensure_docs_schema(con)
+    _ensure_tools_schema(con)
+
+    # The enablement gate. A tool that is new relative to the previous
+    # catalog starts disabled; everything already catalogued keeps whatever
+    # state it had. The policy file wins over both, so a decision survives
+    # a rebuild and a deleted catalog.
+    previous = {r["id"]: r["enabled"] for r in
+                con.execute("SELECT id, enabled FROM tools")}
+    first_build = not previous and not meta_get(con, "built_at")
+
+    def enabled_for(tool_id: str) -> int:
+        default = bool(previous.get(tool_id, 1 if first_build else 0))
+        return 1 if policy.decide(tool_id, default) else 0
+
     con.execute("DELETE FROM docs")
     con.execute("DELETE FROM tools")
     con.execute("DELETE FROM skills")
@@ -386,7 +415,8 @@ def build(
                     seen_script_names.add(cpath.name)
             tool_rows.append((
                 t["id"], t["skill"], t["kind"], t["summary"], t["path"],
-                json.dumps(t["argv"]), json.dumps(contract), t["parent"], now,
+                json.dumps(t["argv"]), json.dumps(contract), t["parent"],
+                enabled_for(t["id"]), now,
             ))
 
             # Subcommands become individually addressable tools. This is the
@@ -419,7 +449,8 @@ def build(
                     contract_cache)
                 tool_rows.append((
                     child_id, t["skill"], "subcommand", child_summary, t["path"],
-                    json.dumps(child_argv), json.dumps(child_contract), t["id"], now,
+                    json.dumps(child_argv), json.dumps(child_contract), t["id"],
+                    enabled_for(child_id), now,
                 ))
                 tool_count += 1
 
@@ -501,11 +532,12 @@ def build(
     for t in registry.endpoint_tools(SKILL_ROOT):
         tool_rows.append((
             t["id"], t["skill"], t["kind"], t["summary"], t["path"],
-            json.dumps(t["argv"]), json.dumps(t["contract"]), t["parent"], now,
+            json.dumps(t["argv"]), json.dumps(t["contract"]), t["parent"],
+            enabled_for(t["id"]), now,
         ))
 
     # script contracts as searchable documents
-    for tool_id, skill, kind, summary, path, argv, contract_json, parent, _ in tool_rows:
+    for tool_id, skill, kind, summary, path, argv, contract_json, parent, _enabled, _ in tool_rows:
         if kind != "script" or not path:
             continue
         try:
@@ -531,8 +563,8 @@ def build(
     )
     con.executemany(
         "INSERT OR REPLACE INTO tools"
-        "(id, skill, kind, summary, path, argv, contract, parent, indexed_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?)", tool_rows
+        "(id, skill, kind, summary, path, argv, contract, parent, enabled, indexed_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?)", tool_rows
     )
 
     meta_set(con, "fingerprint", fingerprint(skills))

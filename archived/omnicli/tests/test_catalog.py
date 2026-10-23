@@ -14,8 +14,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from catalog import builder, registry, search, textutil  # noqa: E402
-from omnicli import _cap, parse_invoke_args  # noqa: E402
+from catalog import builder, invoke, policy, registry, search, textutil  # noqa: E402
+from omnicli import parse_invoke_args  # noqa: E402
 
 
 class TestTextUtil(unittest.TestCase):
@@ -129,18 +129,161 @@ class TestInvokeParsing(unittest.TestCase):
 class TestOutputCap(unittest.TestCase):
     def test_cap_is_never_exceeded(self):
         for cap in (10, 50, 100, 200, 500, 1000, 8000, 100000):
-            out, truncated, total = _cap("X" * 50000, cap)
+            out, truncated, total = invoke.cap("X" * 50000, cap)
             self.assertLessEqual(len(out.encode()), cap,
                                  f"cap {cap} exceeded by {len(out.encode())}")
             if cap < 50000:
                 self.assertTrue(truncated, f"cap {cap} should have truncated")
             self.assertEqual(total, 50000)
 
+    def test_small_caps_still_return_payload(self):
+        """A cap is a budget to fill, not a reason to return only a banner.
+
+        The old implementation reserved 300 bytes for its notice, so every
+        cap below that returned the notice and nothing else.
+        """
+        for cap in (250, 400, 8000):
+            out, truncated, _ = invoke.cap("Y" * 20000, cap)
+            self.assertTrue(truncated)
+            self.assertLessEqual(len(out.encode()), cap)
+            self.assertGreaterEqual(len(out.encode()), cap - 2,
+                                    f"cap {cap} under-filled: {len(out.encode())} bytes")
+            self.assertIn("Y", out, f"cap {cap} returned no payload at all")
+
     def test_payload_within_cap_is_untouched(self):
-        out, truncated, total = _cap("short", 8000)
+        out, truncated, total = invoke.cap("short", 8000)
         self.assertEqual(out, "short")
         self.assertFalse(truncated)
         self.assertEqual(total, 5)
+
+    def test_envelope_fits_the_cap(self):
+        """`--omni-json` must not smuggle the envelope past the cap."""
+        def build(shaped):
+            return {"tool": "x", "exit_code": 0, "bytes": shaped["bytes"],
+                    "truncated": shaped["truncated"], "output": shaped["output"]}
+
+        for cap in (250, 400, 1000):
+            payload, encoded, _ = invoke.fit_envelope(
+                "Z" * 20000, build, max_bytes=cap)
+            self.assertLessEqual(len(encoded.encode()), cap,
+                                 f"envelope at cap {cap} was {len(encoded.encode())}")
+            self.assertIn("Z", payload["output"])
+
+    def test_refusal_always_fits(self):
+        """When even the envelope cannot fit, the explanation still obeys."""
+        for cap in (0, 10, 40, 64, 250, 1000):
+            text = invoke.refusal(50000, cap)
+            self.assertLessEqual(len(text.encode()), cap,
+                                 f"refusal at cap {cap} was {len(text.encode())}")
+
+
+class TestProjection(unittest.TestCase):
+    def test_flat_fields(self):
+        text, applied = invoke.project('{"a": 1, "b": 2}', ["a"])
+        self.assertTrue(applied)
+        self.assertEqual(json.loads(text), {"a": 1})
+
+    def test_nested_path(self):
+        text, applied = invoke.project('{"a": {"b": 1, "c": 2}}', ["a.b"])
+        self.assertTrue(applied)
+        self.assertEqual(json.loads(text), {"a": {"b": 1}})
+
+    def test_list_projection(self):
+        text, applied = invoke.project('[{"x": 1, "y": 2}, {"x": 3, "y": 4}]', ["x"])
+        self.assertTrue(applied)
+        self.assertEqual(json.loads(text), [{"x": 1}, {"x": 3}])
+
+    def test_list_of_nested_paths(self):
+        text, applied = invoke.project('{"rows": [{"v": 1}, {"v": 2}]}', ["rows.v"])
+        self.assertTrue(applied)
+        self.assertEqual(json.loads(text), {"rows": {"v": [1, 2]}})
+
+    def test_unmatched_field_is_not_reported_as_applied(self):
+        """A projection that matches nothing must warn, not return `{}`."""
+        text, applied = invoke.project('{"a": 1}', ["nope"])
+        self.assertFalse(applied)
+        self.assertEqual(text, '{"a": 1}')
+
+    def test_non_json_is_not_reported_as_applied(self):
+        text, applied = invoke.project("plain text", ["a"])
+        self.assertFalse(applied)
+        self.assertEqual(text, "plain text")
+
+    def test_parse_fields(self):
+        self.assertEqual(invoke.parse_fields("a, b ,c"), ["a", "b", "c"])
+        self.assertIsNone(invoke.parse_fields(""))
+
+
+class TestRerankMode(unittest.TestCase):
+    def test_strings_map_to_the_tri_state(self):
+        self.assertIs(search.normalize_rerank("always"), True)
+        self.assertIs(search.normalize_rerank("never"), False)
+        self.assertEqual(search.normalize_rerank("auto"), "auto")
+        self.assertIs(search.normalize_rerank(True), True)
+        self.assertIs(search.normalize_rerank(False), False)
+        self.assertIs(search.normalize_rerank(None), False)
+
+    def test_always_actually_reranks(self):
+        """`--rerank always` used to behave like `never` (string vs True)."""
+        con = builder.connect()
+        builder.ensure_built(con, progress=False)
+        never = search.search(con, "transcribe a zoom lecture", limit=3,
+                              rerank_enabled="never")
+        always = search.search(con, "transcribe a zoom lecture", limit=3,
+                               rerank_enabled="always")
+        self.assertEqual(never["tier"], "bm25")
+        self.assertIn(always["tier"], ("bm25+rerank", "bm25"),
+                      "the re-ranker was not consulted")
+        if search.embedding_available():
+            self.assertEqual(always["tier"], "bm25+rerank")
+
+
+class TestPolicyGate(unittest.TestCase):
+    """Discovery does not imply exposure, and the decision is auditable."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self._original = builder.DEFAULT_DB
+        builder.DEFAULT_DB = Path(self._tmp.name) / "catalog.db"
+
+    def tearDown(self):
+        builder.DEFAULT_DB = self._original
+        self._tmp.cleanup()
+
+    def test_new_tools_are_disabled_and_decisions_are_logged(self):
+        self.assertFalse(policy.decide("brand/new-tool", default=False))
+        self.assertTrue(policy.decide("existing/tool", default=True))
+
+        policy.set_enabled("brand/new-tool", True, contract={"usage": "x"})
+        self.assertTrue(policy.decide("brand/new-tool", default=False))
+
+        history = policy.history("brand/new-tool")
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["after"], True)
+        self.assertEqual(len(history[0]["contract"]), 16)
+
+        policy.set_enabled("brand/new-tool", False)
+        self.assertEqual([h["after"] for h in policy.history("brand/new-tool")],
+                         [True, False])
+
+    def test_policy_survives_a_catalog_rebuild(self):
+        con = builder.connect()
+        try:
+            builder.build(con, with_contracts=False, progress=False)
+            row = con.execute("SELECT enabled FROM tools LIMIT 1").fetchone()
+            self.assertEqual(row["enabled"], 1, "a first build must grandfather tools")
+
+            tool_id = con.execute("SELECT id FROM tools LIMIT 1").fetchone()["id"]
+            policy.set_enabled(tool_id, False)
+            builder.build(con, with_contracts=False, progress=False)
+            row = con.execute("SELECT enabled FROM tools WHERE id = ?",
+                              (tool_id,)).fetchone()
+            self.assertEqual(row["enabled"], 0,
+                             "a rebuild must not re-enable a disabled tool")
+        finally:
+            con.close()
 
 
 class TestCatalog(unittest.TestCase):
@@ -336,6 +479,21 @@ class TestSearch(unittest.TestCase):
         res = search.search(self.con, "click a button on a web page", limit=3)
         text = json.dumps(res)
         self.assertIn("results", json.loads(text))
+
+    def test_compact_view_is_much_smaller_than_the_full_result(self):
+        """Routing needs names and scores; the chunk archive is opt-in."""
+        res = search.search(self.con, "transcribe a zoom lecture", limit=6,
+                            rerank_enabled=False)
+        full = len(json.dumps(res).encode())
+        compact = search.compact(res["results"])
+        small = len(json.dumps(compact).encode())
+        self.assertLess(small * 4, full,
+                        f"compact view is not compact: {small} vs {full} bytes")
+        self.assertEqual([c["skill"] for c in compact],
+                         [r["skill"] for r in res["results"]])
+        for item in compact:
+            self.assertIn("why", item)
+            self.assertIn("score", item)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS tools (
     argv     TEXT DEFAULT '[]',  -- JSON argv template
     contract TEXT DEFAULT '{}',  -- JSON: {usage, flags, positionals, subcommands}
     parent   TEXT,               -- for subcommand tools, the parent tool id
+    -- Discovery does not imply exposure: a tool is discoverable as soon as it
+    -- is catalogued, but runnable only after `omnicli enable <id>`. New tools
+    -- default to 0; the migration that introduced this column grandfathers
+    -- everything that already existed.
+    enabled  INTEGER NOT NULL DEFAULT 0,
     indexed_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_tools_skill ON tools(skill);

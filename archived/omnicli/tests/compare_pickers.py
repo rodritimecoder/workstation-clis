@@ -186,7 +186,7 @@ def main() -> None:
     print("=" * 74)
     print(f"PICKER COMPARISON   {n} golden queries   model={args.model}")
     print("=" * 74)
-    print(f"  shelf   (read 38 frontmatters)   top1 {s1:>3}/{n} ({100.0*s1/n:5.1f}%)   "
+    print(f"  shelf   (read {len(names)} frontmatters)  top1 {s1:>3}/{n} ({100.0*s1/n:5.1f}%)   "
           f"acceptable {s3:>3}/{n}   {t_shelf*1000/n:7.0f} ms/query")
     print(f"  gateway (omnicli BM25 index)    top1 {g1:>3}/{n} ({100.0*g1/n:5.1f}%)   "
           f"acceptable {g3:>3}/{n}   {t_gate*1000/n:7.0f} ms/query")

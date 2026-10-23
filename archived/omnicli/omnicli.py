@@ -19,17 +19,13 @@ tools, and as a direct subcommand for interactive use.
 from __future__ import annotations
 
 import argparse
-import concurrent.futures as futures
 import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -46,16 +42,15 @@ sys.path.insert(0, str(SKILL_DIR))
 
 try:
     from catalog import aliases as aliases_mod
-    from catalog import builder, registry, search  # noqa: E402
+    from catalog import builder, health, invoke, policy, registry, search  # noqa: E402
 except ImportError:  # pragma: no cover - degraded install
     aliases_mod = None
-    builder = registry = search = None  # type: ignore
+    builder = registry = search = health = invoke = policy = None  # type: ignore
 
 # The response cap. An agent must never be able to pull an unbounded payload
-# into its context window, even by forgetting the flags.
-DEFAULT_MAX_BYTES = 8000
-PREVIEW_HEAD = 3000
-PREVIEW_TAIL = 1500
+# into its context window, even by forgetting the flags. The implementation
+# lives in catalog.invoke so that the MCP face enforces the same ceiling.
+DEFAULT_MAX_BYTES = invoke.DEFAULT_MAX_BYTES if invoke else 8000
 
 
 # --------------------------------------------------------------------------
@@ -124,18 +119,29 @@ def parse_invoke_args(argv: list[str]) -> tuple[str | None, dict, list[str]]:
             break
         if a in INVOKE_VALUE_FLAGS:
             key = INVOKE_VALUE_FLAGS[a]
-            if i + 1 < len(argv):
-                val = argv[i + 1]
-                opts[key] = int(val) if key in ("max_bytes", "timeout") else val
-                i += 2
+            if i + 1 >= len(argv):
+                sys.exit(f"❌ Error: {a} needs a value.")
+            val = argv[i + 1]
+            if key in ("max_bytes", "timeout"):
+                try:
+                    opts[key] = int(val) if key == "max_bytes" else float(val)
+                except ValueError:
+                    sys.exit(f"❌ Error: {a} expects a number, got {val!r}.")
             else:
-                i += 1
+                opts[key] = val
+            i += 2
             continue
         if a in INVOKE_BOOL_FLAGS:
             opts[INVOKE_BOOL_FLAGS[a]] = True
             i += 1
             continue
         if a.startswith("--omni-"):
+            # Silently dropping an unknown gateway flag is how a typo becomes
+            # a silently unfiltered 8 KB payload. Say so and keep going: the
+            # tool itself never sees `--omni-*`, so nothing else breaks.
+            print(f"⚠️  omnicli: unknown gateway flag {a!r} ignored "
+                  f"(known: {', '.join(sorted(INVOKE_VALUE_FLAGS | INVOKE_BOOL_FLAGS))})",
+                  file=sys.stderr)
             i += 1
             continue
         if tool_id is None and not a.startswith("-"):
@@ -151,100 +157,10 @@ def parse_invoke_args(argv: list[str]) -> tuple[str | None, dict, list[str]]:
 # status
 # --------------------------------------------------------------------------
 
-def _tailscale_address() -> str | None:
-    try:
-        p = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=6)
-        if p.returncode == 0:
-            data = json.loads(p.stdout)
-            ips = data.get("Self", {}).get("TailscaleIPs", [])
-            if ips:
-                return ips[0]
-    except (OSError, ValueError, subprocess.SubprocessError):
-        pass
-    return None
-
-
-def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.35) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except (socket.timeout, ConnectionRefusedError, OSError):
-        return False
-
-
-def _http_status(port: int, path: str, host: str = "127.0.0.1", timeout: float = 0.8) -> int | None:
-    try:
-        request = urllib.request.Request(f"http://{host}:{port}{path}", method="GET")
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status
-    except urllib.error.HTTPError as exc:
-        return exc.code
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
-
-
-def _serve_proxied_ports() -> set[int]:
-    """Ports where `tailscale serve` owns the tailnet listener.
-
-    On those, an open tailnet port proves the proxy is alive, not the backend:
-    a proxied port with a dead local service still accepts connections.
-    """
-    try:
-        proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=6)
-        if proc.returncode != 0:
-            return set()
-        return {int(port) for port in re.findall(r"^https://\S+:(\d+) \(", proc.stdout, re.MULTILINE)}
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return set()
-
-
-def _service_state(service: dict, ts_addr: str | None, proxied: set[int]) -> str:
-    """HTTP on loopback is authoritative; TCP alone is never proof of health.
-
-    Returns ONLINE (2xx), DEGRADED (process reachable but not answering
-    healthily) or OFFLINE (nothing there).
-    """
-    port = service["port"]
-    code = _http_status(port, service.get("probe", "/health"))
-    if code is not None:
-        return "ONLINE" if 200 <= code < 300 else "DEGRADED"
-    if _port_open(port):
-        return "DEGRADED"
-    if ts_addr and port not in proxied and _port_open(port, ts_addr):
-        return "ONLINE"
-    return "OFFLINE"
-
-
-SERVICES = [
-    {"port": 4000, "name": "LiteLLM Dynamic Gateway", "role": "Multi-model proxy & failover", "probe": "/health/liveliness"},
-    {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper", "probe": "/v1/models"},
-    {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU flagship coder", "probe": "/health"},
-    {"port": 8081, "name": "audio.cpp ASR & TTS", "role": "Streaming speech-to-text / TTS", "probe": "/health"},
-    {"port": 8083, "name": "Decision Gating", "role": "Premier calibrated decisions (protocol auto-detected)", "probe": "/health"},
-    {"port": 8084, "name": "CrispEmbed Scene-Text OCR", "role": "Ultra-fast text detection", "probe": "/health"},
-    {"port": 8085, "name": "LightOnOCR Flagship OCR", "role": "Document and slide OCR", "probe": "/health"},
-    {"port": 8087, "name": "Embedding Server (BGE / EmbeddingGemma)", "role": "Optional re-ranker for catalog search", "probe": "/health"},
-    {"port": 8089, "name": "Decision Fallback (Imajev-4B)", "role": "Second opinion / A-B against :8083", "probe": "/health"},
-    {"port": 8090, "name": "JPT-4B (retired)", "role": "Archived slot; shown until the port is reused", "probe": "/health"},
-    {"port": 9222, "name": "Chromium CDP DevTools", "role": "Direct WebSocket/CDP browser control", "probe": "/json/version"},
-]
-
-
 def cmd_status(as_json: bool = False):
-    ts_addr = _tailscale_address()
-    proxied = _serve_proxied_ports()
-    with futures.ThreadPoolExecutor(max_workers=len(SERVICES)) as pool:
-        states = list(pool.map(lambda service: _service_state(service, ts_addr, proxied), SERVICES))
-    results = []
-    for service, state in zip(SERVICES, states):
-        results.append({
-            "service": service["name"],
-            "port": service["port"],
-            "status": state,
-            "local_url": f"http://127.0.0.1:{service['port']}",
-            "tailnet_url": f"http://{ts_addr}:{service['port']}" if ts_addr else "",
-            "role": service["role"],
-        })
+    probe = health.probe_all()
+    ts_addr = probe["tailscale_address"]
+    results = probe["services"]
 
     catalog_info = {}
     tier = "unavailable"
@@ -300,12 +216,20 @@ def cmd_status(as_json: bool = False):
 # --------------------------------------------------------------------------
 
 def cmd_search(query: str, as_json: bool = False, limit: int = 6,
-               explain: bool = False, no_rerank: bool = False, rerank: str = "auto"):
+               explain: bool = False, no_rerank: bool = False, rerank: str = "auto",
+               chunks: bool = False):
     con = _require_catalog()
     mode = "never" if no_rerank else rerank
     res = search.search(con, query, limit=limit, rerank_enabled=mode, explain=explain)
 
     if as_json:
+        # Routing needs names and scores; the chunk archive is opt-in. The
+        # full shape is ~25 KB (~6.3k tokens) for ten results, which is more
+        # context than the skill being routed to.
+        if not chunks:
+            res = dict(res)
+            res["results"] = search.compact(res["results"])
+            res["shape"] = "compact"
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return
 
@@ -364,8 +288,8 @@ def cmd_list(as_json: bool = False, show_all: bool = False):
 def cmd_tools(skill_name: str, as_json: bool = False):
     con = _require_catalog()
     rows = con.execute(
-        "SELECT id, kind, summary FROM tools WHERE skill = ? OR skill = ? ORDER BY id",
-        (skill_name, skill_name),
+        "SELECT id, kind, summary, enabled FROM tools WHERE skill = ? ORDER BY id",
+        (skill_name,),
     ).fetchall()
     if not rows:
         matches = con.execute(
@@ -382,11 +306,18 @@ def cmd_tools(skill_name: str, as_json: bool = False):
         return
     print(f"\n🛠️  [omnicli tools] {skill_name}  ({len(rows)} tools)\n")
     for r in rows:
-        print(f"   - {r['id']}   [{r['kind']}]")
+        gate = "" if r["enabled"] else "   [disabled]"
+        print(f"   - {r['id']}   [{r['kind']}]{gate}")
         if r["summary"]:
             print(f"       {r['summary'][:150]}")
+    hidden = sum(1 for r in rows if not r["enabled"])
     print(f"\n   Contract:  omnicli describe <tool_id>")
-    print(f"   Execute :  omnicli invoke <tool_id> [args...]\n")
+    print(f"   Execute :  omnicli invoke <tool_id> [args...]")
+    if hidden:
+        print(f"   Gate    :  {hidden} tool(s) disabled; "
+              f"`omnicli enable <tool_id>` after reviewing the contract\n")
+    else:
+        print()
 
 
 def _describe_doc(con, name: str, query: str, as_json: bool = False):
@@ -526,6 +457,7 @@ def cmd_describe(tool_id: str, as_json: bool = False, section: str = "", doc: st
         "id": row["id"],
         "skill": row["skill"],
         "kind": row["kind"],
+        "enabled": bool(row["enabled"]),
         "summary": row["summary"],
         "path": row["path"],
         "argv": json.loads(row["argv"] or "[]"),
@@ -537,9 +469,11 @@ def cmd_describe(tool_id: str, as_json: bool = False, section: str = "", doc: st
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
+    state = "enabled" if row["enabled"] else f"DISABLED (run `omnicli enable {row['id']}`)"
     print(f"\n📄 [omnicli describe] {row['id']}\n")
     print(f"   skill   : {row['skill']}")
     print(f"   kind    : {row['kind']}")
+    print(f"   state   : {state}")
     if row["summary"]:
         print(f"   summary : {row['summary']}")
     if skill and skill["description"]:
@@ -568,67 +502,6 @@ def cmd_describe(tool_id: str, as_json: bool = False, section: str = "", doc: st
 # invoke
 # --------------------------------------------------------------------------
 
-def _project(raw: str, fields: list[str] | None, jq_expr: str | None) -> str:
-    if jq_expr and shutil.which("jq"):
-        try:
-            p = subprocess.run(["jq", jq_expr], input=raw, text=True, capture_output=True)
-            if p.returncode == 0:
-                return p.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            pass
-    if fields:
-        try:
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                return json.dumps({k: v for k, v in data.items() if k in fields}, indent=2)
-            if isinstance(data, list):
-                return json.dumps(
-                    [{k: v for k, v in it.items() if k in fields} if isinstance(it, dict) else it
-                     for it in data], indent=2)
-        except (ValueError, TypeError):
-            pass
-    return raw
-
-
-def _cap(raw: str, max_bytes: int) -> tuple[str, bool, int]:
-    """Bound the payload. Returns (text, truncated, original_size).
-
-    The preview is scaled to fit *within* the cap, including the banner
-    itself — a cap smaller than the preview must still produce a result no
-    larger than the cap, or the guarantee is meaningless.
-    """
-    data = raw.encode("utf-8", errors="replace")
-    total = len(data)
-    if total <= max_bytes:
-        return raw, False, total
-
-    # Reserve a conservative banner allowance first; the exact banner is
-    # built after the split is known, and the final clamp guarantees the cap.
-    budget = max(max_bytes - 300, 0)
-    if budget <= 0:
-        tiny = f"… [omnicli] output elided (cap {max_bytes})."
-        return tiny.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore"), True, total
-
-    head_len = int(budget * 0.66)
-    tail_len = budget - head_len
-    head = data[:head_len].decode("utf-8", errors="ignore")
-    tail = data[-tail_len:].decode("utf-8", errors="ignore") if tail_len else ""
-    omitted = total - head_len - tail_len
-
-    banner = (
-        f"… [omnicli] {omitted} bytes elided ({total} total, cap {max_bytes}). "
-        f"Re-run with --omni-buffer FILE to capture the full payload, "
-        f"or --omni-max-bytes {total} to lift the cap."
-    )
-    if max_bytes < len(banner) + 40:
-        banner = f"… [omnicli] {omitted} bytes elided (cap {max_bytes})."
-    text = f"{head}\n\n{banner}\n\n{tail}"
-    encoded = text.encode("utf-8")
-    if len(encoded) > max_bytes:
-        text = encoded[:max_bytes].decode("utf-8", errors="ignore")
-    return text, True, total
-
-
 def cmd_invoke(tool_id: str, extra_args: list[str], out_path: str | None = None,
                project_fields: str | None = None, jq_expr: str | None = None,
                grep: str | None = None, max_bytes: int = DEFAULT_MAX_BYTES,
@@ -639,56 +512,176 @@ def cmd_invoke(tool_id: str, extra_args: list[str], out_path: str | None = None,
         sys.exit(f"❌ Error: no tool named {tool_id!r}. "
                  f"Use `omnicli tools <skill>` to list a skill's tools.")
 
+    # Discovery does not imply exposure. The catalog knows the tool; the
+    # policy decides whether an agent may run it. `describe` still works, so
+    # the contract can be reviewed before the gate is opened.
+    if not row["enabled"]:
+        sys.exit(f"❌ Error: tool {tool_id!r} is disabled.\n"
+                 f"   Review it:  omnicli describe {tool_id}\n"
+                 f"   Enable it:  omnicli enable {tool_id}")
+
     argv = json.loads(row["argv"] or "[]")
-    cmd = [str(a).replace("{python}", sys.executable).replace("{skill}", str(SKILL_DIR)) for a in argv]
-    cmd += list(extra_args)
+    cmd = invoke.build_cmd(argv, extra_args, python=sys.executable, skill_dir=SKILL_DIR)
+    run = invoke.execute(cmd, timeout=timeout)
 
+    fields = invoke.parse_fields(project_fields)
+    # Reserve one byte for the newline that terminates a plain reply. The JSON
+    # branch re-shapes against its measured envelope instead (fit_envelope).
+    budget = max(0, max_bytes - (0 if as_json else 1))
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        raw = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
-        code = proc.returncode
-    except subprocess.TimeoutExpired:
-        raw = f"⏱️ omnicli: tool timed out after {timeout}s"
-        code = 124
-    except OSError as exc:
-        raw = f"❌ omnicli: failed to execute: {exc}"
-        code = 127
+        shaped = invoke.shape(
+            run["stdout"], fields=fields, jq_expr=jq_expr,
+            grep_pattern=grep, max_bytes=budget,
+        )
+    except re.error as exc:
+        sys.exit(f"❌ Error: invalid --omni-grep pattern: {exc}")
 
-    fields = [f.strip() for f in project_fields.split(",")] if project_fields else None
-    projected = _project(raw, fields, jq_expr)
+    if shaped["projection_requested"] and not shaped["projection_applied"]:
+        print("⚠️  omnicli: projection could not be applied "
+              "(output was not JSON, or no requested field matched); "
+              "returning the unfiltered payload.", file=sys.stderr)
 
-    if grep:
-        try:
-            import re as _re
-            pattern = _re.compile(grep)
-            projected = "\n".join(ln for ln in projected.splitlines() if pattern.search(ln))
-        except _re.error as exc:
-            sys.exit(f"❌ Error: invalid --grep pattern: {exc}")
-
-    capped, truncated, original = _cap(projected, max_bytes)
-
+    # The buffer preserves what the cap discards, so it holds the *unfiltered*
+    # stdout, written before projection, grep and truncation.
     if out_path:
         p = Path(out_path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(projected, encoding="utf-8")
-        print(f"💾 Full output buffered to: {p}  ({original} bytes)")
-        if truncated:
-            print(f"📊 Preview below (cap {max_bytes} bytes).")
-        else:
-            print(f"📊 Payload fit within the cap ({original} bytes).")
+        p.write_text(run["stdout"], encoding="utf-8")
+        print(f"💾 Full stdout buffered to: {p}  ({shaped['raw_bytes']} bytes)")
+        if shaped["projection_applied"] or shaped["grep_applied"]:
+            print("📊 The preview below is filtered; the buffer is not.")
         print()
-        print(capped)
-        sys.exit(code)
+
+    if run["stderr"]:
+        print(run["stderr"], file=sys.stderr, end="" if run["stderr"].endswith("\n") else "\n")
 
     if as_json:
-        print(json.dumps({
-            "tool": tool_id, "exit_code": code, "bytes": original,
-            "truncated": truncated, "output": capped,
-        }, indent=2, ensure_ascii=False))
-        sys.exit(code)
+        def build(shaped: dict[str, Any]) -> dict[str, Any]:
+            payload = {
+                "tool": tool_id,
+                "exit_code": run["exit_code"],
+                "bytes": shaped["bytes"],
+                "raw_bytes": shaped["raw_bytes"],
+                "truncated": shaped["truncated"],
+                "projection_applied": shaped["projection_applied"],
+                "output": shaped["output"],
+            }
+            if run["stderr"]:
+                payload["stderr"] = run["stderr"][-2000:]
+            return payload
 
-    print(capped)
-    sys.exit(code)
+        payload, encoded, _ = invoke.fit_envelope(
+            run["stdout"], build, fields=fields, jq_expr=jq_expr,
+            grep_pattern=grep, max_bytes=max_bytes,
+        )
+        if len(encoded.encode("utf-8")) > max_bytes:
+            # The envelope itself cannot fit (very small cap). Say why in a
+            # reply that does fit, rather than printing past the ceiling.
+            sys.stdout.write(invoke.refusal(len(encoded.encode()), max_bytes) + "\n")
+            sys.exit(1)
+        sys.stdout.write(encoded + ("\n" if len(encoded.encode()) < max_bytes else ""))
+        sys.exit(run["exit_code"])
+
+    sys.stdout.write(shaped["output"])
+    if not shaped["output"].endswith("\n") and shaped["bytes"] < budget:
+        sys.stdout.write("\n")
+    sys.exit(run["exit_code"])
+
+# --------------------------------------------------------------------------
+# policy — discovery does not imply exposure
+# --------------------------------------------------------------------------
+
+def _tool_row(con, tool_id: str):
+    row = con.execute("SELECT * FROM tools WHERE id = ?", (tool_id,)).fetchone()
+    if row is None:
+        sys.exit(f"❌ Error: no tool named {tool_id!r}. "
+                 f"Use `omnicli tools <skill>` to list a skill's tools.")
+    return row
+
+
+def cmd_gate(tool_id: str | None, enabled: bool, as_json: bool = False,
+             all_tools: bool = False):
+    """Enable or disable a tool, recording the decision against its contract."""
+    con = _require_catalog()
+    if all_tools:
+        rows = con.execute("SELECT id, contract, enabled FROM tools ORDER BY id").fetchall()
+    elif tool_id:
+        rows = [_tool_row(con, tool_id)]
+    else:
+        sys.exit("❌ Error: name a tool id, or pass --all.")
+
+    changed = []
+    for row in rows:
+        if bool(row["enabled"]) == enabled:
+            continue
+        contract = json.loads(row["contract"] or "{}")
+        policy.set_enabled(row["id"], enabled, contract=contract)
+        con.execute("UPDATE tools SET enabled = ? WHERE id = ?",
+                    (1 if enabled else 0, row["id"]))
+        changed.append(row["id"])
+    con.commit()
+
+    verb = "enabled" if enabled else "disabled"
+    if as_json:
+        print(json.dumps({"action": verb, "changed": len(changed),
+                          "tools": changed if not all_tools else None,
+                          "scanned": len(rows)}, indent=2))
+        return
+    if all_tools:
+        print(f"✅ {verb} {len(changed)} of {len(rows)} tools.")
+    elif changed:
+        print(f"✅ {verb} {changed[0]}")
+    else:
+        print(f"ℹ️  {rows[0]['id']} was already {verb}.")
+
+
+def cmd_policy(tool_id: str | None = None, as_json: bool = False):
+    """Show the gate: what is runnable, what is not, and why it changed."""
+    con = _require_catalog()
+    if tool_id:
+        row = _tool_row(con, tool_id)
+        payload = {
+            "tool": tool_id,
+            "enabled": bool(row["enabled"]),
+            "decision": policy.entry(tool_id),
+            "history": policy.history(tool_id),
+        }
+    else:
+        rows = con.execute("SELECT id, skill, enabled FROM tools ORDER BY skill, id").fetchall()
+        disabled = [r["id"] for r in rows if not r["enabled"]]
+        payload = {
+            "tools": len(rows),
+            "enabled": len(rows) - len(disabled),
+            "disabled": disabled,
+            "recent_decisions": policy.history(limit=10),
+        }
+
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    if tool_id:
+        print(f"\n🔐 [omnicli policy] {tool_id}\n")
+        print(f"   state: {'enabled' if payload['enabled'] else 'disabled'}")
+        decision = payload["decision"]
+        if decision:
+            print(f"   since: {decision.get('at')}  contract:{decision.get('contract')}")
+        if payload["history"]:
+            print("   history:")
+            for rec in payload["history"]:
+                print(f"      {rec.get('at')}  {rec.get('before')} → {rec.get('after')}")
+        print()
+        return
+
+    print(f"\n🔐 [omnicli policy] {payload['enabled']}/{payload['tools']} tools enabled\n")
+    if payload["disabled"]:
+        shown = payload["disabled"][:40]
+        print("   disabled: " + ", ".join(shown)
+              + (f" … (+{len(payload['disabled']) - len(shown)} more)"
+                 if len(payload["disabled"]) > len(shown) else ""))
+    for rec in payload["recent_decisions"]:
+        print(f"   {rec.get('at')}  {rec.get('tool')}: {rec.get('before')} → {rec.get('after')}")
+    print()
 
 
 def cmd_alias(skill: str = None, aliases: str = None, tags: str = None,
@@ -949,6 +942,9 @@ def main():
     p.add_argument("--rerank", choices=["auto", "always", "never"], default="auto",
                    help="auto=only re-rank when the lexical ranking is unsure (default), "
                         "always=re-rank every query, never=never re-rank")
+    p.add_argument("--chunks", action="store_true",
+                   help="With --json: include every matching chunk (default is the "
+                        "compact routing view: skill, score, why, top hit)")
 
     p = sub.add_parser("list", help="List every skill in the registry")
     p.add_argument("--json", action="store_true")
@@ -976,6 +972,20 @@ def main():
     p.add_argument("--omni-json", action="store_true")
     p.add_argument("--omni-timeout", type=float, default=300.0)
     p.add_argument("args", nargs=argparse.REMAINDER)
+
+    p = sub.add_parser("enable", help="Expose a discovered tool to agents (gate)")
+    p.add_argument("tool_id", nargs="?")
+    p.add_argument("--all", action="store_true", help="Enable every catalogued tool")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("disable", help="Withdraw a tool without deleting it")
+    p.add_argument("tool_id", nargs="?")
+    p.add_argument("--all", action="store_true", help="Disable every tool")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("policy", help="Show the enable gate and its audit log")
+    p.add_argument("tool_id", nargs="?")
+    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("index", help="Build or refresh the catalog index")
     p.add_argument("--rebuild", action="store_true", help="Force a full rebuild")
@@ -1033,7 +1043,8 @@ def main():
         sys.exit(subprocess.run([fast_cdp] + args.args).returncode)
     elif args.action == "search":
         cmd_search(args.query, as_json=args.json, limit=args.limit,
-                   explain=args.explain, no_rerank=args.no_rerank, rerank=args.rerank)
+                   explain=args.explain, no_rerank=args.no_rerank,
+                   rerank=args.rerank, chunks=args.chunks)
     elif args.action == "list":
         cmd_list(as_json=args.json, show_all=args.all)
     elif args.action == "tools":
@@ -1043,6 +1054,12 @@ def main():
     elif args.action == "index":
         cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts,
                   as_json=args.json, check=args.check)
+    elif args.action == "enable":
+        cmd_gate(args.tool_id, True, as_json=args.json, all_tools=args.all)
+    elif args.action == "disable":
+        cmd_gate(args.tool_id, False, as_json=args.json, all_tools=args.all)
+    elif args.action == "policy":
+        cmd_policy(args.tool_id, as_json=args.json)
     elif args.action == "alias":
         cmd_alias(skill=args.skill, aliases=args.aliases, tags=args.tags,
                   remove=args.remove, show_all=args.list, as_json=args.json)

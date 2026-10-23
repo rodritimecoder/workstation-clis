@@ -280,8 +280,7 @@
       "protected file",
       "stop the agent from deleting my notes",
       "make this command safe before running it",
-      "lock down a file",
-      "protect the state file from being edited"
+      "lock down a file"
     ],
     "tags": [
       "safety",
@@ -592,7 +591,6 @@
       "harvest failures",
       "dispatch to a cheaper tier",
       "self calibrating router",
-      "which model should handle this prompt",
       "route this prompt to the right model"
     ],
     "tags": [
@@ -686,7 +684,6 @@
     "aliases": [
       "swarm contract",
       "token budget ceiling",
-      "stop the workers before they overspend",
       "scorecard schema for workers",
       "hit list goals",
       "hard spending limit",

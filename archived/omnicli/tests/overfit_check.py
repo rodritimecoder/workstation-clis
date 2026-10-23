@@ -47,16 +47,26 @@ def skill_corpus(skill: str) -> str:
 
 
 def main() -> None:
+    from catalog import registry
+
     cases = json.loads(GOLDEN.read_text(encoding="utf-8"))["cases"]
     aliases = json.loads(ALIASES.read_text(encoding="utf-8"))
+    # Only indexed skills can hand out an answer key. An archived skill's
+    # aliases never reach the FTS table, so counting them as overfitting is a
+    # false positive that hides the real ones.
+    indexed = set(registry.load_all_skills())
 
     queries = [(c["query"], normalise(c["query"])) for c in cases]
     corpora: dict[str, str] = {}
 
     derived = []   # echo of a query, but the words come from the skill's own docs
     overfit = []   # echo of a query, and NOT derivable from the skill's docs
+    skipped = []   # aliases belonging to a skill the catalog does not index
 
     for skill, cfg in aliases.items():
+        if skill not in indexed:
+            skipped.extend((skill, a) for a in cfg.get("aliases", []))
+            continue
         if skill not in corpora:
             corpora[skill] = skill_corpus(skill)
         corpus = corpora[skill]
@@ -100,6 +110,10 @@ def main() -> None:
 
     print(f"aliases checked : {sum(len(c.get('aliases', [])) for c in aliases.values())}")
     print(f"eval queries    : {len(cases)}")
+    if skipped:
+        skills = sorted({s for s, _ in skipped})
+        print(f"not indexed     : {len(skipped)} aliases on {', '.join(skills)} "
+              f"(sidelined; cannot echo an answer key)")
     print(f"\nDERIVED from the skill's own docs (legitimate): {len(derived)}")
     for skill, alias, q in derived:
         print(f"  ✅ {skill:<22} {alias!r}")

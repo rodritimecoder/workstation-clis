@@ -426,13 +426,12 @@
     },
     {
       "query": "use the local llm to write a python script",
-      "top1": "omnicli",
+      "top1": "local-llm",
       "expect": [
-        "omnicli",
-        "local"
+        "local-llm"
       ],
       "kind": "drift",
-      "note": "'local' is the internal virtual skill that owns the endpoint tools; 'omnicli' is the skill that actually ships llm_client.py and exposes the `omnicli llm` command, so it is the actionable answer."
+      "note": "Corrected 2026-10-23. This case expected `omnicli`, which ships llm_client.py but is archived and therefore excluded from the index (SIDELINED_DIRS), so the expectation was unreachable. The actionable skill is `local-llm`, which owns llm_client.py on :8080; `local` remains the virtual skill holding the endpoint tools."
     },
     {
       "query": "check which local inference servers are online",

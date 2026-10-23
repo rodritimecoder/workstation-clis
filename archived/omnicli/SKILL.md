@@ -1,7 +1,7 @@
 ---
 name: omnicli
 
-description: "ARCHIVED. Unified late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skills, pull one tool's exact contract, and invoke it with a bounded response. Also exposes the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). Retired 2026-10-20 in favour of the plain Agent Skills specification; kept as a measured, switchable front line via `skills-frontline gateway`."
+description: "ARCHIVED. Unified late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skills, pull one tool's exact contract, and invoke it with a bounded response. Also exposes the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). Retired as a front line on 2026-10-20 in favour of the plain Agent Skills specification; the binary is still installed and callable directly, but no harness routes through it automatically."
 status: archived
 
 license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
@@ -13,13 +13,16 @@ allowed-tools: "Bash(omnicli:*) Read"
 
 # `omnicli` — The Uber OmniCLI
 
-> **Archived.** Retired 2026-10-20 in favour of the plain Agent Skills
-> specification, which is the default front line. This copy is kept as a
-> measured, switchable alternative: `skills-frontline gateway` routes a
-> harness through this gateway, `skills-frontline shelf` restores the plain
-> specification. The two were compared on 61 golden routing queries with the
-> same model picking both ways — shelf 58/61, gateway 60/61. See
-> `docs/front-line-shelf-vs-gateway.md` in the canonical repository.
+> **Archived.** Retired 2026-10-20 as a *front line* in favour of the plain
+> Agent Skills specification, which is what a harness now discovers by
+> default. The binary is still installed (`~/.local/bin/omnicli`) and still
+> works; nothing in a harness routes through it automatically. Gateway mode
+> still exists as a one-line state file (`~/.config/skills-frontline`) that
+> `sync-skills` reads; there is no `skills-frontline` command. Kept because
+> it remains the only thing that can answer "which of the 392 tools does this
+> intent want". The two front lines were compared on 61 golden routing
+> queries with the same model picking both ways — shelf 54/61, gateway 60/61.
+> See `docs/front-line-shelf-vs-gateway.md` in the canonical repository.
 
 One gateway, two faces, one catalog. An agent discovers a tool by *intent*,
 pulls the contract for that one tool, invokes it, and gets a bounded response.
@@ -37,7 +40,7 @@ Nothing else enters the context window.
                         └───────────────┬───────────────┘
                                         │
                         ┌───────────────▼───────────────┐
-                        │  210 tools  (data plane)       │
+                        │  392 tools  (data plane)       │
                         │  scripts · CLIs · endpoints    │
                         └───────────────────────────────┘
 ```
@@ -76,14 +79,31 @@ hits, relative to the top score, falls below `RERANK_GATE_MARGIN` (0.25).
 
 | mode | latency | golden top-1 | fires on |
 |---|---|---|---|
-| `--rerank never` | 2.5 ms | 60/61 | 0/61 |
-| `--rerank auto` (default) | 17 ms | 60/61 | 7/61 |
-| `--rerank always` | 118 ms | 60/61 | 61/61 |
+| `--rerank never` | 4.0 ms | 60/61 | 0/61 |
+| `--rerank auto` (default) | 24 ms | 60/61 | 9/61 |
+| `--rerank always` | 126 ms | 60/61 | 61/61 |
 
-Same accuracy, 7x less latency. The re-ranker itself is `bge-small-en-v1.5`
+Same accuracy, 6x less latency. The re-ranker itself is `bge-small-en-v1.5`
 on the local embedding endpoint, running with `-ngl 0` — **CPU only, zero
-VRAM** — at 11 ms per embed. When the embedding server is down, `auto` falls
-back to `bm25(gated)` and the catalog stays fully usable.
+VRAM**. When the embedding server is down, `auto` falls back to `bm25(gated)`
+and the catalog stays fully usable.
+
+### Discovery does not imply exposure
+
+A tool is catalogued the moment it is discovered, and runnable only once it
+has been enabled. `omnicli tools` marks disabled tools, `omnicli describe`
+still returns their contract, and `omnicli invoke` refuses them with the exact
+command that would open the gate:
+
+```bash
+omnicli policy            # 392/392 enabled, plus the recent decisions
+omnicli enable <tool_id>  # record the decision against the contract hash
+omnicli disable <tool_id>
+```
+
+Tools that existed when the gate was introduced were grandfathered; tools new
+relative to the previous catalog start disabled. The decision log
+(`policy.log.jsonl`) is append-only and survives a rebuild.
 
 ### 2. `omnicli describe <tool_id>` — get one contract
 
@@ -142,12 +162,17 @@ passed to the tool untouched; `--` forces that split explicitly.
 
 | Flag | Effect |
 |---|---|
-| `--omni-buffer FILE` | write the full output to a file, print a preview |
-| `--omni-project a,b` | keep only these JSON fields |
+| `--omni-buffer FILE` | write the full, **unfiltered** stdout to a file, print a preview |
+| `--omni-project a,b.c` | keep these JSON fields; dotted paths and list elements supported |
 | `--omni-jq EXPR` | JQ filter expression |
 | `--omni-grep RE` | keep only matching lines |
 | `--omni-max-bytes N` | hard cap on returned bytes (default 8000) |
 | `--omni-json` | wrap the result in JSON |
+
+A cap is a budget to fill, not a reason to return only a banner: at 250 bytes
+the reply is 250 bytes of head, banner and tail. A projection that cannot be
+applied says so; it never returns the unfiltered payload as though it worked.
+Unknown `--omni-*` flags are reported instead of silently dropped.
 
 ---
 
@@ -162,10 +187,14 @@ startup instead of 150,000:
 
 | Tool | Input | Returns |
 |---|---|---|
-| `omni_discover` | `intent`, `limit`, `rerank` | ranked skill + tool ids, one line each |
-| `omni_describe` | `tool_id`, `section` | the exact contract for that one tool, or a skill's outline / one section |
-| `omni_invoke` | `tool_id`, `args`, `projection` | bounded, projected result |
-| `omni_status` | — | endpoint health, catalog freshness, retrieval tier |
+| `omni_discover` | `intent`, `limit` (default 5), `rerank`, `max_bytes` | compact routing view: skill, score, why, best tool ids |
+| `omni_describe` | `tool_id`, `section`, `doc`, `max_bytes` | the exact contract for that one tool, or a skill's outline / one section |
+| `omni_invoke` | `tool_id`, `args`, `projection`, `jq`, `grep`, `max_bytes`, `timeout` | bounded, projected result |
+| `omni_status` | `max_bytes` | endpoint health, catalog freshness, enable count, retrieval tier |
+
+Every reply is bounded by `max_bytes`, not just `omni_invoke`; an oversized
+reply becomes a structured error rather than unparseable truncated JSON.
+Requests run on a small pool, so a slow tool cannot stall `ping`.
 
 Register it with a client:
 
@@ -208,23 +237,26 @@ shoulders and onto a BM25 index, and the golden evaluation in `tests/` is the
 falsifiable claim that it works:
 
 ```
-BM25 catalog    top1 52/53 (98.1%)   top3 53/53 (100.0%)
-legacy scorer   top1 34/53 (64.2%)   top3 40/53 (75.5%)
+BM25 catalog    top1 60/61 (98.4%)   top3 60/61 (98.4%)
+legacy scorer   top1 35/61 (57.4%)   top3 46/61 (75.4%)
 ```
 
-The alias set is audited against the eval set (`omnicli eval` / 
-`tests/overfit_check.py`) so a router handed the answer key cannot be
-mistaken for a router that works.
+The miss is a generic-token query ("decide which model should handle this
+prompt before answering") where the decision skill matches all six tokens and
+the router matches four; the re-ranker does not separate them either. It is
+recorded, not excluded.
 
-The set has since grown to 61 cases; the current numbers are 60/61 (98.4%)
-against the legacy scorer's 40/61 (65.6%). `omnicli eval --rerank
-auto|always|never` re-runs it under any re-ranker mode, and all three
+The alias set is audited against the eval set (`tests/overfit_check.py`) so a
+router handed the answer key cannot be mistaken for a router that works. It
+currently reports **0** echoes; three verbatim-echo aliases were removed, and
+the case one of them propped up is the miss above. `omnicli eval --rerank
+auto|always|never` re-runs the set under any re-ranker mode; all three
 currently score 60/61.
 
 ### Token cost (measured)
 
 `tests/measure_tokens.py` counts what actually lands in the model's context,
-using the local Qwen3.5 tokenizer against the 38-skill library:
+using the local Qwen3.5 tokenizer against the 45-skill library:
 
 | | prompt shelf | omnicli | |
 |---|---|---|---|
@@ -239,6 +271,7 @@ it is paid on every turn whether or not a tool gets used.
 
 ## 🔌 Compatibility
 
-`uber`, `local-hub` and `skills-hub` remain as aliases for `omnicli`. The
-legacy `search` / `tools` / `inspect` / `run` verbs still work; `search` now
+`uber`, `local-hub` and `skills-hub` are **not** installed any more; they were
+deprecated aliases and have been removed from `PATH`. `omnicli` is the name.
+The legacy `search` / `tools` / `inspect` / `run` verbs still work; `search`
 uses the BM25 catalog instead of the old substring scorer.
