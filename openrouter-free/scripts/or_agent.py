@@ -76,6 +76,12 @@ CHAT_CASCADE = [
     },
     {
         "provider": "openrouter",
+        "model": "recursive/flint-v1.0:free",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "env_key": "OPENROUTER_API_KEY",
+    },
+    {
+        "provider": "openrouter",
         "model": "qwen/qwen-2.5-coder-32b-instruct:free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "env_key": "OPENROUTER_API_KEY",
@@ -110,6 +116,7 @@ CHAT_CASCADE = [
 JEV_DECISION_MODELS = [
     "baseten/mammoth-1:free",   # 27B - heavier reasoning, complex multi-question decisions
     "baseten/elephant-1:free",  # 9B  - fast, simple decisions
+    "respan/span-01-lite:free", # lite JEV decision model
     "inception/mercury-decide:free",
 ]
 
@@ -118,6 +125,8 @@ def _is_jev_model(model: str) -> bool:
     return (
         "mammoth" in m
         or "elephant" in m
+        or "respan" in m
+        or "span-01" in m
         or "inception" in m
         or "decide" in m
         or m in {x.lower() for x in JEV_DECISION_MODELS}
@@ -126,14 +135,19 @@ def _is_jev_model(model: str) -> bool:
 
 def _jev_cascade_for(query: str, options: list = None) -> list:
     # Optimise routing: fast 9B for simple/binary, 27B for richer multi-option decisions.
-    if options and len(options) >= 3:
-        return ["baseten/mammoth-1:free", "baseten/elephant-1:free", "inception/mercury-decide:free"]
-    return ["baseten/elephant-1:free", "baseten/mammoth-1:free", "inception/mercury-decide:free"]
+    if options:
+        # Respan is noul-only, so exclude it for choice decisions.
+        if len(options) >= 3:
+            return ["baseten/mammoth-1:free", "baseten/elephant-1:free", "inception/mercury-decide:free"]
+        return ["baseten/elephant-1:free", "baseten/mammoth-1:free", "inception/mercury-decide:free"]
+    # Binary/no-options: noul-capable models first (respan is lite & fast).
+    return ["respan/span-01-lite:free", "baseten/elephant-1:free", "baseten/mammoth-1:free", "inception/mercury-decide:free"]
 
 
 DECIDE_CASCADE = [
     "baseten/elephant-1:free",
     "baseten/mammoth-1:free",
+    "respan/span-01-lite:free",
     "inception/mercury-decide:free",
     "nvidia/nemotron-3.5-lightning:free",
     "openrouter/free",
@@ -492,7 +506,27 @@ def run_decide(query: str, options: list = None, preferred_model: str = None,
         }
 
     alpha_url = "https://openrouter.ai/api/alpha/decisions"
+
+    def _respan_noul_only(model, qp):
+        if "respan" not in (model or "").lower():
+            return True
+        # Respan only accepts noul questions with plain-string criteria.
+        if not isinstance(qp, dict):
+            return False
+        for q in qp.values():
+            if not isinstance(q, dict) or q.get("type") != "noul":
+                return False
+            crit = q.get("criteria")
+            if not isinstance(crit, dict):
+                return False
+            if not all(isinstance(v, str) for v in crit.values()):
+                return False
+        return True
+
     for model in jev_candidates:
+        if not _respan_noul_only(model, q_payload):
+            sys.stderr.write("[openrouter-free decide] %s skipped (noul-only)\n" % model)
+            continue
         try:
             dec_payload = {
                 "model": model,
@@ -738,6 +772,17 @@ def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
             }
         except Exception as e:
             live_results["mammoth_jev"] = {"status": "error", "error": str(e)}
+
+        t0 = time.time()
+        try:
+            dec_res = run_decide("Is 2+2=4?", preferred_model="respan/span-01-lite:free")
+            live_results["respan_jev"] = {
+                "status": "online",
+                "verdict": dec_res.get("verdict"),
+                "latency_ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:
+            live_results["respan_jev"] = {"status": "error", "error": str(e)}
 
     status_str = "HEALTHY" if auth_ok else "UNHEALTHY"
 

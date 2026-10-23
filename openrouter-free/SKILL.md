@@ -24,10 +24,11 @@ Use this skill to delegate self-contained coding loops, multi-command bash workf
 ## Verified Free Endpoint Catalog
 - **Note-Taking & Synthesis**: `dots-studio/dots-3-note-preview:free` (Reasoning note synthesis)
 - **Agentic Reasoning & Chat**: `thinkingmachines/inkling:free` (Thinking Machines agentic free tier)
+- **Reasoning (with reasoning_details)**: `recursive/flint-v1.0:free` (Recursive Flint)
 - **Reasoning & Code (Heavy)**: `nvidia/nemotron-3-ultra-550b-a55b:free`
 - **Fast Subagent Coding**: `nvidia/nemotron-3.5-lightning:free`
 - **General Free Router**: `openrouter/free`
-- **Calibrated Decisions (JEV)**: `baseten/mammoth-1:free` (27B, heavy/complex), `baseten/elephant-1:free` (9B, fast/simple), `inception/mercury-decide:free`
+- **Calibrated Decisions (JEV)**: `baseten/mammoth-1:free` (27B, heavy/complex), `baseten/elephant-1:free` (9B, fast/simple), `respan/span-01-lite:free` (lite, noul-only), `inception/mercury-decide:free`
 - **Vector Embeddings**: `liquid/lfm-2.5-embedding-350m:free` & `nvidia/llama-nemotron-embed-vl-1b-v2:free`
 - **Neural Reranking**: `nvidia/llama-nemotron-rerank-vl-1b-v2:free`
 - **TTS Speech Audio**: `fish-audio/s2.1-pro-free:free`
