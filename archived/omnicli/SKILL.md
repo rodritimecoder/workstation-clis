@@ -4,10 +4,7 @@ name: omnicli
 description: "ARCHIVED. Unified late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skills, pull one tool's exact contract, and invoke it with a bounded response. Also exposes the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). Retired as a front line on 2026-10-20 in favour of the plain Agent Skills specification; the binary is still installed and callable directly, but no harness routes through it automatically."
 status: archived
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085, plus the optional embedding server :8087 used to re-rank search results (the catalog works without it). The decision port speaks either native /v1/systemone or the pplx-decider joint protocol v3; the protocol is auto-detected from the served model."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(omnicli:*) Read"
 ---
 

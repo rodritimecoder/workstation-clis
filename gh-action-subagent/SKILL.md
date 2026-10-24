@@ -6,10 +6,7 @@ description: >
   Git, and headless Chrome CDP browser skills. Use when delegating parallel coding tasks,
   running browser E2E checks in a sandbox, or fixing issues asynchronously via Pull Requests.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires network access to GitHub Actions and an authenticated GitHub CLI or GITHUB_TOKEN."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(gh:*) Bash(python3:*) Read Write"
 ---
 

@@ -7,10 +7,7 @@ description: >
   opening temporary public webhook endpoints (tailscale funnel), and transferring
   artifacts across devices (tailscale file cp).
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires the tailscale CLI and a running tailscaled daemon."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(tailscale-ops:*) Bash(tailscale:*) Read"
 ---
 

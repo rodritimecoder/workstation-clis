@@ -6,10 +6,7 @@ description: >
   Inspect VRAM, swap models in and out on port 8000, run the LiteLLM gateway
   on port 4000, and free headroom on ports 8080-8088.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan, the llama.cpp binaries, and the LiteLLM gateway on :4000."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(vram-rig-ctl:*) Bash(python3:*) Read"
 ---
 

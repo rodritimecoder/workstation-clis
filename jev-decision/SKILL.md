@@ -10,13 +10,7 @@ description: >
   claims; or for any yes/no question about a screenshot. Fast and near-free, so it suits
   high-volume loops.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires a local decision model on :8083. Speaks the TypeSafe /v1/systemone API (StartLux-Decision, vllm-d3-nano, vllm-d3-mini), the retired pplx-decider-flash v1.2 joint protocol v3, and the legacy letter-logprob path; the engine picks the protocol from the served model and names it in every result's `source`."
-metadata:
-  creator: "kem_glitch"
-  source_reel_id: "DdjOqRYNZZi"
-  source_reel_url: "https://www.instagram.com/reel/DdjOqRYNZZi/"
-  source_reel_vault_note: "kem_glitch/2026-10-16_jev_decision_engine/notes.md"
 allowed-tools: "Bash(jev-decision:*) Bash(python3:*) Read Write"
 ---
 

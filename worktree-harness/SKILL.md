@@ -7,10 +7,7 @@ description: >
   and merge the passing ones with automated conflict arbitration. Use when
   several agents will edit the same repository at once.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires git and Python 3.10+."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(worktree-harness:*) Bash(git:*) Bash(python3:*) Read Write"
 ---
 

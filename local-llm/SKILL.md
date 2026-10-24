@@ -3,10 +3,7 @@ name: local-llm
 
 description: "Query the local Qwen3.6-35B-A3B Uncensored Genesis model on port 8080 — a zero-cost, offline, dual-GPU Vulkan coder and writer. Use for drafting code, long-form text, refactors, or any prompt that should not leave the machine. Also starts and health-checks the server when it is down."
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires dual AMD Radeon RX 9060 XT GPUs with Vulkan and the llama.cpp Vulkan build. The server is NOT started by default: port 8080 is offline until launched with the skill's start command or /run/media/rodri/AI/sh/luffy_nothink.sh. Takes ~15-20s to load 22GB into VRAM."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(python3:*) Bash(local-llm:*) Bash(curl:*) Read"
 ---
 

@@ -9,10 +9,7 @@ description: >
   between machines, making a repo private, shielding secrets before a push, or
   bootstrapping a fresh workstation from GitHub.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires git and an authenticated GitHub CLI."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(git:*) Bash(gh:*) Bash(github-architect:*) Read Write"
 ---
 

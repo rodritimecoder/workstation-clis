@@ -7,10 +7,7 @@ description: >
   on dual RX 9060 XT GPUs. Use for transcription, narration, cloning, or
   millisecond word timestamps.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan and the audio.cpp v0.9.0 binary."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(audiocpp:*) Bash(python3:*) Read Write"
 ---
 

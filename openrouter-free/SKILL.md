@@ -10,10 +10,7 @@ description: >
   decisions — or when the local GPU is busy. For frontier-quality hosted models, use
   nvidia-nim instead.
 
-license: "Proprietary. Complete terms are in the LICENSE file at the repository root."
 compatibility: "Requires network access to openrouter.ai and an API key (OPENROUTER_API_KEY). The optional Gemini tier needs GEMINI_API_KEY."
-metadata:
-  author: "rodri"
 allowed-tools: "Bash(openrouter-free:*) Bash(python3:*) Read Write"
 ---
 
