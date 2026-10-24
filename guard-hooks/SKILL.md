@@ -41,27 +41,21 @@ table`) and unauthorised deletion or mutation of protected files
 ## 🛠️ CLI Quickstart
 
 ```bash
-GH="/run/media/rodri/AI/skills/guard-hooks/guard_hooks.py"
-
 # 1. Protect a file from deletion or mutation
-python3 $GH protect KeepMD
+guard-hooks protect KeepMD
 
 # 2. Check whether an operation on a protected file would be allowed
-python3 $GH check-file delete KeepMD
+guard-hooks check-file delete KeepMD
 
-# 3. Check whether a command would be allowed, before running it
-python3 $GH check "rm -rf KeepMD"
+# 3. Check whether a command would be allowed, before running it (<2ms native Rust check)
+guard-hooks check "rm -rf KeepMD"
 
 # 4. Wrap a command so it is gated at execution time
-python3 $GH wrap git push --force origin main
+guard-hooks wrap git push --force origin main
 
 # 5. Install the git hook so every commit and push is checked
-python3 $GH install-git-hook
+guard-hooks install-git-hook
 ```
-
----
-
----
 
 ---
 
@@ -69,7 +63,7 @@ python3 $GH install-git-hook
 
 ## Guardrails
 Before running anything destructive, run it through the guard:
-python3 <path>/guard_hooks.py check "<command>"
+guard-hooks check "<command>"
 - `rm -rf`, force push, `drop table` and similar are refused by the hook, not by you.
 - Protected files (KeepMD, STATE.md, .env, secrets) are never deleted or edited without an explicit instruction.
 - If the guard refuses, stop and report. Do not find another way to do it.
