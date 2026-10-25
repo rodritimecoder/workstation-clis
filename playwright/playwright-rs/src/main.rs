@@ -535,6 +535,12 @@ fn is_cdp_port_running(port: u16) -> bool {
 }
 
 fn find_chromium_binary() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("CDP_CHROME_BIN") {
+        let pb = PathBuf::from(explicit);
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
     if let Ok(home) = std::env::var("HOME") {
         let cache = PathBuf::from(home).join(".cache/ms-playwright");
         if cache.exists() {
@@ -553,7 +559,13 @@ fn find_chromium_binary() -> Option<PathBuf> {
         }
     }
 
-    for name in &["chromium", "chromium-browser", "google-chrome"] {
+    for name in &[
+        "google-chrome-stable",
+        "google-chrome",
+        "chrome",
+        "chromium",
+        "chromium-browser",
+    ] {
         if let Ok(out) = Command::new("which").arg(name).output() {
             if out.status.success() {
                 let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -594,7 +606,7 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
         .ok_or_else(|| "No headless chromium or chrome-headless-shell found".to_string())?;
 
     let child = Command::new("setsid")
-        .arg(binary)
+        .arg(&binary)
         .arg(format!("--remote-debugging-port={port}"))
         .arg("--no-sandbox")
         .arg("--disable-gpu")
@@ -613,14 +625,20 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
     let pid = child.id();
     let _ = fs::write(PID_FILE, pid.to_string());
 
-    for _ in 0..40 {
-        std::thread::sleep(Duration::from_millis(40));
+    // A cold runner can take several seconds to open the CDP port. 1.6s was
+    // enough on a warm workstation and not enough in CI.
+    for _ in 0..150 {
+        std::thread::sleep(Duration::from_millis(100));
         if is_cdp_port_running(port) {
             return Ok(());
         }
     }
 
-    Err("Failed to start and warm CDP daemon within 1.6s".to_string())
+    Err(format!(
+        "CDP port {} did not open within 15s (chrome: {})",
+        port,
+        binary.display()
+    ))
 }
 
 fn stop_cdp_daemon() -> bool {
