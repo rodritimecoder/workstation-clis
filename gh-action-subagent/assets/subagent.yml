@@ -58,6 +58,28 @@ jobs:
 
       # A dispatch with no key used to fail three steps later, inside the agent.
       # Fail here, and say what to set.
+      - name: Install OpenCode CLI
+        run: |
+          # The public installer ships v1; --major moves it to v2, which is the
+          # version this workflow is written against.
+          curl -fsSL https://opencode.ai/install | bash > /tmp/oc-install.log 2>&1
+          export PATH="$HOME/.opencode/bin:$PATH"
+          opencode --version
+          opencode upgrade --major > /tmp/oc-upgrade.log 2>&1 || true
+          version="$(opencode --version)"
+          echo "opencode $version"
+          case "$version" in
+            2.*) echo "✅ v2 CLI ready" ;;
+            *) echo "❌ expected an OpenCode 2 CLI, got $version" >&2; tail -20 /tmp/oc-upgrade.log >&2; exit 1 ;;
+          esac
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Install the lane agent
+        run: |
+          mkdir -p "$HOME/.config/opencode/agents"
+          cp orchestration/gh-action-subagent/assets/agents/lane.md "$HOME/.config/opencode/agents/lane.md"
+          echo "✅ lane agent installed (shell allowed, push/rm/sudo denied)"
+
       - name: Preflight — provider credentials
         env:
           OPENCODE_GO_TOKEN: ${{ secrets.OPENCODE_GO_TOKEN }}
@@ -122,16 +144,38 @@ jobs:
           git config user.email "cloud-subagent[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
-      - name: Execute Subagent via OpenCode Go
+      - name: Execute the Lane with the OpenCode CLI
         env:
-          OPENCODE_GO_TOKEN: ${{ secrets.OPENCODE_GO_TOKEN }}
-          OPENCODE_GO_MODEL: ${{ inputs.model }}
-          OPENCODE_GO_TURNS: ${{ inputs.turns }}
-          OPENCODE_GO_EXPECT_PATH: ${{ inputs.expect_path }}
-          CDP_ENDPOINT: "http://127.0.0.1:9222"
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_GO_TOKEN }}
+          MODEL: ${{ inputs.model }}
           TASK: ${{ inputs.task }}
+          EXPECT: ${{ inputs.expect_path }}
         run: |
-          python3 orchestration/gh-action-subagent/scripts/go_agent.py --task "$TASK"
+          export PATH="$HOME/.opencode/bin:$PATH"
+          if [ -z "$OPENCODE_API_KEY" ]; then
+            echo "❌ OPENCODE_GO_TOKEN is not set" >&2
+            exit 1
+          fi
+          case "$MODEL" in
+            */*) MODEL_REF="$MODEL" ;;
+            *)   MODEL_REF="opencode-go/$MODEL" ;;
+          esac
+          echo "model: $MODEL_REF"
+          set +e
+          opencode run --standalone --auto --agent lane --format json -m "$MODEL_REF" "$TASK"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "❌ the lane exited $rc" >&2
+            exit "$rc"
+          fi
+          if [ -n "$EXPECT" ]; then
+            if [ -z "$(git status --porcelain -- "$EXPECT")" ]; then
+              echo "❌ the lane finished but changed nothing under $EXPECT" >&2
+              exit 1
+            fi
+            echo "✅ changed: $(git status --porcelain -- "$EXPECT" | head -3 | tr '\n' ' ')"
+          fi
 
       - name: Upload Verification Artifacts (Screenshots, Logs & State Ledger)
         if: always()

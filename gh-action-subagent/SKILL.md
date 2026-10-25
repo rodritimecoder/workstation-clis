@@ -27,6 +27,21 @@ Observed in use (2026-10-25, 9 dispatches): `deepseek-v4-pro` completed both mul
 
 Safe choices: `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `kimi-k3`, `kimi-k3.1-pro`, `mimo-v2.6-*`, `longcat-2.0`.
 
+### The runner is the OpenCode CLI
+
+`opencode run --standalone --auto --agent lane` drives the lane, not the hand-written loop (that stays in `scripts/go_agent.py` as a fallback for hosts where v2 cannot be installed). What that buys:
+
+| | `go_agent.py` | `opencode run` |
+| :--- | :--- | :--- |
+| Tools | 5 hand-written | write, edit, patch, read, glob, grep, shell, code-mode, MCP |
+| Protocols | OpenAI shape only | all of them, so Claude/Qwen/Grok become usable |
+| Accounting | none | per-step cost and tokens in `--format json` |
+| Safety | string matching on commands | **permission rules in the agent file** |
+
+The safety claim is the one that matters, and it is a capability boundary rather than a filter. `assets/agents/lane.md` denies `git push*`, `rm -rf*`, `sudo*` and `git reset --hard*`, so tests run and pushes do not. Verified: `echo allowed > ok.txt` completed, `git push origin main` came back `status: error, denied`, with `--auto` on.
+
+Retire `go_agent.py` only after a lane goes green through the CLI.
+
 ### Which model, now that it has been measured
 
 The catalog has 30 ids; eight were actually driven today. Cost is from the Go
