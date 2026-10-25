@@ -55,7 +55,14 @@ class TestGoAgent(unittest.TestCase):
         self.assertEqual(summary, "nothing to do")
         print("  ✓ finish returns the summary and stops the loop")
 
-    def test_07_an_anthropic_shape_model_is_refused_before_the_call(self):
+    def test_07_writing_to_the_checkout_root_is_refused_not_crashed(self):
+        result, done = go_agent.dispatch("write_file", {"path": ".", "content": "x"}, self.root)
+        self.assertIn("refused", result)
+        result, _ = go_agent.dispatch("write_file", {"path": "", "content": "x"}, self.root)
+        self.assertIn("refused", result)
+        print("  ✓ a write aimed at the checkout root is refused, not raised")
+
+    def test_07b_an_anthropic_shape_model_is_refused_before_the_call(self):
         import subprocess
         res = subprocess.run(
             [sys.executable, str(Path(go_agent.__file__)), "--task", "x", "--model", "claude-haiku-5-5"],

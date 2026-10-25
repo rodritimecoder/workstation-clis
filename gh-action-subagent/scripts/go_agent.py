@@ -167,26 +167,44 @@ def run_bash(command: str, root: Path) -> str:
     return f"exit {proc.returncode}\n{output[-6000:]}"
 
 
+def safe_path(raw: str, root: Path) -> tuple[Path | None, str]:
+    if raw in ("", ".", "/", "./"):
+        return None, "refused: give a file path, not the checkout root"
+    path = (root / raw).resolve()
+    if not str(path).startswith(str(root.resolve())):
+        return None, "refused: path escapes the checkout"
+    return path, ""
+
+
 def dispatch(name: str, args: dict, root: Path) -> tuple[str, bool]:
     if name == "read_file":
-        path = (root / args.get("path", "")).resolve()
-        if not str(path).startswith(str(root.resolve())):
-            return "refused: path escapes the checkout", False
+        path, why = safe_path(args.get("path", ""), root)
+        if path is None:
+            return why, False
         if not path.is_file():
             return f"no such file: {args.get('path')}", False
-        return path.read_text(encoding="utf-8", errors="replace")[:12000], False
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")[:12000], False
+        except OSError as exc:
+            return f"could not read {args.get('path')}: {exc}", False
     if name == "write_file":
-        path = (root / args.get("path", "")).resolve()
-        if not str(path).startswith(str(root.resolve())):
-            return "refused: path escapes the checkout", False
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(args.get("content", ""), encoding="utf-8")
+        path, why = safe_path(args.get("path", ""), root)
+        if path is None:
+            return why, False
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(args.get("content", ""), encoding="utf-8")
+        except OSError as exc:
+            return f"could not write {args.get('path')}: {exc}", False
         return f"wrote {path.relative_to(root.resolve())} ({len(args.get('content', ''))} chars)", False
     if name == "list_dir":
-        path = (root / args.get("path", ".")).resolve()
+        path = root if args.get("path", ".") in ("", ".", "/") else (root / args["path"]).resolve()
         if not path.is_dir():
             return f"no such directory: {args.get('path')}", False
-        return "\n".join(sorted(p.name for p in path.iterdir()))[:4000], False
+        try:
+            return "\n".join(sorted(p.name for p in path.iterdir()))[:4000], False
+        except OSError as exc:
+            return f"could not list {args.get('path')}: {exc}", False
     if name == "run_bash":
         return run_bash(args.get("command", ""), root), False
     if name == "finish":
@@ -242,6 +260,18 @@ def main() -> int:
         if body.get("error"):
             print(f"[turn {turn}] provider error: {body['error']}", file=sys.stderr)
             return 1
+
+        nudge_at = max(2, (args.turns * 2) // 3)
+        if turn == nudge_at and not any("Stop gathering" in str(m.get("content")) for m in messages):
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Turn {turn} of {args.turns}. Stop gathering evidence now and write the "
+                        "deliverable with what you have. Partial and honest beats complete and late."
+                    ),
+                }
+            )
 
         choice = (body.get("choices") or [{}])[0]
         message = choice.get("message") or {}
