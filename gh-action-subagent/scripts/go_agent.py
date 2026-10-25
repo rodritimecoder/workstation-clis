@@ -39,6 +39,21 @@ SYSTEM = (
 )
 BASH_DENY = ("git push", "git checkout", "git reset", "sudo", "rm -rf /", "shutdown", "reboot")
 
+# The Go catalog serves three protocols. This runner speaks the OpenAI chat
+# shape, so these ids must be driven elsewhere or by a different client.
+ANTHROPIC_SHAPE = {"claude-haiku-5-5", "minimax-m3", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"}
+RESPONSES_SHAPE = {
+    "grok-4.7",
+    "gpt-6-luna",
+    "gpt-5.6-luna",
+    "muse-spark-1.3-contributor",
+    "muse-spark-1.2-contributor",
+}
+SUGGEST = {
+    "anthropic": "minimax-m3.1-flash, glm-5.3, or deepseek-v4-pro",
+    "responses": "deepseek-v4.1-flash, kimi-k3, or glm-5.3-flash",
+}
+
 
 def tools() -> list:
     return [
@@ -192,6 +207,16 @@ def main() -> int:
         return 2
     if not args.task:
         print("error: no task given (--task or $TASK)", file=sys.stderr)
+        return 2
+
+    if args.model in ANTHROPIC_SHAPE or args.model in RESPONSES_SHAPE:
+        shape = "anthropic" if args.model in ANTHROPIC_SHAPE else "responses"
+        print(
+            f"error: {args.model} is not served in the OpenAI chat shape, which is the "
+            f"only protocol this runner speaks (it needs the {shape} API).\n"
+            f"       OpenAI-compatible alternatives: {SUGGEST[shape]}",
+            file=sys.stderr,
+        )
         return 2
 
     root = Path(args.root).resolve()

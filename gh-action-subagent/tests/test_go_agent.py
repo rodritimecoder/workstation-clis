@@ -55,7 +55,21 @@ class TestGoAgent(unittest.TestCase):
         self.assertEqual(summary, "nothing to do")
         print("  ✓ finish returns the summary and stops the loop")
 
-    def test_07_an_unknown_tool_is_reported_not_crashed(self):
+    def test_07_an_anthropic_shape_model_is_refused_before_the_call(self):
+        import subprocess
+        res = subprocess.run(
+            [sys.executable, str(Path(go_agent.__file__)), "--task", "x", "--model", "claude-haiku-5-5"],
+            capture_output=True,
+            text=True,
+            env={"OPENCODE_GO_TOKEN": "x", "PATH": "/usr/bin:/bin"},
+            timeout=30,
+        )
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("anthropic", res.stderr)
+        self.assertIn("deepseek", res.stderr)
+        print("  ✓ a model on another protocol is refused with an alternative")
+
+    def test_08_an_unknown_tool_is_reported_not_crashed(self):
         result, done = go_agent.dispatch("rm_everything", {}, self.root)
         self.assertIn("unknown tool", result)
         self.assertFalse(done)
