@@ -73,6 +73,23 @@ playwright-rs uat "http://localhost:3000" \
   --screenshot /tmp/result.png
 ```
 
+**Hand it the target instead of letting it choose.** `--ref` skips the decision
+call and clicks the ref you name, which is what a caller with its own judge
+needs. `candidates` prints the same ref space without clicking anything:
+
+```bash
+# The ref space, in DOM order, exactly as uat sees it:
+playwright-rs candidates "http://localhost:3000" --json
+# [{"ref": "uat-1", "description": "button 'Back to catalog'"}, …]
+
+# Deterministic click on a ref someone else chose:
+playwright-rs uat "http://localhost:3000" --goal "complete the purchase" --ref uat-3 --json
+```
+
+A ref that is not on the page fails with the available list rather than clicking
+something else. `glitch-cat/frontend-uat` is the reference caller: it extracts
+with `candidates`, decides with JEV, then passes `--ref`.
+
 ---
 
 ## 📦 Traditional E2E Test Runner

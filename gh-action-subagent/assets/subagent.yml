@@ -1,4 +1,4 @@
-name: Cloud Subagent Worker
+name: Cloud Subagent Worker (Kem Glitch Architecture)
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ on:
         default: 'agent/patch'
         type: string
       model:
-        description: 'OpenRouter or Gemini model ID'
+        description: 'OpenCode Go model id, without the provider prefix'
         required: false
-        default: 'openrouter/free'
+        default: 'deepseek-v4.1-flash'
         type: string
 
 concurrency:
@@ -32,96 +32,117 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Setup Node & Python
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: Setup Fast-CDP Binary
+      # A dispatch with no key used to fail three steps later, inside the agent.
+      # Fail here, and say what to set.
+      - name: Preflight — provider credentials
+        env:
+          OPENCODE_GO_TOKEN: ${{ secrets.OPENCODE_GO_TOKEN }}
+        run: |
+          if [ -z "$OPENCODE_GO_TOKEN" ]; then
+            echo "❌ OPENCODE_GO_TOKEN is not set for this repository." >&2
+            echo "   Settings → Secrets and variables → Actions → New repository secret" >&2
+            echo "   Nothing was run; no branch was created." >&2
+            exit 1
+          fi
+          echo "✅ OpenCode Go token present"
+
+      - name: Install Native Kem Binaries
         run: |
           mkdir -p artifacts
-          if [[ -f "hybrid-browser/bin/fast-cdp" ]]; then
-            chmod +x hybrid-browser/bin/fast-cdp
-            sudo cp hybrid-browser/bin/fast-cdp /usr/local/bin/fast-cdp
-            echo "fast-cdp installed to /usr/local/bin"
+          for pair in \
+            "glitch-cat/guard-hooks/bin/guard-hooks:guard-hooks" \
+            "glitch-cat/state-compactor/bin/cgate:cgate" \
+            "multimodal/playwright/bin/playwright-rs:playwright-rs"
+          do
+            src="${pair%%:*}"
+            name="${pair##*:}"
+            if [ -f "$src" ]; then
+              chmod +x "$src"
+              sudo cp "$src" "/usr/local/bin/$name"
+              echo "✅ installed $name"
+            fi
+          done
+          if command -v playwright-rs >/dev/null; then
+            sudo ln -sf /usr/local/bin/playwright-rs /usr/local/bin/fast-cdp
           fi
 
-      - name: Launch Headless Chrome on CDP Port 9222
+      - name: Verify Pre-Execution Guardrails
         run: |
-          CHROME_BIN=$(which google-chrome || which chromium-browser || which chromium || true)
-          if [[ -z "$CHROME_BIN" ]]; then
-            echo "Installing lightweight chromium..."
-            sudo apt-get update -qq && sudo apt-get install -y -qq chromium-browser
-            CHROME_BIN=$(which chromium-browser || which chromium)
+          guard-hooks check "ls -la"
+          if guard-hooks check "rm -rf /" 2>/dev/null; then
+            echo "❌ Guardrails failed to intercept a destructive command" >&2
+            exit 1
           fi
-          echo "Using browser: $CHROME_BIN"
-          "$CHROME_BIN" \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --disable-software-rasterizer \
-            --disable-extensions \
-            --remote-debugging-port=9222 \
-            about:blank > artifacts/chrome.log 2>&1 &
-          sleep 1
-          curl -fsSL http://127.0.0.1:9222/json/version
+          echo "✅ Guardrails active"
+
+      - name: Start the Browser Daemon on CDP Port 9222
+        run: |
+          playwright-rs daemon start --port 9222
+          sleep 2
+          playwright-rs daemon status
+          for _ in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:9222/json/version; then exit 0; fi
+            sleep 2
+          done
+          echo "❌ the CDP daemon did not answer on :9222" >&2
+          exit 1
 
       - name: Prepare Subagent Branch
+        env:
+          BRANCH: ${{ inputs.target_branch }}
         run: |
           git config user.name "cloud-subagent[bot]"
           git config user.email "cloud-subagent[bot]@users.noreply.github.com"
-          git checkout -b "${{ inputs.target_branch }}"
+          git checkout -b "$BRANCH"
 
-      - name: Execute Subagent via OpenRouter Skill
+      - name: Execute Subagent via OpenCode Go
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENCODE_GO_TOKEN: ${{ secrets.OPENCODE_GO_TOKEN }}
+          OPENCODE_GO_MODEL: ${{ inputs.model }}
           CDP_ENDPOINT: "http://127.0.0.1:9222"
+          TASK: ${{ inputs.task }}
         run: |
-          # Check which path or_agent.py exists at
-          if [[ -f "openrouter-free/scripts/or_agent.py" ]]; then
-            AGENT_SCRIPT="openrouter-free/scripts/or_agent.py"
-          elif [[ -f ".agents/skills/openrouter-free/scripts/or_agent.py" ]]; then
-            AGENT_SCRIPT=".agents/skills/openrouter-free/scripts/or_agent.py"
-          else
-            echo "Error: or_agent.py not found" >&2
-            exit 1
-          fi
+          python3 orchestration/gh-action-subagent/scripts/go_agent.py --task "$TASK"
 
-          python3 "$AGENT_SCRIPT" \
-            --prompt "${{ inputs.task }}" \
-            --model "${{ inputs.model }}"
-
-      - name: Upload Verification Artifacts (Screenshots & Logs)
+      - name: Upload Verification Artifacts (Screenshots, Logs & State Ledger)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: subagent-artifacts-${{ github.run_id }}
-          path: artifacts/
+          path: |
+            artifacts/
+            STATE.md
+            .agent_state.json
           if-no-files-found: ignore
 
       - name: Commit, Push, and Open PR if Changes Exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ inputs.target_branch }}
+          TASK: ${{ inputs.task }}
+          MODEL: ${{ inputs.model }}
         run: |
-          if [[ -n "$(git status --porcelain)" ]]; then
-            git add -A
-            git commit -m "chore(subagent): ${{ inputs.task }}"
-            git push -u origin "${{ inputs.target_branch }}" --force
+          # artifacts/ is evidence, not source: it is uploaded above, never committed.
+          if [ -n "$(git status --porcelain -- . ':(exclude)artifacts')" ]; then
+            git add -A -- . ':(exclude)artifacts'
+            git commit -m "chore(subagent): $TASK"
+            # The branch is agent-owned and recreated per run; lease keeps a
+            # human's commits from being overwritten by a stale worker.
+            git push -u origin "HEAD:refs/heads/$BRANCH" --force-with-lease
             gh pr create \
-              --title "[Subagent] ${{ inputs.task }}" \
-              --body "Automated patch generated by Cloud Subagent using model \`${{ inputs.model }}\`." \
-              --head "${{ inputs.target_branch }}" \
+              --title "[Subagent] $TASK" \
+              --body "Automated patch generated by the Cloud Subagent using \`$MODEL\` with Kem guardrails." \
+              --head "$BRANCH" \
               --base main || true
           else
-            echo "No file changes made by subagent."
+            echo "No source changes made by the subagent."
           fi

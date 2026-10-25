@@ -39,9 +39,10 @@ def take_screenshot_and_snapshot(target_url, output_dir="./artifacts", name="sna
         str(Path.home() / ".local/bin/fast-cdp"),
         # The sibling skill in this collection, without assuming where the
         # collection is mounted: scripts/ -> skill -> domain -> <skills root>.
-        str(Path(__file__).resolve().parents[2] / "multimodal" / "hybrid-browser" / "bin" / "fast-cdp"),
-        "./hybrid-browser/bin/fast-cdp",
-        "../hybrid-browser/bin/fast-cdp",
+        str(Path(__file__).resolve().parents[3] / "multimodal" / "playwright" / "bin" / "fast-cdp"),
+        str(Path(__file__).resolve().parents[3] / "multimodal" / "playwright" / "bin" / "playwright-rs"),
+        "./playwright/bin/fast-cdp",
+        "./multimodal/playwright/bin/fast-cdp",
     ]
     fast_cdp_bin = next((c for c in fast_cdp_candidates if c and os.path.isfile(c) and os.access(c, os.X_OK)), None)
 

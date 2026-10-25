@@ -6,18 +6,18 @@ description: >
   Git, and headless Chrome CDP browser skills. Use when delegating parallel coding tasks,
   running browser E2E checks in a sandbox, or fixing issues asynchronously via Pull Requests.
 
-compatibility: "Requires network access to GitHub Actions and an authenticated GitHub CLI or GITHUB_TOKEN."
+compatibility: "Requires network access to GitHub Actions, an authenticated GitHub CLI or GITHUB_TOKEN, and an OpenCode Go token in the repository secrets."
 allowed-tools: "Bash(gh:*) Bash(python3:*) Read Write"
 ---
 
 # GitHub Actions Cloud Subagent Skill
 
-Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a single API call. Each subagent runs in an isolated Ubuntu VM with pre-cached Chromium (for CDP verification on port 9222) and the `openrouter-free` skill.
+Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a single API call. Each subagent runs in an isolated Ubuntu VM with the `playwright` skill's native client (browser daemon on :9222), the guard hooks, and the OpenCode Go tool loop in `scripts/go_agent.py`.
 
 ## Prerequisites
 - GitHub CLI (`gh`) authenticated, OR `GITHUB_TOKEN` exported in the environment.
 - Workflow file `.github/workflows/subagent.yml` committed to the repository `main` branch — copy `assets/subagent.yml` from this skill; its `workflow_dispatch` inputs (`task`, `target_branch`, `model`) are exactly what `gh-subagent dispatch` sends.
-- Repository secret `OPENROUTER_API_KEY` (and optionally `GEMINI_API_KEY`) added in GitHub repo settings.
+- Repository secret `OPENCODE_GO_TOKEN` added in GitHub repo settings. The token is the OpenCode Go credential; the workflow refuses to start without it, before it creates a branch.
 
 ## Commands
 
@@ -26,7 +26,7 @@ Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a singl
 gh-subagent dispatch \
   --task "Start dev server, use CDP skill to inspect /login, fix the layout bug, and open a PR" \
   --branch "agent/fix-login" \
-  --model "openrouter/free"
+  --model "deepseek-v4.1-flash"
 ```
 
 ### 2. List Active / Recent Cloud Subagents

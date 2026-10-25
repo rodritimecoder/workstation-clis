@@ -32,6 +32,7 @@ enum Commands {
     Daemon(DaemonArgs),
     Verify(VerifyArgs),
     Uat(UatArgs),
+    Candidates(CandidatesArgs),
     Snap(SnapArgs),
     Nav(NavArgs),
 
@@ -84,6 +85,8 @@ struct UatArgs {
     url: String,
     #[arg(long)]
     goal: String,
+    #[arg(long = "ref")]
+    ref_id: Option<String>,
     #[arg(long)]
     expect_text: Option<String>,
     #[arg(long)]
@@ -144,6 +147,17 @@ struct GotoArgs {
     url: String,
     #[arg(long, default_value_t = 5000)]
     timeout: u64,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct CandidatesArgs {
+    url: String,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value_t = false)]
+    no_block_media: bool,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -1370,27 +1384,7 @@ fn run_nav(args: NavArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let start = Instant::now();
-    ensure_cdp_daemon_on_port(CDP_PORT)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut client = CdpClient::new(!args.no_block_media, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("data:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    client
-        .navigate(&target_url, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let extract_script = r#"
+const UAT_EXTRACT_JS: &str = r#"
     (() => {
         const elements = [];
         const candidates = document.querySelectorAll('button, a, input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])');
@@ -1413,7 +1407,29 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
         return elements;
     })()
-    "#;
+"#;
+
+fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let start = Instant::now();
+    ensure_cdp_daemon_on_port(CDP_PORT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut client = CdpClient::new(!args.no_block_media, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let target_url = if !args.url.starts_with("http://")
+        && !args.url.starts_with("https://")
+        && !args.url.starts_with("data:")
+    {
+        format!("https://{}", args.url)
+    } else {
+        args.url.clone()
+    };
+
+    client
+        .navigate(&target_url, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let extract_script = UAT_EXTRACT_JS;
 
     let candidates_val = client.evaluate(extract_script)?;
     let candidates_arr = candidates_val
@@ -1457,10 +1473,21 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.goal
     );
 
-    let (selected_ref, prob, conf) = if args.model == "jpt" {
-        query_jpt_decision(&state, &question, &options)?
+    let (selected_ref, prob, conf, model_label) = if let Some(chosen) = args.ref_id.clone() {
+        let known = candidates_arr
+            .iter()
+            .any(|c| c.get("ref").and_then(Value::as_str) == Some(chosen.as_str()));
+        if !known {
+            let available = options.keys().cloned().collect::<Vec<_>>().join(", ");
+            return Err(format!("ref '{chosen}' is not on this page. Available: {available}").into());
+        }
+        (chosen, 1.0_f64, 1.0_f64, "external".to_string())
+    } else if args.model == "jpt" {
+        let (r, p, c) = query_jpt_decision(&state, &question, &options)?;
+        (r, p, c, args.model.clone())
     } else {
-        query_imajev_decision(&state, &question, &options)?
+        let (r, p, c) = query_imajev_decision(&state, &question, &options)?;
+        (r, p, c, args.model.clone())
     };
 
     let selected_desc = options
@@ -1475,7 +1502,7 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
         description: selected_desc,
         probability: prob,
         confidence: conf,
-        model: args.model.clone(),
+        model: model_label,
     });
 
     let click_script = format!(
@@ -1680,6 +1707,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Verify(v) => run_verify(v)?,
         Commands::Uat(u) => run_uat(u)?,
+        Commands::Candidates(c) => run_candidates(c)?,
         Commands::Snap(s) => run_snap(s)?,
         Commands::Nav(n) => run_nav(n)?,
 
@@ -1694,6 +1722,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Eval(e) => run_eval(session, e)?,
         Commands::Screenshot(s) => run_screenshot(session, s)?,
         Commands::Close(c) => run_close(session, c)?,
+    }
+    Ok(())
+}
+
+fn run_candidates(args: CandidatesArgs) -> Result<(), Box<dyn std::error::Error>> {
+    ensure_cdp_daemon_on_port(CDP_PORT)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut client = CdpClient::new(!args.no_block_media, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let target_url = if !args.url.starts_with("http://")
+        && !args.url.starts_with("https://")
+        && !args.url.starts_with("data:")
+    {
+        format!("https://{}", args.url)
+    } else {
+        args.url.clone()
+    };
+
+    client
+        .navigate(&target_url, args.timeout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    let value = client.evaluate(UAT_EXTRACT_JS)?;
+    let candidates = value
+        .get("value")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "Failed to extract candidate elements".to_string())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&Value::Array(candidates))?);
+    } else {
+        for c in &candidates {
+            println!(
+                "{}: {}",
+                c.get("ref").and_then(Value::as_str).unwrap_or(""),
+                c.get("description").and_then(Value::as_str).unwrap_or("")
+            );
+        }
     }
     Ok(())
 }
