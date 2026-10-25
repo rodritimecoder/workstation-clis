@@ -34,6 +34,7 @@ SYSTEM = (
     "You are a coding subagent working alone in a git checkout. "
     "Be economical: you have a hard turn budget, so spend at most half of it "
     "gathering evidence and then write your output, even if it is incomplete. "
+    "Work only on the paths the task names; do not explore unrelated skills. "
     "You have read_file, write_file, list_dir, run_bash and finish. "
     "Make the smallest change that satisfies the task, then run the project's own "
     "tests if they are quick. Never run git push, git checkout or sudo. "
@@ -122,13 +123,13 @@ def tools() -> list:
     ]
 
 
-def call_model(url: str, token: str, model: str, session: str, messages: list) -> dict:
+def call_model(url: str, token: str, model: str, session: str, messages: list, tool_choice: str = "required") -> dict:
     payload = json.dumps(
         {
             "model": model,
             "messages": messages,
             "tools": tools(),
-            "tool_choice": "auto",
+            "tool_choice": tool_choice,
             "temperature": 0.2,
             "max_tokens": 4000,
         }
@@ -252,6 +253,7 @@ def main() -> int:
     root = Path(args.root).resolve()
     session = f"subagent-{uuid.uuid4()}"
     prose_retry_used = False
+    tool_choice = os.environ.get("OPENCODE_GO_TOOL_CHOICE", "required")
     messages = [
         {"role": "system", "content": f"{SYSTEM} You have at most {args.turns} turns."},
         {"role": "user", "content": args.task},
@@ -259,9 +261,13 @@ def main() -> int:
 
     for turn in range(1, args.turns + 1):
         try:
-            body = call_model(args.url, token, args.model, session, messages)
+            body = call_model(args.url, token, args.model, session, messages, tool_choice)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:400]
+            if exc.code == 400 and "tool_choice" in detail and tool_choice != "auto":
+                print("[turn] provider rejected tool_choice=required; retrying with auto")
+                tool_choice = "auto"
+                continue
             print(f"[turn {turn}] HTTP {exc.code}: {detail}", file=sys.stderr)
             return 1
         except Exception as exc:  # noqa: BLE001 - the workflow needs the reason
