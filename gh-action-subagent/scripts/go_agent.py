@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -146,8 +147,27 @@ def call_model(url: str, token: str, model: str, session: str, messages: list, t
             "User-Agent": "opencode-go-subagent/1.0",
         },
     )
-    with urllib.request.urlopen(request, timeout=600) as response:
-        return json.loads(response.read().decode("utf-8"))
+    # The Go catalog occasionally answers 503 "Endpoint is unavailable" for a
+    # model that is fine a minute later. Retry the transient ones before
+    # spending a turn and failing the run.
+    last: Exception | None = None
+    for attempt, delay in enumerate((0, 2, 5)):
+        if delay:
+            time.sleep(delay)
+        try:
+            with urllib.request.urlopen(request, timeout=600) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (500, 502, 503, 504) and attempt < 2:
+                last = exc
+                continue
+            raise
+        except urllib.error.URLError as exc:
+            if attempt < 2:
+                last = exc
+                continue
+            raise
+    raise last if last else RuntimeError("model call failed")
 
 
 def run_bash(command: str, root: Path) -> str:
