@@ -173,6 +173,10 @@ struct ClickArgs {
     target: String,
     #[arg(long, default_value_t = 5000)]
     timeout: u64,
+    #[arg(long)]
+    expect_text: Option<String>,
+    #[arg(long)]
+    expect_url: Option<String>,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -471,6 +475,67 @@ impl CdpClient {
         }
 
         Ok(res.get("result").cloned().unwrap_or(Value::Null))
+    }
+
+
+    /// Poll a JS expression until it returns true, then return the last value.
+    fn poll_js(&mut self, expr: &str, timeout_ms: u64) -> Result<Value, String> {
+        let start = Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        loop {
+            let value = self
+                .evaluate(expr)?
+                .get("value")
+                .cloned()
+                .unwrap_or(Value::Null);
+            if value.as_bool() == Some(true) || start.elapsed() >= deadline {
+                return Ok(value);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Wait until the element is attached, visible, enabled and actually the
+    /// thing a pointer would hit. Returns the last observed state.
+    fn wait_ready(&mut self, selector: &str, timeout_ms: u64) -> Result<Value, String> {
+        let script = format!(
+            r#"(() => {{
+                const el = document.querySelector({sel});
+                if (!el) return {{ ready: false, state: "missing" }};
+                const r = el.getBoundingClientRect();
+                const s = window.getComputedStyle(el);
+                if (!(r.width > 0 && r.height > 0) || s.visibility === "hidden" || s.display === "none" || Number(s.opacity) === 0) {{
+                    return {{ ready: false, state: "hidden" }};
+                }}
+                if (el.disabled === true || el.getAttribute("aria-disabled") === "true") {{
+                    return {{ ready: false, state: "disabled" }};
+                }}
+                const cx = r.left + r.width / 2;
+                const cy = r.top + r.height / 2;
+                const hit = document.elementFromPoint(cx, cy);
+                if (!hit || !(hit === el || el.contains(hit))) {{
+                    return {{ ready: false, state: "covered", by: hit ? hit.tagName.toLowerCase() : "nothing" }};
+                }}
+                return {{ ready: true, state: "ready" }};
+            }})()"#,
+            sel = json!(selector)
+        );
+        let start = Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        loop {
+            let value = self
+                .evaluate(&script)?
+                .get("value")
+                .cloned()
+                .unwrap_or(Value::Null);
+            if value.get("ready").and_then(Value::as_bool) == Some(true) {
+                return Ok(value);
+            }
+            if start.elapsed() >= deadline {
+                return Ok(value);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     fn navigate(&mut self, url: &str, timeout_ms: u64) -> Result<(), String> {
@@ -976,6 +1041,29 @@ fn run_click(session_name: &str, args: ClickArgs) -> Result<(), Box<dyn std::err
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     let sel = resolve_target_selector(&args.target);
+
+    // One-shot clicking is how a verification lies: the element is not there
+    // yet, or a spinner covers it, and the click returns ok without doing
+    // anything. Wait for a state a pointer could actually hit.
+    let waited = Instant::now();
+    let state = client.wait_ready(&sel, args.timeout)?;
+    let ready = state.get("ready").and_then(Value::as_bool) == Some(true);
+    if !ready {
+        let observed = state.get("state").and_then(Value::as_str).unwrap_or("unknown");
+        let by = state.get("by").and_then(Value::as_str).unwrap_or("");
+        let detail = if by.is_empty() {
+            observed.to_string()
+        } else {
+            format!("{observed} by {by}")
+        };
+        return Err(format!(
+            "{} was never clickable within {}ms ({detail})",
+            args.target, args.timeout
+        )
+        .into());
+    }
+    let waited_ms = waited.elapsed().as_millis();
+
     let script = format!(
         r#"(() => {{
             const el = document.querySelector({sel_json});
@@ -993,12 +1081,51 @@ fn run_click(session_name: &str, args: ClickArgs) -> Result<(), Box<dyn std::err
     );
 
     let res_val = client.evaluate(&script)?;
-    let res = res_val.get("value").cloned().unwrap_or(Value::Null);
+    let mut res = res_val.get("value").cloned().unwrap_or(Value::Null);
+
+    // The click returning ok proves nothing about the page. If an effect was
+    // asked for, poll for it and only then say ok.
+    let mut effects = Vec::new();
+    if let Some(ref text) = args.expect_text {
+        let expr = format!(
+            "document.body ? document.body.innerText.includes({}) : false",
+            json!(text)
+        );
+        let seen = client.poll_js(&expr, args.timeout)?.as_bool() == Some(true);
+        if !seen {
+            return Err(format!("clicked, but text '{text}' never appeared within {}ms", args.timeout).into());
+        }
+        effects.push(format!("text:{text}"));
+    }
+    if let Some(ref url) = args.expect_url {
+        let expr = format!("location.href.includes({})", json!(url));
+        let seen = client.poll_js(&expr, args.timeout)?.as_bool() == Some(true);
+        if !seen {
+            let current = client
+                .evaluate("location.href")?
+                .get("value")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            return Err(format!("clicked, but URL never contained '{url}' within {}ms (at {current})", args.timeout).into());
+        }
+        effects.push(format!("url:{url}"));
+    }
+
+    if let Some(obj) = res.as_object_mut() {
+        obj.insert("waited_ms".to_string(), json!(waited_ms));
+        obj.insert("effects".to_string(), json!(effects));
+    }
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&res)?);
     } else {
-        println!("Clicked: {} ({sel})", args.target);
+        let suffix = if effects.is_empty() {
+            String::new()
+        } else {
+            format!(" (verified {})", effects.join(", "))
+        };
+        println!("Clicked: {} ({sel}) after {waited_ms}ms{suffix}", args.target);
     }
     Ok(())
 }
@@ -1546,22 +1673,33 @@ fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut errors = Vec::new();
 
+    // Poll the effect: a route change or a re-render is rarely done the instant
+    // the click returns, and failing on the first read made this flaky.
     if let Some(ref expect_text) = args.expect_text {
-        let body_val = client.evaluate("document.body ? document.body.innerText : ''")?;
-        let body_text = body_val.get("value").and_then(Value::as_str).unwrap_or("");
-        if !body_text.contains(expect_text) {
+        let expr = format!(
+            "document.body ? document.body.innerText.includes({}) : false",
+            json!(expect_text)
+        );
+        if client.poll_js(&expr, args.timeout)?.as_bool() != Some(true) {
             errors.push(format!(
-                "Expected UAT text '{expect_text}' not found after action"
+                "Expected text '{expect_text}' did not appear within {}ms",
+                args.timeout
             ));
         }
     }
 
     if let Some(ref expect_url) = args.expect_url {
-        let url_val = client.evaluate("window.location.href")?;
-        let current_url = url_val.get("value").and_then(Value::as_str).unwrap_or("");
-        if !current_url.contains(expect_url) {
+        let expr = format!("location.href.includes({})", json!(expect_url));
+        if client.poll_js(&expr, args.timeout)?.as_bool() != Some(true) {
+            let current_url = client
+                .evaluate("location.href")?
+                .get("value")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             errors.push(format!(
-                "Expected UAT URL to contain '{expect_url}', got '{current_url}'"
+                "Expected URL to contain '{expect_url}' within {}ms, got '{current_url}'",
+                args.timeout
             ));
         }
     }

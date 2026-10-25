@@ -73,6 +73,24 @@ playwright-rs uat "http://localhost:3000" \
   --screenshot /tmp/result.png
 ```
 
+**Clicking waits, and proves the effect.** `click` polls until the element is
+attached, visible, enabled and actually the thing a pointer would hit — then, if
+you asked for an expectation, it polls that too and only reports `ok` when the
+page changed:
+
+```bash
+playwright-rs click "#go" --expect-text "order placed" --json
+# { "ok": true, "waited_ms": 706, "effects": ["text:order placed"], … }
+
+playwright-rs click "#buy" --timeout 1500
+# Error: "#buy was never clickable within 1500ms (covered by div)"
+```
+
+Without an expectation a click only tells you the element existed. With one, it
+tells you something happened — which is the only thing worth verifying. The same
+polling applies to `uat --expect-text/--expect-url`: a route change that lands
+300 ms later no longer reads as a failure.
+
 **Hand it the target instead of letting it choose.** `--ref` skips the decision
 call and clicks the ref you name, which is what a caller with its own judge
 needs. `candidates` prints the same ref space without clicking anything:
