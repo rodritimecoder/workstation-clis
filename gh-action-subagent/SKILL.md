@@ -23,6 +23,8 @@ Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a singl
 
 The Go catalog serves three shapes, and `go_agent.py` speaks one: **OpenAI `chat/completions`**. Claude Haiku, Qwen and MiniMax M3 use the Anthropic shape; Grok and the GPT Luna pair use the Responses shape. The runner refuses those ids up front with a suggestion rather than failing mid-task on `ModelProtocolUnsupported`.
 
+Observed in use (2026-10-25, 9 dispatches): `deepseek-v4-pro` completed both multi-file edits it was given. `glm-5.3` twice answered in prose instead of calling a tool, even with `tool_choice: required` — the runner asks once more, then fails. Treat that as a model behaviour, not a harness bug: prefer the DeepSeek lanes for write-heavy runs.
+
 Safe choices: `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `kimi-k3`, `kimi-k3.1-pro`, `mimo-v2.6-*`, `longcat-2.0`.
 
 ## Commands
