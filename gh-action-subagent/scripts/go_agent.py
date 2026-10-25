@@ -41,6 +41,10 @@ SYSTEM = (
     "tests if they are quick. Never run git push, git checkout or sudo. "
     "When you are done, call finish with a one-paragraph summary of what changed."
 )
+# Parameters this catalog has already refused, per model. Learning once per run
+# saves a wasted 400 on every subsequent turn.
+PARAM_OVERRIDES: dict[str, dict] = {}
+
 BASH_DENY = ("git push", "git checkout", "git reset", "sudo", "rm -rf /", "shutdown", "reboot")
 
 # The Go catalog serves three protocols. This runner speaks the OpenAI chat
@@ -124,50 +128,84 @@ def tools() -> list:
     ]
 
 
-def call_model(url: str, token: str, model: str, session: str, messages: list, tool_choice: str = "required") -> dict:
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": messages,
-            "tools": tools(),
-            "tool_choice": tool_choice,
-            "temperature": 0.2,
-            "max_tokens": 4000,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-            "x-opencode-session": session,
-            # The Go docs ask clients to identify themselves rather than
-            # sending a library user agent, which a bot filter can reject.
-            "User-Agent": "opencode-go-subagent/1.0",
-        },
+def call_model(
+    url: str,
+    token: str,
+    model: str,
+    session: str,
+    messages: list,
+    tool_choice: str = "auto",
+    temperature: float | None = None,
+) -> dict:
+    """One model call, adapting to the per-model parameter rules of the catalog.
+
+    Two failures observed in use are the client's fault, not the model's:
+    kimi-k3.1-pro rejects any temperature but 1, and some upstreams reject
+    tool_choice=required outright. Both are retried with a legal request.
+    """
+    learned = PARAM_OVERRIDES.setdefault(model, {})
+    tool_choice = learned.get("tool_choice", tool_choice)
+    temp = (
+        temperature
+        if temperature is not None
+        else learned.get("temperature", float(os.environ.get("OPENCODE_GO_TEMPERATURE", "0.2")))
     )
-    # The Go catalog occasionally answers 503 "Endpoint is unavailable" for a
-    # model that is fine a minute later. Retry the transient ones before
-    # spending a turn and failing the run.
-    last: Exception | None = None
-    for attempt, delay in enumerate((0, 2, 5)):
-        if delay:
-            time.sleep(delay)
-        try:
-            with urllib.request.urlopen(request, timeout=600) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            if exc.code in (500, 502, 503, 504) and attempt < 2:
-                last = exc
-                continue
-            raise
-        except urllib.error.URLError as exc:
-            if attempt < 2:
-                last = exc
-                continue
-            raise
-    raise last if last else RuntimeError("model call failed")
+    attempts = 0
+    while True:
+        attempts += 1
+        payload = json.dumps(
+            {
+                "model": model,
+                "messages": messages,
+                "tools": tools(),
+                "tool_choice": tool_choice,
+                "temperature": temp,
+                "max_tokens": 4000,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+                "x-opencode-session": session,
+                "User-Agent": "opencode-go-subagent/1.0",
+            },
+        )
+        last: Exception | None = None
+        for attempt, delay in enumerate((0, 2, 5)):
+            if delay:
+                time.sleep(delay)
+            try:
+                with urllib.request.urlopen(request, timeout=600) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")
+                if exc.code == 400 and attempts < 3:
+                    if "temperature" in detail.lower() and temp != 1.0:
+                        print(f"[params] {model} rejects temperature={temp}; retrying with 1")
+                        temp = 1.0
+                        learned["temperature"] = 1.0
+                        break
+                    if tool_choice != "auto":
+                        print(f"[params] {model} rejects tool_choice={tool_choice}; retrying with auto")
+                        tool_choice = "auto"
+                        learned["tool_choice"] = "auto"
+                        break
+                if exc.code in (500, 502, 503, 504) and attempt < 2:
+                    last = exc
+                    continue
+                raise
+            except urllib.error.URLError as exc:
+                if attempt < 2:
+                    last = exc
+                    continue
+                raise
+        else:
+            raise last if last else RuntimeError("model call failed")
+        if attempts >= 3:
+            raise RuntimeError(f"{model} rejected the request after {attempts} parameter adaptations")
 
 
 def run_bash(command: str, root: Path) -> str:
@@ -284,10 +322,6 @@ def main() -> int:
             body = call_model(args.url, token, args.model, session, messages, tool_choice)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:400]
-            if exc.code == 400 and tool_choice != "auto":
-                print("[turn] provider rejected tool_choice=required; retrying with auto")
-                tool_choice = "auto"
-                continue
             print(f"[turn {turn}] HTTP {exc.code}: {detail}", file=sys.stderr)
             return 1
         except Exception as exc:  # noqa: BLE001 - the workflow needs the reason
