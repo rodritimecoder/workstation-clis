@@ -251,6 +251,7 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     session = f"subagent-{uuid.uuid4()}"
+    prose_retry_used = False
     messages = [
         {"role": "system", "content": f"{SYSTEM} You have at most {args.turns} turns."},
         {"role": "user", "content": args.task},
@@ -271,17 +272,20 @@ def main() -> int:
             print(f"[turn {turn}] provider error: {body['error']}", file=sys.stderr)
             return 1
 
-        nudge_at = max(2, (args.turns * 2) // 3)
-        if turn == nudge_at and not any("Stop gathering" in str(m.get("content")) for m in messages):
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        f"Turn {turn} of {args.turns}. Stop gathering evidence now and write the "
-                        "deliverable with what you have. Partial and honest beats complete and late."
-                    ),
-                }
-            )
+        for fraction in (2, 3):
+            nudge_at = max(2, (args.turns * fraction) // 3)
+            marker = f"Turn {nudge_at} of {args.turns}."
+            already = any(marker in str(m.get("content")) for m in messages)
+            if turn == nudge_at and not already:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{marker} Stop gathering evidence now and write the deliverable "
+                            "with what you have. Partial and honest beats complete and late."
+                        ),
+                    }
+                )
 
         choice = (body.get("choices") or [{}])[0]
         message = choice.get("message") or {}
@@ -289,9 +293,22 @@ def main() -> int:
         if message.get("content"):
             print(f"[turn {turn}] {message['content'][:400]}")
         if not calls:
+            if not prose_retry_used:
+                prose_retry_used = True
+                print(f"[turn {turn}] prose reply with no tool call; asking once for an action")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You replied in prose without calling a tool. Either call a tool to do "
+                            "the work now, or call finish if it is done. Do not answer in prose."
+                        ),
+                    }
+                )
+                continue
             print(
                 f"[turn {turn}] stopped without calling finish — treating the run as failed "
-                "(the model answered in prose instead of acting)",
+                "(the model answered in prose twice)",
                 file=sys.stderr,
             )
             return 1
