@@ -605,10 +605,15 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
     let binary = find_chromium_binary()
         .ok_or_else(|| "No headless chromium or chrome-headless-shell found".to_string())?;
 
+    let chrome_log = std::env::temp_dir().join("playwright-rs-chrome.log");
+    let log = std::fs::File::create(&chrome_log).ok();
     let child = Command::new("setsid")
         .arg(&binary)
         .arg(format!("--remote-debugging-port={port}"))
+        // A CI runner has no display; without this Chrome exits immediately.
+        .arg("--headless=new")
         .arg("--no-sandbox")
+        .arg("--disable-dev-shm-usage")
         .arg("--disable-gpu")
         .arg("--disable-software-rasterizer")
         .arg("--disable-extensions")
@@ -618,7 +623,7 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
         .arg("--disable-default-apps")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(log.map(Stdio::from).unwrap_or_else(Stdio::null))
         .spawn()
         .map_err(|e| format!("Failed to spawn headless Chromium daemon: {e}"))?;
 
@@ -635,9 +640,10 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
     }
 
     Err(format!(
-        "CDP port {} did not open within 15s (chrome: {})",
+        "CDP port {} did not open within 15s (chrome: {}, log: {})",
         port,
-        binary.display()
+        binary.display(),
+        chrome_log.display()
     ))
 }
 
