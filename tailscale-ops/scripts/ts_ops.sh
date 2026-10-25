@@ -126,6 +126,7 @@ SERVICES=(
   "8085:ocr-lighton — LightOnOCR-3-1B"
   "8086:reranker — jina-reranker-v2-base-multilingual"
   "8087:embed — bge-small-en-v1.5"
+  "8088:grounding — WeVisOne-VL-4B"
   "4000:litellm — LiteLLM gateway"
   "8000:llama-swap — llama-swap"
   "3010:kasmvnc — KasmVNC (podman)"

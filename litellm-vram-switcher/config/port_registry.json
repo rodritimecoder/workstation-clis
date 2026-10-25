@@ -77,6 +77,14 @@
       "name": "bge-small-en-v1.5",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/bge-small.sh",
       "role": "Vector embeddings for RAG and semantic caching"
+    },
+    "8088": {
+      "alias": "local-grounding-wevisone",
+      "vram_mb": 3300,
+      "pinned": false,
+      "name": "WeVisOne-VL-4B",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/wevisone-vl.sh",
+      "role": "Word-level OCR boxes, open-vocab detection, referring localization, pointing, counting"
     }
   }
 }
