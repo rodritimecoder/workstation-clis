@@ -11,6 +11,20 @@ TMP_WAV = "/tmp/test_audiocpp_grounded.wav"
 
 class TestAudiocppDeterministic(unittest.TestCase):
     @classmethod
+    def setUpClass(cls):
+        probe = subprocess.run(
+            ["python3", AUDIOCPP_PY, "doctor", "--json"], capture_output=True, text=True
+        )
+        try:
+            health = json.loads(probe.stdout)
+        except json.JSONDecodeError:
+            raise unittest.SkipTest("audiocpp doctor did not return JSON; the engine is not installed")
+        if not (health.get("cli_bin_ready") and health.get("config_ready")):
+            raise unittest.SkipTest(
+                f"audio.cpp is not installed here ({health.get('audio_cpp_dir')})"
+            )
+
+    @classmethod
     def tearDownClass(cls):
         p = Path(TMP_WAV)
         if p.exists():
