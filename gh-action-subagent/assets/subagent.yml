@@ -17,6 +17,11 @@ on:
         required: false
         default: 'deepseek-v4.1-flash'
         type: string
+      turns:
+        description: 'Model turns before the agent stops'
+        required: false
+        default: '24'
+        type: string
 
 concurrency:
   group: subagent-${{ github.workflow }}-${{ github.event.inputs.target_branch }}
@@ -108,6 +113,7 @@ jobs:
         env:
           OPENCODE_GO_TOKEN: ${{ secrets.OPENCODE_GO_TOKEN }}
           OPENCODE_GO_MODEL: ${{ inputs.model }}
+          OPENCODE_GO_TURNS: ${{ inputs.turns }}
           CDP_ENDPOINT: "http://127.0.0.1:9222"
           TASK: ${{ inputs.task }}
         run: |

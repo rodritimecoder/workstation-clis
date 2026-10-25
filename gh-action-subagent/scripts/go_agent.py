@@ -12,7 +12,7 @@ Environment:
     OPENCODE_GO_TOKEN   bearer token for opencode.ai (required)
     OPENCODE_GO_MODEL   model id without the provider prefix (default deepseek-v4.1-flash)
     OPENCODE_GO_URL     endpoint override
-    OPENCODE_GO_TURNS   max model turns (default 12)
+    OPENCODE_GO_TURNS   max model turns (default 24)
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ DEFAULT_URL = "https://opencode.ai/inference/go/openai/v1/chat/completions"
 DEFAULT_MODEL = "deepseek-v4.1-flash"
 SYSTEM = (
     "You are a coding subagent working alone in a git checkout. "
+    "Be economical: you have a hard turn budget, so spend at most half of it "
+    "gathering evidence and then write your output, even if it is incomplete. "
     "You have read_file, write_file, list_dir, run_bash and finish. "
     "Make the smallest change that satisfies the task, then run the project's own "
     "tests if they are quick. Never run git push, git checkout or sudo. "
@@ -197,7 +199,7 @@ def main() -> int:
     parser.add_argument("--task", default=os.environ.get("TASK"), help="task prompt (default $TASK)")
     parser.add_argument("--root", default=".", help="checkout to work in")
     parser.add_argument("--model", default=os.environ.get("OPENCODE_GO_MODEL", DEFAULT_MODEL))
-    parser.add_argument("--turns", type=int, default=int(os.environ.get("OPENCODE_GO_TURNS", "12")))
+    parser.add_argument("--turns", type=int, default=int(os.environ.get("OPENCODE_GO_TURNS", "24")))
     parser.add_argument("--url", default=os.environ.get("OPENCODE_GO_URL", DEFAULT_URL))
     args = parser.parse_args()
 
@@ -222,7 +224,7 @@ def main() -> int:
     root = Path(args.root).resolve()
     session = f"subagent-{uuid.uuid4()}"
     messages = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": f"{SYSTEM} You have at most {args.turns} turns."},
         {"role": "user", "content": args.task},
     ]
 
@@ -267,7 +269,11 @@ def main() -> int:
                 print(f"\nfinished: {result}")
                 return 0
 
-    print(f"stopped after {args.turns} turns without finishing", file=sys.stderr)
+    print(
+        f"stopped after {args.turns} turns without finishing; raise OPENCODE_GO_TURNS "
+        f"or narrow the task",
+        file=sys.stderr,
+    )
     return 1
 
 
