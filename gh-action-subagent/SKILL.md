@@ -27,6 +27,28 @@ Observed in use (2026-10-25, 9 dispatches): `deepseek-v4-pro` completed both mul
 
 Safe choices: `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `kimi-k3`, `kimi-k3.1-pro`, `mimo-v2.6-*`, `longcat-2.0`.
 
+### Which model, now that it has been measured
+
+The catalog has 30 ids; eight were actually driven today. Cost is from the Go
+console, outcome is whether the lane produced its files.
+
+| Job | Model | Evidence |
+| :--- | :--- | :--- |
+| **Tool loop, lanes, multi-file edits** | `deepseek-v4.1-flash` | 10/10 lanes completed; $1.09 for 822 requests (~$0.0013 each); 34,670 req/5h, $80 pool |
+| **One-shot judgement** (read a diff, score an audit) | `deepseek-v4-pro` | the only pro that finished a multi-file edit; $0.0041/request; 1,050 req/5h, $15 pool |
+| **Not usable in this loop** | `kimi-k3`, `kimi-k3.1-pro`, `glm-5.3`, `mimo-*`, `minimax-m3.1-flash` | answered in prose instead of calling a tool, twice each; `tool_choice: required` did not change it |
+| **Wrong protocol** | `claude-haiku-5-5`, `qwen3.8-*`, `qwen3.7-plus`, `minimax-m3`, `grok-4.7`, `gpt-*-luna`, `muse-*` | anthropic / responses shapes; the runner refuses them at startup |
+
+Sizing and drift live in one script, which is also the only thing that knows the
+whole catalog:
+
+```bash
+go-roster --check                 # is the plan connected, and does the roster match it
+go-roster --verify                # exit 1 if a curated id is no longer served
+go-roster --plan "deepseek-v4.1-flash:6,deepseek-v4-pro:2"
+go-roster --tier 2 --json
+```
+
 ## Commands
 
 ### 1. Dispatch a New Cloud Subagent
