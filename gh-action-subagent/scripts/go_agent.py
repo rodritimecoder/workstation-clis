@@ -212,6 +212,11 @@ def dispatch(name: str, args: dict, root: Path) -> tuple[str, bool]:
     return f"unknown tool: {name}", False
 
 
+def changed(expect: str, root: Path) -> bool:
+    proc = subprocess.run(["git", "status", "--porcelain", "--", expect], cwd=root, capture_output=True, text=True)
+    return bool(proc.stdout.strip())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="OpenCode Go subagent loop")
     parser.add_argument("--task", default=os.environ.get("TASK"), help="task prompt (default $TASK)")
@@ -219,6 +224,11 @@ def main() -> int:
     parser.add_argument("--model", default=os.environ.get("OPENCODE_GO_MODEL", DEFAULT_MODEL))
     parser.add_argument("--turns", type=int, default=int(os.environ.get("OPENCODE_GO_TURNS", "24")))
     parser.add_argument("--url", default=os.environ.get("OPENCODE_GO_URL", DEFAULT_URL))
+    parser.add_argument(
+        "--expect-change",
+        default=os.environ.get("OPENCODE_GO_EXPECT_PATH", ""),
+        help="path that must be modified or created, or the run fails",
+    )
     args = parser.parse_args()
 
     token = os.environ.get("OPENCODE_GO_TOKEN", "").strip()
@@ -279,8 +289,12 @@ def main() -> int:
         if message.get("content"):
             print(f"[turn {turn}] {message['content'][:400]}")
         if not calls:
-            print(f"[turn {turn}] no tool call; stopping")
-            return 0 if turn > 1 else 1
+            print(
+                f"[turn {turn}] stopped without calling finish — treating the run as failed "
+                "(the model answered in prose instead of acting)",
+                file=sys.stderr,
+            )
+            return 1
 
         messages.append({"role": "assistant", "content": message.get("content"), "tool_calls": calls})
         finished = False
@@ -297,6 +311,12 @@ def main() -> int:
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
             if finished:
                 print(f"\nfinished: {result}")
+                if args.expect_change and not changed(args.expect_change, root):
+                    print(
+                        f"error: the run finished but {args.expect_change} was not modified",
+                        file=sys.stderr,
+                    )
+                    return 1
                 return 0
 
     print(

@@ -22,6 +22,11 @@ on:
         required: false
         default: '24'
         type: string
+      expect_path:
+        description: 'Path the run must modify or create, or it fails (optional)'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: subagent-${{ github.workflow }}-${{ github.event.inputs.target_branch }}
@@ -114,6 +119,7 @@ jobs:
           OPENCODE_GO_TOKEN: ${{ secrets.OPENCODE_GO_TOKEN }}
           OPENCODE_GO_MODEL: ${{ inputs.model }}
           OPENCODE_GO_TURNS: ${{ inputs.turns }}
+          OPENCODE_GO_EXPECT_PATH: ${{ inputs.expect_path }}
           CDP_ENDPOINT: "http://127.0.0.1:9222"
           TASK: ${{ inputs.task }}
         run: |

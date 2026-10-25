@@ -55,6 +55,20 @@ class TestGoAgent(unittest.TestCase):
         self.assertEqual(summary, "nothing to do")
         print("  ✓ finish returns the summary and stops the loop")
 
+    def test_06b_expect_change_detects_a_missing_edit(self):
+        import subprocess
+        subprocess.run(["git", "init", "-q", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+            cwd=self.root,
+            check=True,
+        )
+        self.assertFalse(go_agent.changed("notes.md", self.root))
+        go_agent.dispatch("write_file", {"path": "notes.md", "content": "edited\n"}, self.root)
+        self.assertTrue(go_agent.changed("notes.md", self.root))
+        print("  ✓ --expect-change can tell an edit from a no-op")
+
     def test_07_writing_to_the_checkout_root_is_refused_not_crashed(self):
         result, done = go_agent.dispatch("write_file", {"path": ".", "content": "x"}, self.root)
         self.assertIn("refused", result)
