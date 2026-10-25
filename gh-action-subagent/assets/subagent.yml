@@ -66,7 +66,7 @@ jobs:
           export PATH="$HOME/.opencode/bin:$PATH"
           opencode --version
           opencode upgrade --major > /tmp/oc-upgrade.log 2>&1 || true
-          version="$(opencode --version)"
+          version="$(opencode --version | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)"
           echo "opencode $version"
           case "$version" in
             2.*) echo "✅ v2 CLI ready" ;;
