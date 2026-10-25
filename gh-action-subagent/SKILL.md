@@ -12,7 +12,7 @@ allowed-tools: "Bash(gh:*) Bash(python3:*) Read Write"
 
 # GitHub Actions Cloud Subagent Skill
 
-Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a single API call. Each subagent runs in an isolated Ubuntu VM with the `playwright` skill's native client (browser daemon on :9222), the guard hooks, and the OpenCode Go tool loop in `scripts/go_agent.py`.
+Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a single API call. Each subagent runs in an isolated Ubuntu VM with the `playwright` skill's native client (browser daemon on :9222), the guard hooks, and the OpenCode CLI running the restricted `lane` agent.
 
 ## Prerequisites
 - GitHub CLI (`gh`) authenticated, OR `GITHUB_TOKEN` exported in the environment.
@@ -21,17 +21,13 @@ Use this skill to dispatch tasks to ephemeral GitHub Actions runners via a singl
 
 ### Which models this runner can drive
 
-The Go catalog serves three shapes, and `go_agent.py` speaks one: **OpenAI `chat/completions`**. Claude Haiku, Qwen and MiniMax M3 use the Anthropic shape; Grok and the GPT Luna pair use the Responses shape. The runner refuses those ids up front with a suggestion rather than failing mid-task on `ModelProtocolUnsupported`.
-
-Observed in use (2026-10-25, 9 dispatches): `deepseek-v4-pro` completed both multi-file edits it was given. `glm-5.3` twice answered in prose instead of calling a tool, even with `tool_choice: required` — the runner asks once more, then fails. Treat that as a model behaviour, not a harness bug: prefer the DeepSeek lanes for write-heavy runs.
-
-Safe choices: `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `kimi-k3`, `kimi-k3.1-pro`, `mimo-v2.6-*`, `longcat-2.0`.
+The Go catalog serves three shapes, and the CLI speaks all of them: OpenAI `chat/completions` for DeepSeek, GLM, Kimi and MiMo; the Anthropic shape for Claude Haiku, Qwen and MiniMax M3; the Responses shape for Grok and the GPT Luna pair. That is the main reason the CLI replaced the hand-written loop, which could only call the first group.
 
 ### The runner is the OpenCode CLI
 
-`opencode run --standalone --auto --agent lane` drives the lane, not the hand-written loop (that stays in `scripts/go_agent.py` as a fallback for hosts where v2 cannot be installed). What that buys:
+`opencode run --standalone --auto --agent lane` drives the lane. The hand-written tool loop that lived here is gone: the CLI installs in one step, speaks every protocol, and enforces permissions the loop could only pattern-match.
 
-| | `go_agent.py` | `opencode run` |
+| | hand-written loop (removed) | `opencode run` |
 | :--- | :--- | :--- |
 | Tools | 5 hand-written | write, edit, patch, read, glob, grep, shell, code-mode, MCP |
 | Protocols | OpenAI shape only | all of them, so Claude/Qwen/Grok become usable |
@@ -40,7 +36,6 @@ Safe choices: `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.
 
 The safety claim is the one that matters, and it is a capability boundary rather than a filter. `assets/agents/lane.md` denies `git push*`, `rm -rf*`, `sudo*` and `git reset --hard*`, so tests run and pushes do not. Verified: `echo allowed > ok.txt` completed, `git push origin main` came back `status: error, denied`, with `--auto` on.
 
-Retire `go_agent.py` only after a lane goes green through the CLI.
 
 ### Which model, now that it has been measured
 
