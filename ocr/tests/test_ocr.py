@@ -9,6 +9,18 @@ SAMPLE_IMG = Path("/run/media/rodri/AI/llama.cpp/media/llama0-banner.png")
 
 
 class TestUnifiedOCRDeterministic(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not SAMPLE_IMG.is_file():
+            raise unittest.SkipTest(f"needs a local fixture image at {SAMPLE_IMG}")
+        probe = subprocess.run(["python3", OCR_PY, "doctor", "--json"], capture_output=True, text=True)
+        try:
+            health = json.loads(probe.stdout)
+        except json.JSONDecodeError:
+            raise unittest.SkipTest("ocr doctor did not return JSON; the local engines are not installed")
+        if not (health.get("lighton_models_ready") and health.get("crisp_models_ready")):
+            raise unittest.SkipTest("the OCR model weights are not on this machine")
+
     def test_01_doctor(self):
         cmd = ["python3", OCR_PY, "doctor", "--json"]
         res = subprocess.run(cmd, capture_output=True, text=True)

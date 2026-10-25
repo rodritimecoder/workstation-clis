@@ -8,6 +8,14 @@ class TestOpenRouterFree(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.cli = str(Path(__file__).resolve().parent.parent / "scripts" / "or_agent.py")
+        probe = subprocess.run(["python3", cls.cli, "doctor", "--json"], capture_output=True, text=True)
+        try:
+            health = json.loads(probe.stdout)
+        except json.JSONDecodeError:
+            raise unittest.SkipTest("doctor did not return JSON; no provider credentials here")
+        creds = health.get("credentials", {}).get("openrouter_api_key", {})
+        if not (creds.get("configured") and creds.get("valid")):
+            raise unittest.SkipTest("no valid OPENROUTER_API_KEY; this suite tests the live service")
 
     def test_01_doctor_json_contract(self):
         res = subprocess.run(
