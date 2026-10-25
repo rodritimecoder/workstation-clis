@@ -273,7 +273,7 @@ def main() -> int:
     root = Path(args.root).resolve()
     session = f"subagent-{uuid.uuid4()}"
     prose_retry_used = False
-    tool_choice = os.environ.get("OPENCODE_GO_TOOL_CHOICE", "required")
+    tool_choice = os.environ.get("OPENCODE_GO_TOOL_CHOICE", "auto")
     messages = [
         {"role": "system", "content": f"{SYSTEM} You have at most {args.turns} turns."},
         {"role": "user", "content": args.task},
@@ -284,7 +284,7 @@ def main() -> int:
             body = call_model(args.url, token, args.model, session, messages, tool_choice)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:400]
-            if exc.code == 400 and "tool_choice" in detail and tool_choice != "auto":
+            if exc.code == 400 and tool_choice != "auto":
                 print("[turn] provider rejected tool_choice=required; retrying with auto")
                 tool_choice = "auto"
                 continue
