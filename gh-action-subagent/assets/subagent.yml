@@ -22,6 +22,11 @@ on:
         required: false
         default: '24'
         type: string
+      needs_browser:
+        description: 'Start a CDP browser for frontend work (true/false)'
+        required: false
+        default: 'false'
+        type: string
       expect_path:
         description: 'Path the run must modify or create, or it fails (optional)'
         required: false
@@ -95,6 +100,7 @@ jobs:
           echo "✅ Guardrails active"
 
       - name: Start the Browser Daemon on CDP Port 9222
+        if: inputs.needs_browser == 'true'
         run: |
           playwright-rs daemon start --port 9222
           sleep 2
@@ -104,6 +110,8 @@ jobs:
             sleep 2
           done
           echo "❌ the CDP daemon did not answer on :9222" >&2
+          echo "--- chrome log ---" >&2
+          cat "${TMPDIR:-/tmp}/playwright-rs-chrome.log" >&2 2>/dev/null || true
           exit 1
 
       - name: Prepare Subagent Branch
