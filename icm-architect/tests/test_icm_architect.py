@@ -9,7 +9,7 @@ from pathlib import Path
 class TestICMArchitect(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = Path(tempfile.mkdtemp(prefix="test_icm_"))
-        self.cli = "/run/media/rodri/AI/skills/icm-architect/scripts/icm_architect.py"
+        self.cli = str(Path(__file__).resolve().parent.parent / "scripts" / "icm_architect.py")
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
