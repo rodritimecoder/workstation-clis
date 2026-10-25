@@ -36,8 +36,14 @@ console, outcome is whether the lane produced its files.
 | :--- | :--- | :--- |
 | **Tool loop, lanes, multi-file edits** | `deepseek-v4.1-flash` | 10/10 lanes completed; $1.09 for 822 requests (~$0.0013 each); 34,670 req/5h, $80 pool |
 | **One-shot judgement** (read a diff, score an audit) | `deepseek-v4-pro` | the only pro that finished a multi-file edit; $0.0041/request; 1,050 req/5h, $15 pool |
-| **Not usable in this loop** | `kimi-k3`, `kimi-k3.1-pro`, `glm-5.3`, `mimo-*`, `minimax-m3.1-flash` | answered in prose instead of calling a tool, twice each; `tool_choice: required` did not change it |
-| **Wrong protocol** | `claude-haiku-5-5`, `qwen3.8-*`, `qwen3.7-plus`, `minimax-m3`, `grok-4.7`, `gpt-*-luna`, `muse-*` | anthropic / responses shapes; the runner refuses them at startup |
+| **Brief-sensitive, not unusable** | `kimi-k3.1-pro`, `glm-5.3`, `mimo-*`, `minimax-m3.1-flash` | each stalled in prose on a long brief. A control run proved the brief was the variable: `kimi-k3.1-pro` completed the identical task in 10 turns once the brief opened with "your first action should be write_file" |
+
+### The brief is a parameter
+
+Every stall followed the same shape: a long brief that read like a specification, after which the model composed a plan. Every completion followed the opposite: the brief named the first `write_file`, then the test, then the run. Two consequences worth keeping:
+
+- **Open the brief with the first action.** "Your first action should be write_file X" is worth more than another paragraph of context.
+- **One run is not evidence.** A model that stalled twice and then completed the same task under a corrected brief was never "broken" — the brief was. Run the control before writing a verdict into a skill.
 
 Sizing and drift live in one script, which is also the only thing that knows the
 whole catalog:
