@@ -74,6 +74,8 @@ icm-architect map . --mermaid
 
 ## Reference
 
+- `references/core.md` — the five principles, the five layers, and the stage contract format
+- `references/forms.md` — the seven forms: what each repeats, when it fits, when it does not
 - `references/build-mode.md` — extracting the structure, picking a form, writing the contracts
 - `references/restructure-mode.md` — mapping an existing workspace before you touch it
 - `references/walk-test.md` — validating any ICM by walking it cold, as an agent with no memory

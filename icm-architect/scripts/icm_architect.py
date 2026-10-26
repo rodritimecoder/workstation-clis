@@ -596,15 +596,18 @@ def main():
     )
     p_init.add_argument(
         "--form",
-        choices=["pipeline", "library", "map"],
+        choices=[
+            "pipeline", "umbrella", "library", "record-library",
+            "knowledge-bundle", "context-map", "system-map", "agentic-factory", "map",
+        ],
         default="pipeline",
-        help="ICM architectural form",
+        help="ICM architectural form (see references/forms.md; 'map' and 'library' are legacy aliases)",
     )
     p_init.add_argument(
         "--template",
         choices=["pipeline", "agentic-factory", "software-factory"],
         default="pipeline",
-        help="Pre-baked ICM workspace template (e.g. agentic-factory for Kem's 7-step software factory)",
+        help="Pre-baked workspace template (agentic-factory: Kem's six-phase software factory as folders)",
     )
     p_init.add_argument(
         "--with-memory",

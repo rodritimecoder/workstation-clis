@@ -1,8 +1,8 @@
-# The Six Forms
+# The Seven Forms
 
-One skeleton, six jobs. Every form obeys the ten invariants; what changes is what the repeating unit is and what the structure optimizes for. All six are drawn from production workspaces, not theory.
+One skeleton, seven jobs. Every form obeys the ten invariants; what changes is what the repeating unit is and what the structure optimizes for. All seven are drawn from production workspaces, not theory. The first six are the ICM paper's canon; the seventh is Pipeline specialised for software built by agents.
 
-Contents: Selection · 1 Pipeline · 2 Umbrella · 3 Record library · 4 Knowledge bundle · 5 Context map · 6 System map · Composing forms
+Contents: Selection · 1 Pipeline · 2 Umbrella · 3 Record library · 4 Knowledge bundle · 5 Context map · 6 System map · 7 Agentic factory · Composing forms
 
 ## Selection
 
@@ -16,6 +16,7 @@ Ask one question first: **what is the repeating unit of work?**
 | the knowledge itself (claims, notes, evidence) | Knowledge bundle |
 | an organization (teams, processes, data, handoffs) | Context map |
 | a folder later agents must edit (code, markdown, or mixed) | System map |
+| a change to software, built by parallel agents and gated by tests | Agentic factory |
 
 ## 1. Pipeline — the production line
 
@@ -168,6 +169,62 @@ subject/
 **Watch for:** copying behaviour into cards; mapping intent docs as live; duplicate entry files; marking `verified` without a citation.
 
 The audit pipeline, card sections, and walk test for this form: [system-map.md](system-map.md).
+
+## 7. Agentic factory — Pipeline, specialised for software
+
+A **Pipeline** whose runs are software changes, built by parallel agents and gated by code.
+Derived from Pipeline and drawn from production: Kem Glitch's six-phase development loop
+(Reel `DemLMidtxxj`) expressed as ICM folders, on the seven-step factory (Reel `DehIT3lNgHC`).
+Scaffold it with `icm-architect init ./my-app --name "..." --template agentic-factory`.
+
+```
+workspace/
+├─ AGENTS.md            routing, and where the two human gates are
+├─ CONTEXT.md           the loop in one screen
+├─ 00_intent/           signed why and why-not            human
+├─ 01_inbox/            request -> feature_spec.md
+├─ 02_plan_split/       slices, holdouts, plan.md (approved: false)
+├─ 03_kanban/           todo/ doing/ done/ rejected/
+├─ 04_sandboxes/        isolated workers (worktrees, claims.json)
+├─ 05_gates/            tests, linters, UI checks         code decides
+├─ 06_judge/            fresh-context audit, runs the holdouts
+├─ 07_intent_check/     verdict per non-goal              human
+├─ holdouts/            concealed acceptance tests, outside the numbering
+├─ _shared/             rules.md, kem-contract.md
+└─ _memory/             entity graph + hybrid search
+```
+
+**What it adds to Pipeline:**
+
+- A **concealed shelf** (`holdouts/`) outside the numbering. A builder that can read the tests
+  builds to pass the tests; anti-sycophancy is a layout decision, not a rule in a prompt.
+- A **physical state machine** (`03_kanban/`) beside the mtimes: cards move, and a rejected
+  card carries its evidence with it.
+- **Two human gates that are files.** Intent signed once up front; a verdict per non-goal at
+  the end. Approval that lives only in the conversation is not approval.
+- The three contract fields from `_shared/kem-contract.md` on every stage: `Actor`,
+  `Step type` (D/P/H), `Proof`. `icm-architect validate . --kem` fails on a gap.
+
+**Take it when:**
+
+- The repeating unit is a feature or a change, and the repo is the product.
+- Some automated check can go red — a test, a linter, a UI assertion. That is the spine.
+- The work splits into independent vertical slices worth running in parallel.
+- Someone will read `why.md` at the end and answer for each non-goal.
+
+**Do not take it when:**
+
+- **There is no gate.** `05_gates` then holds opinions, and the judge's verdict is a model's
+  taste dressed as a result. Use Pipeline and let a human check each handoff instead.
+- **The work is one fix.** The folder ceremony is bigger than the change; route it down the
+  fast lane and skip the plan gate.
+- **The deliverable is not software** — a deck, a video, a vault. That is Pipeline or
+  Knowledge bundle.
+- **Nobody will sign twice.** Then this is a build script wearing folders.
+
+Tooling it assumes: `05_gates` names `pytest` / `cargo test` / `playwright-rs`, and
+`04_sandboxes` assumes worktree isolation with `claims.json` line ranges. Both are contract
+text — edit them to match the repo. A JavaScript factory is the same shape with vitest.
 
 ## Composing forms
 
