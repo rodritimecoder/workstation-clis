@@ -68,7 +68,12 @@ headed Chromium on the desktop, with its own debug port.
 
 `scripts/desktop_cdp.py` owns exactly that: a *headed* Chromium on port **9224**
 with a separate profile, so it never collides with the user's daily browser or
-with the automation shell.
+with the automation shell. Chromium 136+ will not enable remote debugging on its
+default profile. If the daily browser was started without a CDP port, the helper
+cannot attach to that already-running window. It can make a **one-time local
+copy** of the profile, then launch a separate visible browser from that copy.
+The copy includes private browser state, is not kept in sync, and may not make
+OS-encrypted credentials portable.
 
 ```bash
 # Who owns which port, and is the visible one real?
@@ -79,8 +84,16 @@ python3 scripts/desktop_cdp.py doctor
 # desktop      : pid 7113 no cdp port (default profile)
 # desktop      : pid 712232 cdp :9224 /home/rodri/.local/share/chromium-agent
 
-# Start it on a page the user must sign in to themselves
+# To reuse the current Flatpak Chromium profile, first close Chromium normally
+# and make sure doctor reports no running default-profile desktop browser.
+python3 scripts/desktop_cdp.py doctor
+python3 scripts/desktop_cdp.py clone-profile
+
+# Or skip the copy and start with a clean agent profile
 python3 scripts/desktop_cdp.py launch "https://example.com/account"
+
+# After cloning, start the visible browser with the copied profile
+python3 scripts/desktop_cdp.py launch
 
 # Drive that visible window: the port flag is the whole trick
 playwright-rs -s desktop --port 9224 snapshot --json
@@ -95,9 +108,16 @@ Rules that keep this honest:
 * **`doctor` before claiming the user can see anything.** `cdp :9224` plus a
   `desktop` line naming the agent profile is the evidence; "the snapshot returned
   elements" is not.
-* **Never open the user's profile.** A second Chromium on the default profile
-  silently hands off to the running instance and drops `--remote-debugging-port`,
-  which is why the helper uses `~/.local/share/chromium-agent`.
+* **Never launch against the live daily profile.** `clone-profile` refuses to
+  copy while it sees the default-profile browser running, refuses to overwrite
+  a non-empty destination, and skips disposable caches. Close Chromium normally
+  before cloning; it does not stop Chromium for you. The clone at
+  `~/.local/share/chromium-agent` is separate and will diverge from the daily
+  profile after launch.
+* **A clone is sensitive.** It contains copied browser data such as cookies and
+  browsing state. Keep it local, don't upload or share it, and use `stop` when
+  finished. If login state does not transfer, sign in directly in the visible
+  agent window rather than copying secret-store files by hand.
 * **Credentials stay with the user.** Launch the page, ask them to sign in in the
   window on their screen, then continue over CDP. Never request a password or an
   emailed login code in chat.
@@ -146,5 +166,7 @@ npx playwright test
 npx playwright codegen http://localhost:3000
 ```
 
-When writing Rust tests against the crate itself, use Padamson's
-[`playwright-rs-usage` skill](https://github.com/padamson/playwright-rust/tree/main/skills/playwright-rs-usage).
+When writing Rust tests against the crate itself, use the local
+`playwright-rs-usage` skill (vendored from
+[padamson/playwright-rust](https://github.com/padamson/playwright-rust/tree/main/skills/playwright-rs-usage),
+Apache-2.0).

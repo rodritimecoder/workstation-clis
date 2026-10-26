@@ -7,6 +7,7 @@ whose debug port is separate from the automation shell.
 
 Commands:
   doctor          report which browser owns each port and whether it is visible
+  clone-profile   copy the Flatpak Chromium profile while its browser is closed
   launch          start the headed agent browser and wait for its CDP endpoint
   stop            stop only the agent browser (matched by its profile path)
 """
@@ -17,14 +18,33 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 DEFAULT_PORT = 9224
 PROFILE = os.path.expanduser("~/.local/share/chromium-agent")
+CURRENT_PROFILE = os.path.expanduser("~/.var/app/org.chromium.Chromium/config/chromium")
 FLATPAK_APP = "org.chromium.Chromium"
 AUTOMATION_PORT = 9222
+COPY_IGNORES = {
+    "Cache",
+    "CacheStorage",
+    "Code Cache",
+    "GPUCache",
+    "ShaderCache",
+    "GrShaderCache",
+    "DawnCache",
+    "Media Cache",
+    "Crash Reports",
+    "BrowserMetrics",
+    "SingletonCookie",
+    "SingletonLock",
+    "SingletonSocket",
+    "DevToolsActivePort",
+}
 
 
 def cdp_version(port, timeout=1.0):
@@ -196,6 +216,47 @@ def cmd_launch(args):
     return 1
 
 
+def copy_current_profile(source, destination):
+    source = Path(source).expanduser().resolve()
+    destination = Path(destination).expanduser().resolve()
+    if not source.is_dir():
+        raise ValueError(f"Chromium profile not found: {source}")
+    if source == destination or source in destination.parents:
+        raise ValueError("destination must be outside the current Chromium profile")
+    if destination.exists() and any(destination.iterdir()):
+        raise ValueError(f"destination is not empty: {destination}")
+    active_default = [
+        (pid, joined)
+        for pid, joined in browser_processes()
+        if process_kind(joined) == "desktop"
+        and (
+            profile_of(joined) is None
+            or Path(profile_of(joined)).expanduser().resolve() == source
+        )
+    ]
+    if active_default:
+        pids = ", ".join(str(pid) for pid, _ in active_default)
+        raise ValueError(f"close the current Chromium completely before copying its profile (running browser PID(s): {pids})")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".chromium-profile-copy-", dir=destination.parent) as staging_parent:
+        staging = Path(staging_parent) / "profile"
+        shutil.copytree(source, staging, ignore=shutil.ignore_patterns(*COPY_IGNORES))
+        if destination.exists():
+            destination.rmdir()
+        shutil.move(str(staging), str(destination))
+
+
+def cmd_clone_profile(args):
+    try:
+        copy_current_profile(args.source, args.destination)
+    except (OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    print(f"Copied Chromium profile to {args.destination}")
+    print("The original profile was not modified. The clone contains private browser data.")
+    return 0
+
+
 def cmd_stop(args):
     pids = owned_pids()
     if not pids:
@@ -221,6 +282,11 @@ def main():
     launch = sub.add_parser("launch", help="start the headed agent browser")
     launch.add_argument("url", nargs="?", default=None)
     launch.set_defaults(func=cmd_launch)
+
+    clone = sub.add_parser("clone-profile", help="copy the current Flatpak Chromium profile after Chromium is closed")
+    clone.add_argument("--source", default=CURRENT_PROFILE)
+    clone.add_argument("--destination", default=PROFILE)
+    clone.set_defaults(func=cmd_clone_profile)
 
     stop = sub.add_parser("stop", help="stop the headed agent browser")
     stop.set_defaults(func=cmd_stop)

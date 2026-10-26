@@ -10,7 +10,9 @@ clean tokens. Classification that assumes clean tokens reports dozens of
 import importlib.util
 import socket
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -75,6 +77,43 @@ class TestProbe(unittest.TestCase):
 
     def test_agent_port_is_distinct_from_the_automation_shell(self):
         self.assertNotEqual(desktop_cdp.DEFAULT_PORT, desktop_cdp.AUTOMATION_PORT)
+
+
+class TestProfileClone(unittest.TestCase):
+    def test_clone_preserves_profile_data_and_skips_caches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            destination = root / "agent" / "profile"
+            (source / "Default").mkdir(parents=True)
+            (source / "Default" / "Bookmarks").write_text("saved", encoding="utf-8")
+            (source / "Default" / "Cache").mkdir()
+            (source / "Default" / "Cache" / "data").write_text("cache", encoding="utf-8")
+            (source / "Local State").write_text("state", encoding="utf-8")
+            with patch.object(desktop_cdp, "browser_processes", return_value=[]):
+                desktop_cdp.copy_current_profile(source, destination)
+            self.assertEqual((destination / "Default" / "Bookmarks").read_text(), "saved")
+            self.assertEqual((destination / "Local State").read_text(), "state")
+            self.assertFalse((destination / "Default" / "Cache").exists())
+
+    def test_clone_refuses_to_copy_while_default_profile_is_running(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source"
+            source.mkdir()
+            with patch.object(desktop_cdp, "browser_processes", return_value=[(42, DESKTOP)]):
+                with self.assertRaisesRegex(ValueError, "close the current Chromium"):
+                    desktop_cdp.copy_current_profile(source, Path(temp) / "agent")
+
+    def test_clone_refuses_to_overwrite_existing_agent_profile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source"
+            destination = Path(temp) / "agent"
+            source.mkdir()
+            destination.mkdir()
+            (destination / "keep").write_text("existing", encoding="utf-8")
+            with patch.object(desktop_cdp, "browser_processes", return_value=[]):
+                with self.assertRaisesRegex(ValueError, "destination is not empty"):
+                    desktop_cdp.copy_current_profile(source, destination)
 
 
 if __name__ == "__main__":
