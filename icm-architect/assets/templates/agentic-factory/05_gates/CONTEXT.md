@@ -2,6 +2,10 @@
 
 One job: Enforce automated test suites ('Code Decides').
 
+**Actor:** code
+**Step type:** D
+**Proof:** output/gate_results.json
+
 ## Inputs
 - Working: Worker branch changes from `../04_sandboxes/`
 - Reference: ../_shared/rules.md

@@ -8,6 +8,22 @@ import sys
 import uuid
 from pathlib import Path
 
+# The three contract fields kem-mode contributes. Every stage answers who does the
+# work, whether the step is deterministic, and what artifact proves it ran. Optional
+# by default so existing workspaces keep validating; errors under `validate --kem`.
+CONTRACT_FIELDS = ("**Actor:**", "**Step type:**", "**Proof:**")
+STAGE_SECTIONS = ("## Inputs", "## Process", "## Outputs", "## Human check")
+
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "assets" / "templates"
+
+
+def write_kem_contract(ws_path: Path):
+    src_file = TEMPLATE_DIR / "kem-contract.md"
+    if src_file.is_file():
+        (ws_path / "_shared").mkdir(parents=True, exist_ok=True)
+        (ws_path / "_shared" / "kem-contract.md").write_text(
+            src_file.read_text(encoding="utf-8"), encoding="utf-8"
+        )
 
 def parse_markdown_links(text: str) -> list[str]:
     matches = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", text)
@@ -212,243 +228,46 @@ if __name__ == "__main__":
 
 def scaffold_agentic_factory(ws_path: Path, name: str, with_memory: bool, as_json: bool):
     ws_path.mkdir(parents=True, exist_ok=True)
+    template_dir = TEMPLATE_DIR / "agentic-factory"
+    if not template_dir.is_dir():
+        raise FileNotFoundError(f"agentic-factory template missing at {template_dir}")
 
-    shared_dir = ws_path / "_shared"
-    archive_dir = ws_path / "_archive"
-    shared_dir.mkdir(exist_ok=True)
-    archive_dir.mkdir(exist_ok=True)
+    for item in sorted(template_dir.rglob("*")):
+        rel = item.relative_to(template_dir)
+        dest = ws_path / rel
+        if item.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(
+            item.read_text(encoding="utf-8").replace("{Workspace Name}", name),
+            encoding="utf-8",
+        )
 
-    (shared_dir / "rules.md").write_text(
-        f"# {name} — Core Engineering Rules & Team Axioms\n\n"
-        "## Invariant Axioms (Glitch Cat / Kem Software Factory)\n"
-        "1. **Code Decides Wherever It Can**: Unit tests, type checks, and linter gates make the decision. LLMs only decide where code cannot.\n"
-        "2. **Anti-Sycophancy via Holdouts**: Holdout tests in `07_holdouts/` are hidden from builder agents until validation.\n"
-        "3. **Validation Precedes Code Review**: Grounded functional verification (UI, API, persona tests) runs first. Code review runs strictly second.\n"
-        "4. **Human Intent Gate**: The human operator reviews the initial plan and validates the intent at the end.\n",
-        encoding="utf-8",
-    )
-    (archive_dir / ".gitkeep").touch()
+    stage_dirs = sorted(d for d in ws_path.iterdir() if d.is_dir() and re.match(r"^\d{2}_", d.name))
+    for s in stage_dirs:
+        (s / "output").mkdir(exist_ok=True)
+        (s / "output" / ".gitkeep").touch()
 
-    stages_config = [
-        ("01_inbox", "Ingest raw requirements, user stories, and bug prompts into a feature spec."),
-        ("02_plan_split", "Decompose work into vertical slices and generate holdout tests."),
-        ("03_kanban", "Target-local markdown Kanban board state machine (todo, doing, done, rejected)."),
-        ("04_sandboxes", "Parallel builder worker slots running in isolated git worktrees."),
-        ("05_gates", "Deterministic quality test gates (unit tests, clippy, playwright-rs)."),
-        ("06_judge", "Fresh-context unbiased evaluation audit logs evaluating against spec."),
-        ("07_holdouts", "Anti-sycophancy holdout test suite hidden from builder agents."),
-    ]
-
-    agents_content = [
-        f"# AGENTS.md — {name} (Autonomous Software Factory)",
-        "",
-        "**Workspace Form**: Agentic Software Factory (Kem Glitch 7-Step Architecture; Reel `DehIT3lNgHC`)",
-        "**Methodology**: Interpretable Context Methodology (ICM; arXiv:2603.16021) + Graph-Memory",
-        "",
-        "```mermaid",
-        "flowchart TD",
-        "    Inbox[\"01_inbox\"] --> Plan[\"02_plan_split\"]",
-        "    Plan --> Kanban[\"03_kanban (todo)\"]",
-        "    Kanban --> Sandboxes[\"04_sandboxes (Parallel Workers)\"]",
-        "    Sandboxes --> Gates[\"05_gates (Deterministic Tests)\"]",
-        "    Holdouts[(\"07_holdouts (Hidden)\")] -.-> Judge",
-        "    Gates --> Judge[\"06_judge (Unbiased Audit)\"]",
-        "    Judge -- \"Fail\" --> KanbanRejected[\"03_kanban (rejected)\"]",
-        "    Judge -- \"Pass\" --> KanbanDone[\"03_kanban (done)\"]",
-        "```",
-        "",
-        "## Hierarchy & Control Map",
-        "| Layer | Directory / File | Role & Invariants |",
-        "|---|---|---|",
-        "| **L0** | `AGENTS.md` | Factory routing, core invariants, and memory queries |",
-        "| **L1** | `CONTEXT.md` | 7-step sequence and status progression |",
-        "| **L2** | `01_inbox/` | Ingests feature requests into `output/feature_spec.md` |",
-        "| **L2** | `02_plan_split/` | Task splitter, vertical slices, upfront holdout generation |",
-        "| **L2** | `03_kanban/` | Physical Kanban state: `todo/`, `doing/`, `done/`, `rejected/` |",
-        "| **L2** | `04_sandboxes/` | Isolated worker slots (uses `worktree-harness` + `claims.json`) |",
-        "| **L2** | `05_gates/` | Deterministic verification: `pytest`, `cargo test`, `playwright-rs` |",
-        "| **L2** | `06_judge/` | Fresh-context judge: audits code against spec without seeing builder scratchpad |",
-        "| **L2** | `07_holdouts/` | Hidden tests: builder agents never see this folder |",
-        "| **L3** | `_shared/rules.md` | Immutable engineering invariants |",
-    ]
-
-    if with_memory:
-        agents_content.extend([
-            "| **L3** | `_memory/` | Dual-legged graph memory (`graph.db`) & hybrid RRF search (`memory.py`) |",
-            "",
-            "## Memory & Blast Radius Queries",
-            "Before modifying code across stages, query the local entity graph:",
-            "```bash",
-            "# Query downstream dependencies in <2ms:",
-            "python3 _memory/memory.py k-hop <EntityName> --hops 2",
-            "",
-            "# Query semantic specs and docs:",
-            "python3 _memory/memory.py search \"query string\"",
-            "```",
-        ])
-
-    agents_content.extend([
-        "",
-        "## Stage Pipeline",
-    ])
-
-    context_content = [
-        f"# {name} — 7-Step Autonomous Engineering Pipeline",
-        "",
-        "Sequential stage execution order:",
-        "",
-    ]
-
-    for stage_dir_name, desc in stages_config:
-        agents_content.append(f"- [{stage_dir_name}]({stage_dir_name}/CONTEXT.md): {desc}")
-        context_content.append(f"1. [{stage_dir_name}]({stage_dir_name}/CONTEXT.md) — {desc}")
-
-        s_dir = ws_path / stage_dir_name
-        s_dir.mkdir(exist_ok=True)
-        out_dir = s_dir / "output"
-        out_dir.mkdir(exist_ok=True)
-        (out_dir / ".gitkeep").touch()
-
-    # Specialized stage files
-    kanban_dir = ws_path / "03_kanban"
-    for sub in ["todo", "doing", "done", "rejected"]:
-        k_sub = kanban_dir / sub
-        k_sub.mkdir(exist_ok=True)
+    for sub in ("todo", "doing", "done", "rejected"):
+        k_sub = ws_path / "03_kanban" / sub
+        k_sub.mkdir(parents=True, exist_ok=True)
         (k_sub / ".gitkeep").touch()
 
-    # Specialized stage CONTEXT contracts
-    (ws_path / "01_inbox" / "CONTEXT.md").write_text(
-        "# 01_inbox — Requirements Ingestion\n\n"
-        "One job: Ingest raw user prompt or issue into a structured feature specification.\n\n"
-        "## Inputs\n"
-        "- Working: User issue description, bug report, or feature request\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Extract target outcomes and non-goals.\n"
-        "2. Define user acceptance criteria.\n"
-        "3. Emit `output/feature_spec.md`.\n\n"
-        "## Outputs\n"
-        "- `output/feature_spec.md`\n\n"
-        "## Human check\n"
-        "Verify scope before plan decomposition starts.\n",
-        encoding="utf-8"
-    )
+    (ws_path / "_archive").mkdir(exist_ok=True)
+    (ws_path / "_archive" / ".gitkeep").touch()
 
-    (ws_path / "02_plan_split" / "CONTEXT.md").write_text(
-        "# 02_plan_split — Plan Approval & Task Splitter\n\n"
-        "One job: Break feature spec into vertical slices and create holdout tests.\n\n"
-        "## Inputs\n"
-        "- Working: ../01_inbox/output/feature_spec.md\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Decompose into independent vertical slices (frontend, backend, schema).\n"
-        "2. Write holdout verification tests into `../07_holdouts/`.\n"
-        "3. Create task cards in `../03_kanban/todo/`.\n"
-        "4. Emit `output/execution_plan.md`.\n\n"
-        "## Outputs\n"
-        "- `output/execution_plan.md`\n"
-        "- Task cards in `../03_kanban/todo/`\n\n"
-        "## Human check\n"
-        "Human approves plan (the 'Why and Why Not') before builders spawn.\n",
-        encoding="utf-8"
-    )
-
-    (ws_path / "03_kanban" / "CONTEXT.md").write_text(
-        "# 03_kanban — Physical State Machine\n\n"
-        "One job: Track active task card status across physical folders.\n\n"
-        "## Inputs\n"
-        "- Working: Cards in `todo/`, `doing/`, `done/`, `rejected/`\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Move card from `todo/` to `doing/` when worker claims it.\n"
-        "2. Move card from `doing/` to `done/` when gates pass and judge approves.\n"
-        "3. Move card to `rejected/` if gates or judge fail (with attached evidence).\n\n"
-        "## Outputs\n"
-        "- `output/kanban_status.md`\n\n"
-        "## Human check\n"
-        "Inspect cards in `rejected/` to diagnose persistent failures.\n",
-        encoding="utf-8"
-    )
-
-    (ws_path / "04_sandboxes" / "CONTEXT.md").write_text(
-        "# 04_sandboxes — Parallel Worker Execution\n\n"
-        "One job: Execute tasks in isolated worktree sandboxes.\n\n"
-        "## Inputs\n"
-        "- Working: Active task card from `../03_kanban/doing/`\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Claim target line ranges in `claims.json` before editing.\n"
-        "2. Implement required code in worker branch.\n"
-        "3. Run worker-local test gate.\n\n"
-        "## Outputs\n"
-        "- `output/worker_patch.diff`\n\n"
-        "## Human check\n"
-        "Verify no uncommitted files or claim conflicts exist.\n",
-        encoding="utf-8"
-    )
-
-    (ws_path / "05_gates" / "CONTEXT.md").write_text(
-        "# 05_gates — Deterministic Quality Gates\n\n"
-        "One job: Enforce automated test suites ('Code Decides').\n\n"
-        "## Inputs\n"
-        "- Working: Worker branch changes from `../04_sandboxes/`\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Run linters, type checks, and test runner.\n"
-        "2. Run sub-second UI checks via `playwright-rs` / `fast-cdp`.\n"
-        "3. Emit pass/fail status.\n\n"
-        "## Outputs\n"
-        "- `output/gate_results.json`\n\n"
-        "## Human check\n"
-        "Review test summary if failures occur.\n",
-        encoding="utf-8"
-    )
-
-    (ws_path / "06_judge" / "CONTEXT.md").write_text(
-        "# 06_judge — Fresh-Context Unbiased Evaluation\n\n"
-        "One job: Audit completed work against spec in a fresh context.\n\n"
-        "## Inputs\n"
-        "- Working: `../01_inbox/output/feature_spec.md` + Worker patch\n"
-        "- Working: Hidden holdouts from `../07_holdouts/`\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Judge evaluates deliverables without seeing worker's trial-and-error thoughts.\n"
-        "2. Execute holdout test suite.\n"
-        "3. Emit final verdict.\n\n"
-        "## Outputs\n"
-        "- `output/judge_verdict.md`\n\n"
-        "## Human check\n"
-        "Final sign-off before merging into main branch.\n",
-        encoding="utf-8"
-    )
-
-    (ws_path / "07_holdouts" / "CONTEXT.md").write_text(
-        "# 07_holdouts — Anti-Sycophancy Test Suite\n\n"
-        "One job: Maintain secret validation tests builder agents never see.\n\n"
-        "## Inputs\n"
-        "- Working: Holdout scenarios defined during planning\n"
-        "- Reference: ../_shared/rules.md\n\n"
-        "## Process\n"
-        "1. Store holdout test scripts and edge case fixtures.\n"
-        "2. Accessible ONLY to `06_judge` at validation time.\n\n"
-        "## Outputs\n"
-        "- `output/holdout_pass.log`\n\n"
-        "## Human check\n"
-        "Confirm holdouts test true user behavior, not implementation details.\n",
-        encoding="utf-8"
-    )
+    write_kem_contract(ws_path)
 
     if with_memory:
         scaffold_memory(ws_path)
 
-    (ws_path / "AGENTS.md").write_text("\n".join(agents_content) + "\n", encoding="utf-8")
-    (ws_path / "CONTEXT.md").write_text("\n".join(context_content) + "\n", encoding="utf-8")
-
+    stages = [d.name for d in stage_dirs]
     result = {
         "workspace": str(ws_path),
         "name": name,
         "template": "agentic-factory",
-        "stages": [s[0] for s in stages_config],
+        "stages": stages,
         "with_memory": with_memory,
         "status": "scaffolded",
     }
@@ -458,7 +277,7 @@ def scaffold_agentic_factory(ws_path: Path, name: str, with_memory: bool, as_jso
     else:
         print(f"✅ Initialized Kem Glitch Agentic Software Factory at: {ws_path}")
         print(f"   Root Entry:  {ws_path / 'AGENTS.md'}")
-        print(f"   Stages:      {len(stages_config)} stages (01_inbox -> 07_holdouts)")
+        print(f"   Stages:      {len(stages)} folders ({stages[0]} -> {stages[-1]})")
         print(f"   Kanban:      {ws_path / '03_kanban'} (todo, doing, done, rejected)")
         if with_memory:
             print(f"   Memory:      {ws_path / '_memory'} (graph.db + FTS5 + BGE RRF hybrid)")
@@ -491,6 +310,7 @@ def cmd_init(
         "Global rules, voice constraints, and schemas applicable across all pipeline stages.\n",
         encoding="utf-8",
     )
+    write_kem_contract(ws_path)
     (archive_dir / ".gitkeep").touch()
 
     agents_content = [
@@ -504,8 +324,8 @@ def cmd_init(
         "|---|---|---|",
         "| **L0** | `AGENTS.md` | Root workspace routing & identity |",
         "| **L1** | `CONTEXT.md` | Stage pipeline index & execution order |",
-        "| **L2** | `NN_*/CONTEXT.md` | Stage contracts (Inputs, Process, Outputs, Human Check) |",
-        "| **L3** | `_shared/`, `references/` | Immutable guidelines, constraints, and schemas |",
+        "| **L2** | `NN_*/CONTEXT.md` | Stage contracts (Actor, Step type, Proof, Inputs, Process, Outputs, Human Check) |",
+        "| **L3** | `_shared/`, `references/` | Immutable guidelines, constraints, schemas, and the Kem contract |",
         "| **L4** | `NN_*/output/` | Per-run editable product artifacts |",
     ]
 
@@ -555,6 +375,10 @@ def cmd_init(
 
 One job: Execute {slug} according to workspace constraints.
 
+**Actor:** agent
+**Step type:** P
+**Proof:** output/result.md
+
 ## Inputs
 - Working (this run): {prev_input}
 - Reference (every run): ../_shared/rules.md
@@ -573,6 +397,12 @@ Inspect `output/result.md` before advancing to the next stage. Edit in place; do
         (s_dir / "CONTEXT.md").write_text(s_contract, encoding="utf-8")
 
     agents_content.extend([
+        "",
+        "## Stage contract",
+        "Every stage names who does the work (`**Actor:**`), how (`**Step type:**` D/P/H),",
+        "and what proves it (`**Proof:**`). The five moves behind those fields are in",
+        "`_shared/kem-contract.md`. Fail the build on an incomplete contract:",
+        "`icm-architect validate . --kem`.",
         "",
         "## Reference Integrity",
         "Before renaming or moving any file, run `icm-architect validate .` to prevent broken relative links.",
@@ -603,7 +433,7 @@ Inspect `output/result.md` before advancing to the next stage. Edit in place; do
             print(f"   Memory:     {ws_path / '_memory'} (graph.db + FTS5 + BGE RRF hybrid)")
 
 
-def cmd_validate(target_dir: Path, as_json: bool = False) -> int:
+def cmd_validate(target_dir: Path, as_json: bool = False, kem: bool = False) -> int:
     target_dir = target_dir.resolve()
     errors = []
     warnings = []
@@ -635,11 +465,21 @@ def cmd_validate(target_dir: Path, as_json: bool = False) -> int:
 
         checks_passed += 1
         content = s_context.read_text(encoding="utf-8", errors="replace")
-        for sec in ["## Inputs", "## Process", "## Outputs", "## Human check"]:
+        for sec in STAGE_SECTIONS:
             if sec not in content:
                 errors.append(f"Stage '{s.name}/CONTEXT.md' missing required section: '{sec}'")
             else:
                 checks_passed += 1
+
+        for field in CONTRACT_FIELDS:
+            if field in content:
+                checks_passed += 1
+                continue
+            gap = f"Stage '{s.name}/CONTEXT.md' missing contract field '{field}' (who / how / proof)"
+            if kem:
+                errors.append(gap)
+            else:
+                warnings.append(gap)
 
         out_dir = s / "output"
         if not out_dir.is_dir():
@@ -674,6 +514,7 @@ def cmd_validate(target_dir: Path, as_json: bool = False) -> int:
             "warnings": warnings,
             "stage_count": len(stage_dirs),
             "markdown_files_inspected": len(md_files),
+            "kem_strict": kem,
         }
         print(json.dumps(report, indent=2))
     else:
@@ -775,6 +616,11 @@ def main():
     p_val = sub.add_parser("validate", aliases=["check"], help="Validate reference integrity & ICM hierarchy")
     p_val.add_argument("path", nargs="?", default=".", help="Target workspace directory (default: current)")
     p_val.add_argument("--json", action="store_true", help="Output as JSON")
+    p_val.add_argument(
+        "--kem",
+        action="store_true",
+        help="Strict kem-mode contract: missing Actor / Step type / Proof in any stage is an error",
+    )
 
     p_map = sub.add_parser("map", help="Render stage pipeline topology")
     p_map.add_argument("path", nargs="?", default=".", help="Target workspace directory (default: current)")
@@ -783,6 +629,7 @@ def main():
     p_doc = sub.add_parser("doctor", help="Run diagnostic health checks on workspace")
     p_doc.add_argument("path", nargs="?", default=".", help="Target workspace directory (default: current)")
     p_doc.add_argument("--json", action="store_true", help="Output as JSON")
+    p_doc.add_argument("--kem", action="store_true", help="Strict kem-mode contract fields")
 
     args = parser.parse_args()
 
@@ -800,7 +647,7 @@ def main():
             as_json=args.json,
         )
     elif args.action in ("validate", "check", "doctor"):
-        ret = cmd_validate(Path(args.path), as_json=args.json)
+        ret = cmd_validate(Path(args.path), as_json=args.json, kem=getattr(args, "kem", False))
         sys.exit(ret)
     elif args.action == "map":
         cmd_map(Path(args.path), mermaid=args.mermaid)

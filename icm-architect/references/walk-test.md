@@ -9,6 +9,7 @@ Validate any ICM — new or restructured — by walking it cold, as an agent wit
 - Is any routing file carrying content payload? Move the payload to a shelf; leave a pointer.
 - Is any fact stored in two places? Pick one home; link from the other.
 - Token check: entry file + one contract + its inputs should land in roughly 2k–8k tokens.
+- Cold human: if the person who must approve cannot read the code, is there a walk they can look at — the real screens, the steps in order, the code behind each one? `glitch-walk` renders one. A summary is not a walk.
 - System map only: can a cold agent answer *what is X* and *what else moves if I change X* from `map/AGENTS.md` plus one card? Extra checks are in [references/system-map.md](references/system-map.md).
 
 If a step fails, fix the structure — not by explaining more, but by moving or splitting files until the walk works.

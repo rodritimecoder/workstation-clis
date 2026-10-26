@@ -28,7 +28,7 @@ Every ICM, whatever its form, obeys these. When building or restructuring, enfor
 1. **One folder, one job.** Each folder does a single step or holds a single kind of thing, and states its own purpose in a file inside itself. The structure is the documentation.
 2. **A small, stable entry file.** `AGENTS.md` at the root answers "where am I, where does everything live, where do I go for task X" — and nothing else. Target under ~60 lines. It routes; it never holds content. It also carries two things a routing table alone cannot: a **"Not this workspace"** section (what this workspace is *not* for, and where those requests go instead), and the **status** rules below, including `STALE`.
 3. **Numbering encodes order.** `01_`, `02_`, … where sequence matters. Renaming folders reorders the pipeline — that is the point.
-4. **Every folder-level contract is explicit.** A `CONTEXT.md` per working folder: what it reads (inputs), what it does (process), what it writes (outputs), what a human checks. See [assets/templates/stage-CONTEXT.md](assets/templates/stage-CONTEXT.md).
+4. **Every folder-level contract is explicit.** A `CONTEXT.md` per working folder: what it reads (inputs), what it does (process), what it writes (outputs), what a human checks — plus the three kem-mode fields: who performs it (`Actor`), whether the step is deterministic (`Step type` D/P/H), and what proves it ran (`Proof`). See [assets/templates/stage-CONTEXT.md](assets/templates/stage-CONTEXT.md).
 5. **Factory vs. product.** Reference material (rules, voice, schemas, templates — stable across runs) lives structurally apart from working artifacts (outputs, drafts — new every run). Configure the factory once; the product is what each run emits.
 6. **Every output is an edit surface.** Intermediate outputs are plain files a human can open, edit, and save before the next step reads them. A human *may* review a stage's output before the next one starts — that is a choice at the handoff, not a lock on the pipeline.
 7. **Load only what the step needs.** An agent executing a step reads its contract, its references, and its inputs — not the whole workspace. 2,000–8,000 tokens per step is the healthy range.
@@ -59,6 +59,9 @@ icm-architect validate .
 
 # 3. Diagnostic health check, with exit code gating (0 = PASS, 1 = FAIL)
 icm-architect doctor /path/to/workspace --json
+
+# 3b. Same check, failing on any stage missing Actor / Step type / Proof
+icm-architect validate . --kem
 
 # 4. Render the stage flow as an ASCII topology
 icm-architect map .

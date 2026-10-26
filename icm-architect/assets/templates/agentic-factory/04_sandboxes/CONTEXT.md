@@ -2,6 +2,10 @@
 
 One job: Execute tasks in isolated worktree sandboxes.
 
+**Actor:** agent
+**Step type:** P
+**Proof:** output/worker_patch.diff
+
 ## Inputs
 - Working: Active task card from `../03_kanban/doing/`
 - Reference: ../_shared/rules.md

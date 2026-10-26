@@ -2,10 +2,14 @@
 
 One job: Audit completed work against spec in a fresh context.
 
+**Actor:** agent
+**Step type:** P
+**Proof:** output/judge_verdict.md
+
 ## Inputs
 - Working: ../01_inbox/output/feature_spec.md
 - Working: ../04_sandboxes/output/worker_patch.diff
-- Working: ../07_holdouts/
+- Working: ../holdouts/
 - Reference: ../_shared/rules.md
 
 ## Process

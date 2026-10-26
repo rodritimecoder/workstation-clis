@@ -2,6 +2,10 @@
 
 One job: Ingest raw user prompt or issue into a structured feature specification.
 
+**Actor:** agent
+**Step type:** P
+**Proof:** output/feature_spec.md
+
 ## Inputs
 - Working: User issue description, bug report, or feature request
 - Reference: ../_shared/rules.md

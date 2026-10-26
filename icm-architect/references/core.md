@@ -40,6 +40,10 @@ Every working folder carries a `CONTEXT.md` shaped like this (copy from `assets/
 
 One job: write the script from the research output.
 
+**Actor:** agent
+**Step type:** P
+**Proof:** output/script_draft.md
+
 ## Inputs
 - Working (this run): ../01_research/output/research.md
 - Reference (every run): ../../_shared/voice.md
@@ -58,6 +62,8 @@ Read the draft aloud. Verify the argument order survived from research. Edit in 
 ```
 
 Rules: inputs are exact paths, split working vs reference. The process is numbered and short — constraints live in L3 files, not restated here. Exactly one human check, stated as something a person does, not a vague "review."
+
+The three fields above the Inputs are the kem-mode contract: **Actor** (`code`, `agent`, or `human` — one owns the step), **Step type** (`D` deterministic code, `P` probabilistic model, `H` human in the loop), and **Proof** (the artifact that proves it ran). They are warnings by default so older workspaces keep validating, and errors under `icm-architect validate . --kem`. A stage that cannot name its proof is a note, not a stage. The reasoning is in `_shared/kem-contract.md` in any workspace scaffolded by `init`.
 
 ## Naming conventions
 

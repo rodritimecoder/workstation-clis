@@ -2,6 +2,10 @@
 
 One job: {the single thing this stage does}.
 
+**Actor:** {code | agent | human} — who performs this step
+**Step type:** {D | P | H} — deterministic code · probabilistic model · human in the loop
+**Proof:** {the command or output file that proves it ran and passed}
+
 ## Inputs
 - Working (this run): ../{NN-1}_{prev-stage}/output/{file}
 - Reference (every run): ../../_shared/{rules-file}.md
