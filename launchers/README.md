@@ -31,6 +31,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:8000` | `llama-swap` | llama-swap | Model multiplexer behind LiteLLM; swaps models in/out of VRAM |
 | `:3010` | `kasmvnc` | KasmVNC (podman) | Live interactive web desktop for browser inspection |
 | `:9222` | `cdp` | Chromium DevTools | CDP endpoint used by fast-cdp and Playwright |
+| `:9224` | `cdp-desktop` | Chromium DevTools (headed agent profile) | Headed Chromium CDP endpoint so a person can see and drive the automated page |
 | `:9223` | `cdp-internal` | labwc forwarder | Container-internal forwarder 0.0.0.0:9222 -> 127.0.0.1:9223 |
 | `:8761` | `clip-box` | h2o-lightning shim | Box grounding and typed decisions; Python shim, box questions need LIGHTNING_BOX_ENABLED=1 |
 | `:8621` | `clip-box-backend` | llama-server (private backend) | Pinned stock llama.cpp the h2o-lightning shim drives; one full-context slot, loopback only |

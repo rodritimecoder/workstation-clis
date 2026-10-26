@@ -4,7 +4,7 @@ description: >
   High-performance browser automation, DOM snapshotting, and grounded verification powered by
   native Rust (playwright-rs / fast-cdp). Direct sub-millisecond CDP execution for navigation,
   clicking, typing, accessibility tree snapshots, screenshots, JS evaluation, and automated UAT assertions.
-compatibility: "Requires Chromium/Chrome running on :9222 or auto-spawned. Standalone native Rust binary."
+compatibility: "Needs a Chromium CDP endpoint: the headless shell on :9222 for unattended work, or a headed Chromium on :9224 when a person must see and drive the page. Standalone native Rust binary."
 allowed-tools: "Bash(playwright-rs:*) Bash(fast-cdp:*) Bash(python3:*) Bash(npx:*) Read Write"
 ---
 
@@ -58,6 +58,56 @@ playwright-rs verify "http://localhost:3000" --assert-text "Dashboard Overview"
 # 8. Close session
 playwright-rs close
 ```
+
+---
+
+## 👁️ A Browser the User Can Actually See (port 9224)
+
+`:9222` is often owned by Playwright's **headless shell**, which answers CDP
+perfectly and renders into nothing. Driving it looks like success from the agent
+side and like a missing window from the user side — the classic "I don't see the
+browser you're looking at". Slack or a session you must hand to a person needs a
+headed Chromium on the desktop, with its own debug port.
+
+`scripts/desktop_cdp.py` owns exactly that: a *headed* Chromium on port **9224**
+with a separate profile, so it never collides with the user's daily browser or
+with the automation shell.
+
+```bash
+# Who owns which port, and is the visible one real?
+python3 scripts/desktop_cdp.py doctor
+# agent port   : 9224 -> open
+#   browser    : Chrome/154.0.8037.92
+# automation   : 9222 -> HeadlessChrome/153 (hidden)
+# desktop      : pid 7113 no cdp port (default profile)
+# desktop      : pid 712232 cdp :9224 /home/rodri/.local/share/chromium-agent
+
+# Start it on a page the user must sign in to themselves
+python3 scripts/desktop_cdp.py launch "https://example.com/account"
+
+# Drive that visible window: the port flag is the whole trick
+playwright-rs -s desktop --port 9224 snapshot --json
+playwright-rs -s desktop --port 9224 click e4 --expect-text "Signed in"
+
+# Stop only the agent's own instance, matched by profile path
+python3 scripts/desktop_cdp.py stop
+```
+
+Rules that keep this honest:
+
+* **`doctor` before claiming the user can see anything.** `cdp :9224` plus a
+  `desktop` line naming the agent profile is the evidence; "the snapshot returned
+  elements" is not.
+* **Never open the user's profile.** A second Chromium on the default profile
+  silently hands off to the running instance and drops `--remote-debugging-port`,
+  which is why the helper uses `~/.local/share/chromium-agent`.
+* **Credentials stay with the user.** Launch the page, ask them to sign in in the
+  window on their screen, then continue over CDP. Never request a password or an
+  emailed login code in chat.
+* **`:9222` is not a website.** `http://127.0.0.1:9222/json/version` is the
+  diagnostic; a blank page in a browser is expected and harmless.
+* **Never expose either port off-host.** A CDP port is full control of that
+  browser, including its cookies.
 
 ---
 
