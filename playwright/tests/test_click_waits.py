@@ -40,6 +40,15 @@ DISABLED = """<!doctype html><html><body>
 <button id="pay" disabled>Pay</button>
 </body></html>"""
 
+WORKFLOW = """<!doctype html><html><body>
+<h1>Order review</h1>
+<button id="complete">Complete order</button>
+<div id="status">waiting</div>
+<script>document.getElementById('complete').addEventListener('click', () => {
+  document.getElementById('status').textContent = 'order confirmed';
+});</script>
+</body></html>"""
+
 
 def free_port() -> int:
     with socket.socket() as s:
@@ -62,6 +71,7 @@ class TestClickWaits(unittest.TestCase):
         (root / "slow.html").write_text(SLOW, encoding="utf-8")
         (root / "covered.html").write_text(COVERED, encoding="utf-8")
         (root / "disabled.html").write_text(DISABLED, encoding="utf-8")
+        (root / "workflow.html").write_text(WORKFLOW, encoding="utf-8")
 
         cls.port = free_port()
         handler = partial(SimpleHTTPRequestHandler, directory=str(root))
@@ -136,6 +146,44 @@ class TestClickWaits(unittest.TestCase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("never appeared", (res.stderr or res.stdout))
         print("  ✓ a click that changes nothing is not reported as success")
+
+    def test_05_ai_snapshot_refs_drive_playwright_locators(self):
+        self.open_page("workflow.html")
+        snapshot = subprocess.run(
+            [str(BIN), "snapshot", "--json"], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(snapshot.returncode, 0, snapshot.stderr)
+        elements = json.loads(snapshot.stdout)["elements"]
+        target = next(element for element in elements if "Complete order" in element["description"])
+        self.assertRegex(target["ref"], r"^e\d+$")
+
+        click = subprocess.run(
+            [str(BIN), "click", target["ref"], "--expect-text", "order confirmed", "--json"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(click.returncode, 0, click.stderr)
+        self.assertIn("text:order confirmed", json.loads(click.stdout)["effects"])
+        print("  ✓ an AI-mode ARIA ref resolves through Playwright get_by_ref")
+
+    def test_06_frontend_uat_ref_contract_runs_on_playwright(self):
+        url = f"http://127.0.0.1:{self.port}/workflow.html"
+        candidates = subprocess.run(
+            [str(BIN), "candidates", url, "--json"], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(candidates.returncode, 0, candidates.stderr)
+        target = next(item for item in json.loads(candidates.stdout) if "Complete order" in item["description"])
+        self.assertEqual(target["ref"], "uat-1")
+
+        result = subprocess.run(
+            [str(BIN), "uat", url, "--goal", "place the order", "--ref", target["ref"],
+             "--expect-text", "order confirmed", "--json"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["actions"][0]["ref_id"], "uat-1")
+        print("  ✓ frontend-uat's externally judged uat-N ref still executes and verifies")
 
 
 if __name__ == "__main__":

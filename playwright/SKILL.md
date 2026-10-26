@@ -1,45 +1,42 @@
 ---
 name: playwright
 description: >
-  High-performance browser automation, DOM snapshotting, and grounded verification powered by
-  native Rust (playwright-rs / fast-cdp). Direct sub-millisecond CDP execution for navigation,
-  clicking, typing, accessibility tree snapshots, screenshots, JS evaluation, and automated UAT assertions.
-compatibility: "Needs a Chromium CDP endpoint: the headless shell on :9222 for unattended work, or a headed Chromium on :9224 when a person must see and drive the page. Standalone native Rust binary."
+  Agent-facing browser control through Padamson's playwright-rust API: CDP attach, Playwright
+  locators, AI-mode accessibility refs, screenshots, and JavaScript evaluation. Use frontend-uat
+  for the JEV-driven user-journey workflow; use the upstream Rust skill when authoring Rust tests.
+compatibility: "Needs a Chromium CDP endpoint: the headless shell on :9222 for unattended work, or a headed Chromium on :9224 when a person must see and drive the page. The CLI wraps playwright-rs 0.20.1 and its bundled Playwright driver."
 allowed-tools: "Bash(playwright-rs:*) Bash(fast-cdp:*) Bash(python3:*) Bash(npx:*) Read Write"
 ---
 
 # Playwright Browser (`playwright`)
 
-> **Blazing-fast browser automation engine powered by native Rust (`playwright-rs` / `fast-cdp`).**  
-> Direct sub-millisecond CDP execution over WebSocket, zero-overhead DOM snapshotting, and grounded UAT verification.
+> Browser control through the upstream `playwright-rs` Rust API, with a compact local CLI for agent use.
 
 ---
 
-## ⚡ Why Rust for Browser Automation?
+## Browser backend
 
-* **Sub-Millisecond Startup**: Single compiled static binary (`playwright-rs`). No Python virtual environment startup, no Node.js runtime initialization.
-* **Direct CDP WebSocket**: Talks directly to Chromium's `:9222` debug socket using raw native WebSockets (`tungstenite`), bypassing driver abstraction layers.
-* **Zero Token Bloat**: Commands return compact JSON or one-line status receipts directly to stdout.
+The CLI is built on [`playwright-rs`](https://github.com/padamson/playwright-rust) 0.20.1. It attaches to Chromium over CDP and uses Playwright's locator actionability, AI-mode ARIA snapshots, and `get_by_ref` support. The crate launches its bundled Playwright driver; this is not the old raw-WebSocket CDP implementation.
+
+The CLI keeps the agent-facing commands and the `fast-cdp` alias. The legacy raw-CDP executable is retained as `legacy-fast-cdp` for daemon lifecycle and rollback while the new backend is in use.
 
 ---
 
-## 🛠️ CLI Quickstart (Native Rust Engine)
+## CLI quickstart
 
-The Rust binary is installed globally on your path as **`playwright-rs`** (and aliased as **`fast-cdp`**):
+The local wrapper is available as **`playwright-rs`** and **`fast-cdp`**:
 
 ```bash
-# 1. Start browser daemon or connect to running Chrome (:9222)
+# Start the unattended browser and open a persistent agent session
 playwright-rs daemon start
 
-# 2. Open or navigate to a URL (instant)
 playwright-rs open "http://localhost:3000"
 playwright-rs goto "http://localhost:3000/dashboard"
 
-# 3. Snapshot accessibility tree & interactive elements (gives ref ids like e1, e2)
+# AI-mode accessibility snapshot (Playwright refs such as e1, e2)
 playwright-rs snapshot
-playwright-rs snap "http://localhost:3000" --json
 
-# 4. Interact deterministically using element refs or selectors
+# Interact with a snapshot ref or selector; actions use Playwright locators
 playwright-rs click e1
 playwright-rs fill e2 "admin@example.com"
 playwright-rs type "password123"
@@ -49,13 +46,13 @@ playwright-rs press Enter
 playwright-rs eval "document.title"
 playwright-rs eval "window.location.pathname"
 
-# 6. Capture full-page or viewport screenshot
-playwright-rs screenshot "http://localhost:3000" /tmp/screen.png
+# 6. Capture a screenshot of the selected page
+playwright-rs screenshot /tmp/screen.png
 
 # 7. One-shot verification assertion (exits 0 on pass, 1 on fail)
 playwright-rs verify "http://localhost:3000" --assert-text "Dashboard Overview"
 
-# 8. Close session
+# Close the selected tab/session
 playwright-rs close
 ```
 
@@ -111,52 +108,29 @@ Rules that keep this honest:
 
 ---
 
-## 🧪 Grounded UAT Testing (`playwright-rs uat`)
+## Workflow routing
 
-Run intent-based user acceptance testing with the local decision model:
+This skill owns browser operations. For an intent-based journey, use the separate
+`frontend-uat` skill, which composes this CLI with JEV:
 
 ```bash
-# Sifts DOM targets, picks the action via JEV (:8083), executes, and verifies:
-playwright-rs uat "http://localhost:3000" \
-  --goal "submit contact form" \
+frontend-uat run --url http://localhost:3000 \
+  --intent "submit contact form" \
   --expect-text "Message received" \
   --screenshot /tmp/result.png
 ```
 
-**Clicking waits, and proves the effect.** `click` polls until the element is
-attached, visible, enabled and actually the thing a pointer would hit — then, if
-you asked for an expectation, it polls that too and only reports `ok` when the
-page changed:
+`frontend-uat` owns candidate extraction, the JEV decision, the `uat-N` ref
+contract, evidence ledger, and outcome verification. This CLI supplies the
+browser backend and retains `candidates`/`uat --ref` for compatibility.
+
+For a single browser action, use `click` with an expected effect. It waits for
+Playwright's actionability checks and reports failure if the requested effect
+does not appear:
 
 ```bash
 playwright-rs click "#go" --expect-text "order placed" --json
-# { "ok": true, "waited_ms": 706, "effects": ["text:order placed"], … }
-
-playwright-rs click "#buy" --timeout 1500
-# Error: "#buy was never clickable within 1500ms (covered by div)"
 ```
-
-Without an expectation a click only tells you the element existed. With one, it
-tells you something happened — which is the only thing worth verifying. The same
-polling applies to `uat --expect-text/--expect-url`: a route change that lands
-300 ms later no longer reads as a failure.
-
-**Hand it the target instead of letting it choose.** `--ref` skips the decision
-call and clicks the ref you name, which is what a caller with its own judge
-needs. `candidates` prints the same ref space without clicking anything:
-
-```bash
-# The ref space, in DOM order, exactly as uat sees it:
-playwright-rs candidates "http://localhost:3000" --json
-# [{"ref": "uat-1", "description": "button 'Back to catalog'"}, …]
-
-# Deterministic click on a ref someone else chose:
-playwright-rs uat "http://localhost:3000" --goal "complete the purchase" --ref uat-3 --json
-```
-
-A ref that is not on the page fails with the available list rather than clicking
-something else. `glitch-cat/frontend-uat` is the reference caller: it extracts
-with `candidates`, decides with JEV, then passes `--ref`.
 
 ---
 
@@ -171,3 +145,6 @@ npx playwright test
 # Interactive visual debugger & code generator
 npx playwright codegen http://localhost:3000
 ```
+
+When writing Rust tests against the crate itself, use Padamson's
+[`playwright-rs-usage` skill](https://github.com/padamson/playwright-rust/tree/main/skills/playwright-rs-usage).
