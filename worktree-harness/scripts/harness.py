@@ -21,9 +21,6 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_JEV_CLI = Path.home() / ".gemini" / "config" / "skills" / "jev-cli" / "scripts" / "decide.py"
-
-
 def get_git_root() -> Path:
     try:
         out = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL, text=True).strip()
@@ -599,4 +596,3 @@ if __name__ == "__main__":
             timeout_worker=args.timeout,
             model_override=args.model,
         )
-

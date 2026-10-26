@@ -7,37 +7,13 @@ import os
 from pathlib import Path
 import re
 import ssl
-import sys
 import urllib.request
 import urllib.error
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-BACKEND_PPLX = "pplx"
 BACKEND_SYSTEMONE = "systemone"
 BACKEND_NONE = "none"
-
-_PPLX_SCRIPT_DIRS = (
-    Path("/run/media/rodri/AI/skills/pplx-decider/scripts"),
-    Path.home() / ".pi/agent/skills/pplx-decider/scripts",
-    Path.home() / ".gemini/config/skills/pplx-decider/scripts",
-)
-
-
-def _load_pplx_modules():
-    """Locate the pplx-decider client modules without importing them eagerly."""
-    import importlib
-
-    for directory in _PPLX_SCRIPT_DIRS:
-        if not (directory / "pplx_decider.py").is_file():
-            continue
-        if str(directory) not in sys.path:
-            sys.path.append(str(directory))
-        try:
-            return importlib.import_module("pplx_decider"), importlib.import_module("gguf_meta")
-        except Exception:
-            continue
-    return None, None
-
+EXPECTED_MODEL = "h2o-lightning-4b"
 
 def _concentration(probs: List[float]) -> float:
     k = len(probs)
@@ -47,16 +23,11 @@ def _concentration(probs: List[float]) -> float:
     return min(1.0, max(0.0, 1 - ent / math.log(k)))
 
 class JevEngine:
-    def __init__(self, host: Optional[str] = None, port: int = 8083, timeout: float = 5.0,
-                 backend: str = "auto"):
+    def __init__(self, host: Optional[str] = None, port: int = 8083, timeout: float = 5.0):
         env_host = os.environ.get("JEV_HOST")
         self.host = host or env_host or "127.0.0.1"
         self.port = port
         self.timeout = timeout
-        self.requested_backend = backend
-        self._resolved_backend: Optional[str] = None
-        self._pplx_client = None
-
         self.scheme = "https" if (".ts.net" in self.host or os.environ.get("JEV_SCHEME") == "https") else "http"
         self.ssl_ctx = ssl.create_default_context()
         self.ssl_ctx.check_hostname = False
@@ -72,18 +43,8 @@ class JevEngine:
     # ---- backend selection ------------------------------------------------------
 
     def backend(self) -> str:
-        """Which protocol the served model speaks.
-
-        pplx-decider checkpoints need their own joint protocol v3 client: the
-        stock llama.cpp /v1/systemone path targets the older v1 prompt layout.
-        Every other native decision model (vllm-d3, openjev, ...) speaks
-        /v1/systemone directly.
-        """
-        if self.requested_backend != "auto":
-            return self.requested_backend
-        if self._resolved_backend is None:
-            self._resolved_backend = self._detect_backend()
-        return self._resolved_backend
+        """Return the supported backend only when the H2O model is served."""
+        return self._detect_backend()
 
     def _detect_backend(self) -> str:
         try:
@@ -94,31 +55,14 @@ class JevEngine:
         except Exception:
             return BACKEND_NONE
         entries = data.get("data") or []
-        if not entries:
+        if not entries or not isinstance(entries[0], dict):
             return BACKEND_NONE
         entry = entries[0]
-        modalities = ((entry.get("architecture") or {}).get("output_modalities")) or []
-        if "decisions" not in modalities:
+        model_id = str(entry.get("id") or "")
+        if EXPECTED_MODEL not in model_id.lower():
             return BACKEND_NONE
-        path = entry.get("id")
-        _, gguf_meta = _load_pplx_modules()
-        if path and gguf_meta is not None:
-            try:
-                if gguf_meta.decision_type(path) == "pplx-decider":
-                    return BACKEND_PPLX
-            except Exception:
-                pass
+        self.model_name = self.model_name or EXPECTED_MODEL
         return BACKEND_SYSTEMONE
-
-    def _pplx(self):
-        if self._pplx_client is None:
-            module, _ = _load_pplx_modules()
-            if module is None:
-                raise RuntimeError("pplx-decider client not found; install the pplx-decider skill")
-            self._pplx_client = module.PplxDecider(
-                host=self.host, port=self.port, timeout=max(self.timeout, 120.0)
-            )
-        return self._pplx_client
 
     def is_online(self) -> bool:
         try:
@@ -156,92 +100,6 @@ class JevEngine:
             return image
         return None
 
-    def _data_url(self, image: Optional[str]) -> Optional[str]:
-        raw = self._encode_image(image)
-        if not raw:
-            return None
-        mime = "image/png"
-        try:
-            guess, _ = mimetypes.guess_type(str(image))
-            if guess and guess.startswith("image/"):
-                mime = guess
-        except Exception:
-            pass
-        return f"data:{mime};base64,{raw}"
-
-    def _pplx_images(self, image: Optional[str]) -> Optional[list[bytes]]:
-        """Accept a file path or a base64 blob; the client wants raw bytes."""
-        if not image:
-            return None
-        path = Path(image)
-        if path.exists() and path.is_file():
-            return [path.read_bytes()]
-        raw = self._encode_image(image)
-        if not raw:
-            return None
-        import base64
-
-        try:
-            return [base64.b64decode(raw)]
-        except Exception:
-            return None
-
-    def _call_pplx(
-        self,
-        state: str,
-        question: str,
-        options: Optional[List[str]],
-        typ: str,
-        image: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """pplx-decider joint protocol v3. One question, one readout marker."""
-        if not self.is_online():
-            return None
-        levels: Optional[List[str]] = None
-        if typ == "choice":
-            if not options:
-                raise ValueError("Options list required for choice primitive")
-            spec: Dict[str, Any] = {
-                "type": "choice",
-                "instructions": question,
-                "criteria": {str(o): None for o in options},
-            }
-        elif typ == "score":
-            levels = [str(o) for o in (options or ["0.0", "0.25", "0.5", "0.75", "1.0"])]
-            spec = {"type": "score", "instructions": question, "criteria": levels}
-        else:
-            spec = {"type": "noul", "instructions": question}
-
-        try:
-            answers = self._pplx().decide(
-                state, {"answer": spec}, images=self._pplx_images(image)
-            )["answers"]
-        except Exception:
-            return None
-        answer = answers.get("answer")
-        if not answer:
-            return None
-        return self._map_answer(
-            self._pplx_shape(answer, typ), typ, levels, source="pplx_decider_flash_v1.2"
-        )
-
-    @staticmethod
-    def _pplx_shape(answer: Dict[str, Any], typ: str) -> Dict[str, Any]:
-        """pplx answer -> the /v1/systemone answer shape the mapper already knows."""
-        if typ == "noul":
-            return {"noul": float(answer.get("noul", 0.0))}
-        probabilities = {
-            str(key): float(value)
-            for key, value in zip(answer.get("keys", []), answer.get("probs", []))
-        }
-        if typ == "score":
-            return {"probabilities": {str(i): p for i, p in enumerate(answer.get("probs", []))}}
-        return {
-            "choice": answer.get("argmax"),
-            "probabilities": probabilities,
-            "confidence": _concentration(list(answer.get("probs", []))),
-        }
-
     def _call_decision(
         self,
         state: str,
@@ -250,9 +108,9 @@ class JevEngine:
         typ: str,
         image: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """One typed decision through whichever protocol the served model speaks."""
-        if self.backend() == BACKEND_PPLX:
-            return self._call_pplx(state, question, options, typ, image)
+        """One typed decision through the verified H2O API."""
+        if self.backend() != BACKEND_SYSTEMONE:
+            return None
         return self._call_systemone(state, question, options, typ, image)
 
     def _call_systemone(
@@ -263,26 +121,28 @@ class JevEngine:
         typ: str,
         image: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """vllm-d3-mini native /v1/systemone. Calibrated server-side."""
+        """h2o-lightning-4b native /v1/systemone."""
         if self._systemone_supported is False:
             return None
         if not self.is_online():
             return None
 
-        q: Dict[str, Any] = {"type": typ, "instructions": question}
+        h2o_type = {"noul": "bool", "choice": "choice", "score": "score"}[typ]
+        q: Dict[str, Any] = {"type": h2o_type}
         levels: Optional[List[str]] = None
+        if typ == "score":
+            q["criteria"] = question
+        else:
+            q["question"] = question
         if typ == "choice":
             if not options:
                 raise ValueError("Options list required for choice primitive")
-            q["criteria"] = {str(o): None for o in options}
+            q["options"] = [str(option) for option in options]
         elif typ == "score":
             levels = [str(o) for o in (options or ["0.0", "0.25", "0.5", "0.75", "1.0"])]
-            q["criteria"] = levels
 
-        payload: Dict[str, Any] = {"state": state, "questions": {"answer": q}}
-        data_url = self._data_url(image)
-        if data_url:
-            payload["images"] = [data_url]
+        payload: Dict[str, Any] = {"state": {"context": state}, "questions": {"answer": q}}
+        self._add_image(payload, q, image)
 
         answers = self._post(payload)
         if answers is None:
@@ -290,7 +150,50 @@ class JevEngine:
         ans = answers.get("answer")
         if not ans:
             return None
-        return self._map_answer(ans, typ, levels)
+        return self._map_h2o_answer(ans, typ, levels)
+
+    def _add_image(self, payload: Dict[str, Any], question: Dict[str, Any], image: Optional[str]) -> None:
+        raw = self._encode_image(image)
+        if not raw:
+            return
+        mime = "image/png"
+        if image:
+            guess, _ = mimetypes.guess_type(str(image))
+            if guess and guess.startswith("image/"):
+                mime = guess
+        image_format = "jpg" if mime == "image/jpeg" else mime.split("/", 1)[1]
+        payload["assets"] = {
+            "img": {
+                "type": "image",
+                "format": image_format,
+                "data_base64": raw,
+            }
+        }
+        question["image"] = "img"
+
+    def _map_h2o_answer(self, answer: Dict[str, Any], typ: str,
+                        levels: Optional[List[str]]) -> Dict[str, Any]:
+        if typ == "noul":
+            probs = answer.get("probabilities") or {}
+            probability = answer.get("probability", probs.get("true"))
+            if probability is None:
+                probability = 1.0 if answer.get("decision") else 0.0
+            return self._map_answer({"noul": float(probability)}, typ, levels)
+        if typ == "choice":
+            normalized = dict(answer)
+            if "choice" not in normalized and "selection" in normalized:
+                normalized["choice"] = normalized["selection"]
+            return self._map_answer(normalized, typ, levels)
+        if "score" in answer:
+            probabilities = answer.get("probabilities") or {}
+            mapped = self._map_answer({"probabilities": probabilities}, typ, levels) if probabilities else {}
+            return {
+                "primitive": "score",
+                "score": round(min(1.0, max(0.0, float(answer["score"]))), 4),
+                "probabilities": mapped.get("probabilities", probabilities),
+                "source": self.source_label(),
+            }
+        return self._map_answer(answer, typ, levels)
 
     def _post(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """POST one /v1/systemone request. None means "not a decision server".
@@ -298,7 +201,7 @@ class JevEngine:
         The single place the engine talks to the server, so one call and a batch
         cannot drift apart in their error handling.
         """
-        if self._systemone_supported is False:
+        if self.backend() != BACKEND_SYSTEMONE or self._systemone_supported is False:
             return None
         if not self.is_online():
             return None
@@ -420,13 +323,32 @@ class JevEngine:
             built[qid] = q
             levels_by_id[qid] = levels
 
-        payload: Dict[str, Any] = {"state": state, "questions": built}
-        data_url = self._data_url(image)
-        if data_url:
-            payload["images"] = [data_url]
+        h2o_questions: Dict[str, Dict[str, Any]] = {}
+        for qid, spec in built.items():
+            typ = spec["type"]
+            question: Dict[str, Any]
+            if typ == "noul":
+                question = {"type": "bool", "question": spec["instructions"]}
+            elif typ == "choice":
+                question = {
+                    "type": "choice",
+                    "question": spec["instructions"],
+                    "options": list(spec["criteria"]),
+                }
+            else:
+                question = {"type": "score", "criteria": spec["instructions"]}
+                score_levels = levels_by_id[qid]
+                if score_levels:
+                    question["criteria"] += " (ordered levels: " + ", ".join(score_levels) + ")"
+            h2o_questions[qid] = question
 
-        if self.backend() == BACKEND_PPLX:
-            return self._pplx_batch(state, built, levels_by_id, image)
+        payload: Dict[str, Any] = {
+            "state": {"context": state},
+            "questions": h2o_questions,
+        }
+        if image:
+            for question in h2o_questions.values():
+                self._add_image(payload, question, image)
 
         answers = self._post(payload)
         if answers is None:
@@ -435,27 +357,9 @@ class JevEngine:
                 f"{self.systemone_url.rsplit('/v1/', 1)[0]}/health"
             )
         return {
-            qid: self._map_answer(ans, built[qid]["type"], levels_by_id[qid])
+            qid: self._map_h2o_answer(ans, built[qid]["type"], levels_by_id[qid])
             for qid, ans in answers.items() if qid in built
         }
-    def _pplx_batch(self, state: str, built: Dict[str, Any],
-                    levels_by_id: Dict[str, Optional[List[str]]],
-                    image: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
-        """Many typed questions in ONE pplx-decider sequence (joint protocol v3)."""
-        answers = self._pplx().decide(
-            state, built, images=self._pplx_images(image)
-        )["answers"]
-        out: Dict[str, Dict[str, Any]] = {}
-        for qid, answer in answers.items():
-            if qid not in built:
-                continue
-            typ = built[qid]["type"]
-            out[qid] = self._map_answer(
-                self._pplx_shape(answer, typ), typ, levels_by_id.get(qid),
-                source="pplx_decider_flash_v1.2",
-            )
-        return out
-
     def decide_bool(self, context: str, question: str, image: Optional[str] = None) -> Dict[str, Any]:
         res = self._call_decision(context, question, None, "noul", image)
         if res is not None:

@@ -11,7 +11,7 @@ Stages:
   01_acquire       - Ingests video (URL or local), extracts audio & metadata
   02_audio_asr     - Speech-to-text with timestamps via audiocpp-asr (Nemotron 3.5)
   03_visual_sample - Smart frame sampling with ffmpeg & perceptual deduplication
-  04_visual_gate   - Gating frames with readable text (vllm-d3-mini vision / heuristics)
+  04_visual_gate   - Gating frames with readable text (h2o-lightning-4b vision / heuristics)
   05_visual_ocr    - Visual OCR via LightOnOCR-3-1B (Qwen3-VL on llama.cpp Vulkan)
   06_synthesize    - Merges transcript & OCR into chronological mined_video.md
 """
@@ -64,6 +64,18 @@ STAGES = [
 
 # Service Endpoints
 DECISION_URL = os.environ.get("JEV_URL", "http://127.0.0.1:8083/v1/systemone")
+
+
+def _decision_model_is_h2o() -> bool:
+    models_url = DECISION_URL.rsplit("/v1/systemone", 1)[0] + "/v1/models"
+    try:
+        req = urllib.request.Request(models_url)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        models = data.get("data") or []
+        return bool(models and "h2o-lightning-4b" in str(models[0].get("id", "")).lower())
+    except Exception:
+        return False
 
 LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
 LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf"))
@@ -482,6 +494,7 @@ def run_stage_04_visual_gate(workspace: Path) -> None:
         
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     print(f"[04_visual_gate] Evaluating {len(manifest)} frames for visible text/code...")
+    h2o_available = _decision_model_is_h2o()
     
     gated_results = []
     for item in manifest:
@@ -489,29 +502,38 @@ def run_stage_04_visual_gate(workspace: Path) -> None:
         if not frame_path.exists():
             continue
             
-        # Fast local classifier: ask the vision decision model for a calibrated
-        # yes/no, then fall back to a size heuristic if it is offline.
+        # Fast local classifier: use H2O's calibrated vision decision, then a
+        # size heuristic if the expected model is unavailable.
         has_text = True
         confidence = 0.8
         ext = frame_path.suffix.lower().lstrip(".")
         mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
 
         try:
+            if not h2o_available:
+                raise RuntimeError("h2o-lightning-4b is not served on the configured JEV endpoint")
             with open(frame_path, "rb") as img_file:
                 b64_data = base64.b64encode(img_file.read()).decode("utf-8")
 
             payload = {
-                "state": "Frame sampled from a technical video or lecture recording.",
+                "state": {"context": "Frame sampled from a technical video or lecture recording."},
                 "questions": {
                     "answer": {
-                        "type": "noul",
-                        "instructions": (
+                        "type": "bool",
+                        "question": (
                             "Does this image show slides, code, UI text, or diagrams "
                             "with readable text?"
                         ),
+                        "image": "frame",
                     }
                 },
-                "images": [f"data:{mime};base64,{b64_data}"],
+                "assets": {
+                    "frame": {
+                        "type": "image",
+                        "format": "jpg" if mime == "image/jpeg" else "png",
+                        "data_base64": b64_data,
+                    }
+                },
             }
             req = urllib.request.Request(
                 DECISION_URL,
@@ -520,7 +542,9 @@ def run_stage_04_visual_gate(workspace: Path) -> None:
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            p_true = float((data.get("answers") or {}).get("answer", {}).get("noul", 0.5))
+            answer = (data.get("answers") or {}).get("answer", {})
+            probabilities = answer.get("probabilities") or {}
+            p_true = float(answer.get("probability", probabilities.get("true", 1.0 if answer.get("decision") else 0.0)))
             has_text = p_true >= 0.5
             confidence = round(abs(p_true - 0.5) * 2.0, 4)
         except Exception:

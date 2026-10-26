@@ -25,7 +25,7 @@ Everything the SKILL.md quickstart leaves out. Paths are relative to the skill r
 ```jsonc
 // bool
 {"primitive": "bool", "decision": true, "confidence": 0.95,
- "probabilities": {"true": 0.978, "false": 0.022}, "source": "vllm_d3_mini_systemone"}
+ "probabilities": {"true": 0.978, "false": 0.022}, "source": "h2o-lightning-4b"}
 
 // choice
 {"primitive": "choice", "selection": "parallel_worker_lane", "confidence": 0.99,
@@ -41,7 +41,7 @@ Everything the SKILL.md quickstart leaves out. Paths are relative to the skill r
  "confidence": 0.88, "source": "..."}
 ```
 
-`source` is `vllm_d3_mini_systemone` when the server answered, `heuristic_fallback`
+`source` is `h2o-lightning-4b` when the server answered, `heuristic_fallback`
 when the keyword heuristic did. Assert on it in anything that must not guess.
 
 ---

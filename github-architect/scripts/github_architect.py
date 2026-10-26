@@ -886,7 +886,7 @@ Synthesized by `github-architect` from local GPU inference configs, launchers, a
 |---|---|---|---|
 | `:8080` | **Qwen3.6-35B-A3B-Uncensored-Genesis (Q4_K_M)** | `sh/luffy_nothink.sh` | Complex reasoning, coding, uncensored generation |
 | `:8081` | **Nemotron 3.5 ASR + Kokoro TTS** | `audio.cpp` server | Real-time speech-to-text (40 langs) + fast speech synthesis |
-| `:8083` | **vllm-d3-mini Decision Model (vision)** | `sh/vllm-d3-mini.sh` | Native `/v1/systemone` bool/choice/score + image gating |
+| `:8083` | **h2o-lightning-4b Decision Model (vision)** | `sh/decision-model.sh` | Native `/v1/systemone` bool/choice/score + image gating |
 | `:8084` | **CrispEmbed Scene Text OCR** | `launchers/crispembed-ocr.sh` | Real-world scene-text OCR (DBNet + PARSeq) |
 | `:8085` | **LightOnOCR-3-1B** | `launchers/lighton-ocr.sh` | **Flagship Video, Slide & Scanned-PDF OCR** (~16k t/s prefill, ~330 t/s gen) |
 | `:8086` | **Jina-Reranker-v2 Base** | `launchers/jina-reranker.sh` | Cross-encoder RAG reranking |
@@ -898,7 +898,7 @@ Synthesized by `github-architect` from local GPU inference configs, launchers, a
 ## 🏆 Model Rankings by Task
 
 - **Video, Slide & Document OCR**: `LightOnOCR-3-1B` (#1) > `SmolDocling-256M` (#2) > `CrispEmbed` (#3)
-- **Calibrated Decisions**: `vllm-d3-mini` (Vision + Text, `/v1/systemone`)
+- **Calibrated Decisions**: `h2o-lightning-4b` (Vision + Text, `/v1/systemone`)
 - **Browser Visual Grounding**: `DeskForge-Qwen3.5-4B` (GUI coordinates)
 - **Speech-to-Text**: `Nemotron-3.5-ASR` (Streaming RNNT on `:8081`)
 """

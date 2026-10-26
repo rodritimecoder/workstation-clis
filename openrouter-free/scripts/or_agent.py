@@ -745,7 +745,7 @@ def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
     local_services = {
         "genesis_35b_8080": check_tcp_port("127.0.0.1", 8080),
         "litellm_gateway_4000": check_tcp_port("127.0.0.1", 4000),
-        "vllm_d3_decide_8083": check_tcp_port("127.0.0.1", 8083),
+        "h2o_jev_8083": check_tcp_port("127.0.0.1", 8083),
         "fast_cdp_9222": check_tcp_port("127.0.0.1", 9222),
     }
 
@@ -832,7 +832,7 @@ def run_doctor(as_json: bool = False, live_probe: bool = False) -> int:
         print("\n  🖥️  Local Inference Headroom (Homelab Priority):")
         print(f"  • Genesis 35B (:8080):  {'✅ ONLINE' if local_services['genesis_35b_8080'] else '⚪ OFFLINE'}")
         print(f"  • LiteLLM Gate (:4000): {'✅ ONLINE' if local_services['litellm_gateway_4000'] else '⚪ OFFLINE'}")
-        print(f"  • vllm-d3-mini Decide (:8083):{'✅ ONLINE' if local_services['vllm_d3_decide_8083'] else '⚪ OFFLINE'}")
+        print(f"  • h2o-lightning-4b JEV (:8083):{'✅ ONLINE' if local_services['h2o_jev_8083'] else '⚪ OFFLINE'}")
         print(f"  • Fast-CDP (:9222):     {'✅ ONLINE' if local_services['fast_cdp_9222'] else '⚪ OFFLINE'}")
 
         if live_probe:

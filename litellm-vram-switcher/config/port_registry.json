@@ -26,8 +26,8 @@
       "alias": "local-decide",
       "vram_mb": 3600,
       "pinned": false,
-      "name": "vllm-d3-nano",
-      "cmd": "sh $HOME/src/my-agent-skills/launchers/vllm-d3-nano.sh",
+      "name": "h2o-lightning-4b",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/decision-model.sh",
       "role": "The decision engine slot - bool / choice / score primitives"
     },
     "8082": {
@@ -36,7 +36,7 @@
       "pinned": false,
       "name": "StartLux-Decision-v1.1-4B-Instant",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/startlux-decision.sh",
-      "role": "Internal engine of the :8083 decision slot - prompts in one micro-batch, not a client-facing API"
+      "role": "Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint"
     },
     "8089": {
       "alias": "local-decide-fallback",

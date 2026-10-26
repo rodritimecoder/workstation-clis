@@ -16,8 +16,8 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 |---|---|---|---|---|---|
 | `:8080` | `llm` | many (7) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
 | `:8081` | `audio` | many (3) | nemotron-asr | `run-audiocpp.sh` | Speech-to-text, text-to-speech, forced alignment, voice cloning |
-| `:8083` | `decision` | one-of-many (5) | vllm-d3-nano | `vllm-d3-nano.sh` | The decision engine slot - bool / choice / score primitives |
-| `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Internal engine of the :8083 decision slot - prompts in one micro-batch, not a client-facing API |
+| `:8083` | `decision` | one-of-many (5) | h2o-lightning-4b | `decision-model.sh` | The decision engine slot - bool / choice / score primitives |
+| `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint |
 | `:8089` | `decision-fallback` | single (1) | Imajev-4B | `imajev-decider.sh` | Secondary decision engine — Imajev-4B chat path, or letter/readout with READOUT=1 |
 | `:8084` | `ocr-crispembed` | single (1) | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `crispembed-ocr.sh` | Scene text — 2D bounding boxes and structured markdown |
 | `:8085` | `ocr-lighton` | single (1) | LightOnOCR-3-1B | `lighton-ocr.sh` | Documents, PDFs and slides — fast prefill, high-throughput markdown |

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -124,16 +125,56 @@ class TestJevDecision(unittest.TestCase):
         self.assertIn("confidence", res)
         print(f"  ✓ vision decision ({res['source']}) · verified")
 
-    def test_09_remote_tailscale_decision(self):
-        remote_engine = JevEngine(host="rodri-x870-taichi-creator.tail2975a8.ts.net", port=8083)
-        if not remote_engine.is_online():
-            print("  ⚠️ Remote vllm-d3-mini host offline, skipping")
-            return
-        res = remote_engine.decide_bool("Tailscale cluster state verification.", "Is cluster network operational?")
-        self.assertIn("decision", res)
-        self.assertIn("confidence", res)
-        self.assertNotEqual(res["source"], "heuristic_fallback")
-        print(f"  ✓ remote tailscale bool decision ({res['decision']}, conf={res['confidence']*100:.1f}%) · verified")
+    def test_18_backend_accepts_only_h2o_lightning(self):
+        class Response:
+            def __init__(self, model_id):
+                self.body = json.dumps({"data": [{"id": model_id}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return self.body
+
+        engine = JevEngine()
+        with patch("jev_engine.urllib.request.urlopen", return_value=Response("/models/h2o-lightning-4b-Q4_K_M.gguf")):
+            self.assertEqual(engine.backend(), "systemone")
+        with patch("jev_engine.urllib.request.urlopen", return_value=Response("/models/vllm-d3-nano-Q4_K_M.gguf")):
+            self.assertEqual(engine.backend(), "none")
+
+    def test_19_h2o_native_payload_and_answer(self):
+        engine = JevEngine()
+        engine.model_name = "h2o-lightning-4b"
+        request_payload = {}
+
+        def post(payload):
+            request_payload.update(payload)
+            return {"answer": {"decision": True, "probability": 0.93}}
+
+        with patch.object(engine, "backend", return_value="systemone"), \
+             patch.object(engine, "is_online", return_value=True), \
+             patch.object(engine, "_post", side_effect=post):
+            result = engine._call_systemone(
+                "browser state", "Is the confirmation visible?", None, "noul"
+            )
+
+        self.assertEqual(request_payload["state"], {"context": "browser state"})
+        self.assertEqual(request_payload["questions"]["answer"], {
+            "type": "bool", "question": "Is the confirmation visible?"
+        })
+        self.assertTrue(result["decision"])
+        self.assertEqual(result["probabilities"]["true"], 0.93)
+        self.assertEqual(result["source"], "h2o-lightning-4b")
+
+    def test_20_post_refuses_unverified_model(self):
+        engine = JevEngine()
+        with patch.object(engine, "backend", return_value="none"), \
+             patch.object(engine, "is_online") as online:
+            self.assertIsNone(engine._post({"questions": {}}))
+            online.assert_not_called()
 
 
 class TestCliContract(unittest.TestCase):

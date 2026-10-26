@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -35,6 +36,27 @@ class TestVideomineTokenShielding(unittest.TestCase):
         self.assertIn("Stage", out)
         self.assertIn("01_acquire", out)
         self.assertIn("02_audio_asr", out)
+
+    def test_jev_gate_requires_h2o_model(self):
+        class Response:
+            def __init__(self, model_id):
+                self.body = json.dumps({"data": [{"id": model_id}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return self.body
+
+        with patch.object(vm.urllib.request, "urlopen",
+                          return_value=Response("/models/h2o-lightning-4b-Q4_K_M.gguf")):
+            self.assertTrue(vm._decision_model_is_h2o())
+        with patch.object(vm.urllib.request, "urlopen",
+                          return_value=Response("/models/vllm-d3-nano-Q4_K_M.gguf")):
+            self.assertFalse(vm._decision_model_is_h2o())
 
     def test_pipeline_status_and_artifacts(self):
         # Put sample file in 01_acquire

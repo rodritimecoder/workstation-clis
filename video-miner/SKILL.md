@@ -1,9 +1,9 @@
 ---
 name: video-miner
 
-description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (vllm-d3-mini vision), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
+description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (h2o-lightning-4b vision), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
 
-compatibility: "Requires ffmpeg, the local Nemotron ASR server on :8081, the vllm-d3-mini decision model on :8083 for frame gating, and LightOnOCR on :8085 for layout extraction."
+compatibility: "Requires ffmpeg, the local Nemotron ASR server on :8081, the h2o-lightning-4b JEV decision model on :8083 for frame gating, and LightOnOCR on :8085 for layout extraction."
 allowed-tools: "Bash(video-miner:*) Bash(ffmpeg:*) Bash(python3:*) Read Write"
 ---
 
@@ -125,4 +125,3 @@ vault-mine reindex
 ```bash
 python3 ~/.gemini/config/skills/video-miner/scripts/test_videomine.py
 ```
-

@@ -53,27 +53,17 @@ models:
     ttl: 0
 
   # ============================================================
-  # 2. Premier Decision: vllm-d3-nano (2.39B) — JEV DECISION MODEL
-  #    Native /v1/systemone decision model (qwen35 decision_type=vllm-d3).
-  #    Non-causal, calibrated probabilities, vision via mmproj.
+  # 2. Premier Decision: h2o-lightning-4b — JEV DECISION MODEL
+  #    Native /v1/systemone text and image decisions, calibrated server-side.
   # ============================================================
-  "vllm-d3-nano":
+  "h2o-lightning-4b":
     aliases:
       - "agent-classifier"
       - "local-classifier-jev"
       - "jev-decision"
       - "local-decide"
     cmd: >
-      ${server_upstream_vulkan}
-      -m /run/media/rodri/AI/models/ggml-org/vllm-d3-nano-GGUF/vllm-d3-nano-Q4_K_M.gguf
-      --mmproj /run/media/rodri/AI/models/ggml-org/vllm-d3-nano-GGUF/mmproj-vllm-d3-nano-Q8_0.gguf
-      --host 127.0.0.1
-      --port ${PORT}
-      -ngl 99
-      -c 8192
-      -b 8192
-      -ub 4096
-      --no-warmup
+      PORT=${PORT} sh $HOME/src/my-agent-skills/launchers/decision-model.sh
     proxy: "http://127.0.0.1:${PORT}"
     ttl: 600
 
@@ -109,7 +99,6 @@ models:
   "vllm-d3-mini":
     aliases:
       - "agent-classifier-legacy"
-      - "local-classifier-jev-legacy"
       - "vllm-d3"
     cmd: >
       ${server_upstream_vulkan}
@@ -129,7 +118,6 @@ models:
   "imajev-4b":
     aliases:
       - "agent-classifier-imajev"
-      - "local-classifier-jev-imajev"
       - "imajev"
     cmd: >
       ${server_upstream_vulkan}

@@ -5,12 +5,12 @@ description: >
   Calibrated, non-generative decision engine (Glitch Cat Club / Kem Glitch; Reel DdjOqRYNZZi).
   Turns a judgement into one of four typed answers — bool (binary), choice (constrained enum),
   score (scalar 0.0-1.0) or composite (gate + action + quality) — with a probability from the
-  local decision model on :8083, no generated tokens. Use when something must be judged,
+  h2o-lightning-4b local decision model on :8083, no generated tokens. Use when something must be judged,
   triaged, routed, gated, scored, or classified; for context de-duplication and superseding
   claims; or for any yes/no question about a screenshot. Fast and near-free, so it suits
   high-volume loops.
 
-compatibility: "Requires a local decision model on :8083. Speaks the TypeSafe /v1/systemone API (StartLux-Decision, vllm-d3-nano, vllm-d3-mini), the retired pplx-decider-flash v1.2 joint protocol v3, and the legacy letter-logprob path; the engine picks the protocol from the served model and names it in every result's `source`."
+compatibility: "Requires h2o-lightning-4b on :8083 through its native /v1/systemone API. The engine verifies the served model before sending decisions; other models are not used."
 allowed-tools: "Bash(jev-decision:*) Bash(python3:*) Read Write"
 ---
 
@@ -48,7 +48,7 @@ Run from this skill's directory (the harness resolves paths from the skill root)
 JEV="python3 jev_decision.py"
 
 # Is the server up?
-$JEV doctor                                  # ONLINE http://127.0.0.1:8083
+$JEV doctor                                  # ONLINE h2o-lightning-4b http://127.0.0.1:8083
 
 # The four primitives — one compact line each
 $JEV bool    --context "Postgres was deprecated and replaced by SQLite." \

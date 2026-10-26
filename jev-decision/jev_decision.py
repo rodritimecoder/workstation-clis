@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JEV decision CLI — the four primitives of vllm-d3-nano, plus batch and cleanup.
+"""JEV decision CLI — h2o-lightning-4b primitives, plus batch and cleanup.
 
 Output is one compact line by default. `--json` prints the structured result,
 `--out FILE` writes the JSON to disk and keeps stdout to one pointer line, so a
@@ -77,7 +77,7 @@ def _check_source(args, res: dict) -> None:
 def main():
     parent_parser = argparse.ArgumentParser(add_help=False)
     parent_parser.add_argument("--host", default=None, help="Decision host (default: $JEV_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
-    parent_parser.add_argument("--port", type=int, default=8083, help="Decision service port (default: 8083 = vllm-d3-nano)")
+    parent_parser.add_argument("--port", type=int, default=8083, help="Decision service port (default: 8083 = h2o-lightning-4b)")
     parent_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     parent_parser.add_argument("--out", default=None, help="Write the JSON result here and print a one-line pointer")
     parent_parser.add_argument("--require-server", action="store_true",
@@ -93,7 +93,7 @@ def main():
     sub_parent.add_argument("--require-server", action="store_true", default=argparse.SUPPRESS)
 
     parser = argparse.ArgumentParser(
-        description="JEV decision engine — vllm-d3-nano native /v1/systemone, vision-capable",
+        description="JEV decision engine — h2o-lightning-4b native /v1/systemone, vision-capable",
         epilog=(
             "Primitives: bool (binary), choice (constrained enum), score (0.0-1.0), "
             "composite (gate + action + quality).\n"
@@ -172,8 +172,12 @@ def main():
     engine = JevEngine(host=getattr(args, "host", None), port=args.port)
 
     if args.command == "doctor":
-        online = engine.is_online()
-        print(f"{'ONLINE' if online else 'OFFLINE'} {engine.systemone_url.rsplit('/v1/', 1)[0]}")
+        reachable = engine.is_online()
+        backend = engine.backend()
+        online = backend == "systemone" and reachable
+        status = "ONLINE" if online else "OFFLINE or wrong model"
+        model = engine.model_name or "unknown model"
+        print(f"{status} {model} {engine.systemone_url.rsplit('/v1/', 1)[0]}")
         return 0 if online else 3
 
     if args.command == "bool":

@@ -27,7 +27,7 @@ the auxiliary models are evicted and restored on demand.
 | :--- | :--- | :--- |
 | `qwen3.6-35b` | ~22 GB | **Pinned King** — Q4_0 ROCMFP4, split across both GPUs (`-ts 45/55`) |
 | `gemma4-26b` | ~18 GB | Heavy general model; evicts the King when called, and swaps it back when done |
-| `vllm-d3-nano` | ~3.5 GB | **The** decision model: 2.39B native `/v1/systemone` on `:8083`, ~70 ms, zero generated tokens, vision via `mmproj`. Replaces the retired `pplx-decider-flash` 4B |
+| `h2o-lightning-4b` | ~3.2 GB | **The** JEV decision model: native `/v1/systemone` on `:8083`, calibrated text and vision decisions; JEV rejects other served models |
 | `deskforge-4b` | ~3.5 GB | Desktop computer-use coordinate extraction |
 | `lighton-ocr` | ~1.5 GB | Flagship 16k t/s slide and document OCR; runs concurrently alongside the King |
 
