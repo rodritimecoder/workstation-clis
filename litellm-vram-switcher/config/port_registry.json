@@ -27,7 +27,7 @@
       "vram_mb": 3600,
       "pinned": false,
       "name": "h2o-lightning-4b",
-      "cmd": "sh $HOME/src/my-agent-skills/launchers/decision-model.sh",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/h2o.sh",
       "role": "The decision engine slot - bool / choice / score primitives"
     },
     "8082": {

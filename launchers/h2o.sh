@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# decision-model.sh — h2o-lightning-4b (4B) decision & visual grounding model on llama-server
+# h2o.sh — h2o-lightning-4b (4B) decision & visual grounding model on llama-server
 # Min-maxed VRAM profile: 8k context with q4_0 KV cache + tuned 2048 ubatch for Image + Text
 
 set -uo pipefail

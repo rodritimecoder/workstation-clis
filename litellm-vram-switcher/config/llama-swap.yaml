@@ -63,7 +63,7 @@ models:
       - "jev-decision"
       - "local-decide"
     cmd: >
-      PORT=${PORT} sh $HOME/src/my-agent-skills/launchers/decision-model.sh
+      PORT=${PORT} sh $HOME/src/my-agent-skills/launchers/h2o.sh
     proxy: "http://127.0.0.1:${PORT}"
     ttl: 600
 
