@@ -10,7 +10,7 @@ description: >
   claims; or for any yes/no question about a screenshot. Fast and near-free, so it suits
   high-volume loops.
 
-compatibility: "Requires h2o-lightning-4b on :8083 through its native /v1/systemone API. The engine verifies the served model before sending decisions; other models are not used."
+compatibility: "Requires a decision server on :8083 answering /v1/systemone (noul | choice | score). h2o-lightning-4b is the default occupant, behind the h2o-serve shim; any rotated candidate on the slot is used, and the served model is named in every result. JEV_REQUIRE_H2O=1 restores the hard h2o-only pin."
 allowed-tools: "Bash(jev-decision:*) Bash(python3:*) Read Write"
 ---
 
@@ -109,7 +109,9 @@ answers off the caller's token stream.
   (`["0.0","0.5","1.0"]`) are averaged by value; named levels (`["none","low","high"]`)
   map to an expected level index. Both return a scalar in `[0,1]`.
 - **`choice` needs at least two options, and `score` 2–10 levels.** The server rejects
-  a malformed question with a 400; the CLI validates first and explains what it wanted.
+  a malformed question with a 422; the CLI validates first and explains what it wanted.
+  The wire dialect is `{"type": "noul", "instructions": "…"}` — `bool` + `question` is
+  the retired shape that every current server rejects.
 
 ---
 

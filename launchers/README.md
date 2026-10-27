@@ -68,7 +68,19 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 
 `archived/` holds retired launchers kept for reference: the `JPT-4B`,
 `OneJev1.5-4B` and `Imajev-4B` decision models, and `Jev-Style-Qwen3.5-2B`.
-The decision engine is `vllm-d3-mini` on `:8083` with no fallback.
+
+`:8083` is one slot with several occupants. `decide.sh` frees the port and hands
+over to the chosen candidate, so the command you type does not change when the
+model behind the slot does:
+
+```bash
+decide.sh list                              # h2o, startlux, pplx, vllm-d3-mini, …
+decide.sh status                            # :8083 UP  h2oai/h2o-lightning-4b
+decide.sh h2o                               # the default: shim on :8083, backend :8621
+```
+
+Every candidate answers the same `/v1/systemone` dialect (`noul | choice | score`,
+`instructions`, `criteria`), which is what `jev` and `decision-model` speak.
 
 ---
 

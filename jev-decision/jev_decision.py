@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent / "scripts"))
 from jev_engine import JevEngine
+import jev_engine
 
 
 def _die(message: str, code: int) -> "SystemExit":
@@ -61,15 +62,17 @@ def _split_options(values: list) -> list:
 def _check_source(args, res: dict) -> None:
     """The server is the point. Say so when it was not the one answering."""
     if res.get("source") == "heuristic_fallback":
+        detail = jev_engine.LAST_ERROR
         if getattr(args, "require_server", False):
             raise _die(
                 "Error: the decision server did not answer, and --require-server was given.\n"
-                f"       Probe it with: curl -s http://127.0.0.1:{getattr(args, 'port', 8083)}/health",
+                f"       {detail or 'Probe it with: curl -s http://127.0.0.1:'
+                   + str(getattr(args, 'port', 8083)) + '/health'}",
                 3,
             )
         print(
-            "warning: decision server unreachable — answered with the keyword heuristic. "
-            "Pass --require-server to make this an error.",
+            "warning: decision server did not answer — answered with the keyword heuristic"
+            + (f" ({detail})" if detail else "") + ". Pass --require-server to make this an error.",
             file=sys.stderr,
         )
 

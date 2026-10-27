@@ -41,7 +41,8 @@ Everything the SKILL.md quickstart leaves out. Paths are relative to the skill r
  "confidence": 0.88, "source": "..."}
 ```
 
-`source` is `h2o-lightning-4b` when the server answered, `heuristic_fallback`
+`source` is the served model's id (for example `h2o-lightning-4b` or
+`vllm-d3-mini-Q4_K_M.gguf`) when the server answered, `heuristic_fallback`
 when the keyword heuristic did. Assert on it in anything that must not guess.
 
 ---

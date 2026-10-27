@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 BACKEND_SYSTEMONE = "systemone"
 BACKEND_NONE = "none"
 EXPECTED_MODEL = "h2o-lightning-4b"
+LAST_ERROR: Optional[str] = None
 
 def _concentration(probs: List[float]) -> float:
     k = len(probs)
@@ -38,6 +39,7 @@ class JevEngine:
         self.health_url = f"{self.scheme}://{self.host}:{self.port}/health"
 
         self._systemone_supported: Optional[bool] = None
+        self.last_error: Optional[str] = None
         self.model_name: Optional[str] = None
 
     # ---- backend selection ------------------------------------------------------
@@ -59,9 +61,11 @@ class JevEngine:
             return BACKEND_NONE
         entry = entries[0]
         model_id = str(entry.get("id") or "")
-        if EXPECTED_MODEL not in model_id.lower():
+        if not model_id:
             return BACKEND_NONE
-        self.model_name = self.model_name or EXPECTED_MODEL
+        if os.environ.get("JEV_REQUIRE_H2O") == "1" and EXPECTED_MODEL not in model_id.lower():
+            return BACKEND_NONE
+        self.model_name = self.model_name or model_id.rsplit("/", 1)[-1]
         return BACKEND_SYSTEMONE
 
     def is_online(self) -> bool:
@@ -127,19 +131,15 @@ class JevEngine:
         if not self.is_online():
             return None
 
-        h2o_type = {"noul": "bool", "choice": "choice", "score": "score"}[typ]
-        q: Dict[str, Any] = {"type": h2o_type}
+        q: Dict[str, Any] = {"type": typ, "instructions": question}
         levels: Optional[List[str]] = None
-        if typ == "score":
-            q["criteria"] = question
-        else:
-            q["question"] = question
         if typ == "choice":
             if not options:
                 raise ValueError("Options list required for choice primitive")
-            q["options"] = [str(option) for option in options]
+            q["criteria"] = {str(option): str(option) for option in options}
         elif typ == "score":
             levels = [str(o) for o in (options or ["0.0", "0.25", "0.5", "0.75", "1.0"])]
+            q["criteria"] = levels
 
         payload: Dict[str, Any] = {"state": {"context": state}, "questions": {"answer": q}}
         self._add_image(payload, q, image)
@@ -175,7 +175,7 @@ class JevEngine:
                         levels: Optional[List[str]]) -> Dict[str, Any]:
         if typ == "noul":
             probs = answer.get("probabilities") or {}
-            probability = answer.get("probability", probs.get("true"))
+            probability = answer.get("noul", answer.get("probability", probs.get("true")))
             if probability is None:
                 probability = 1.0 if answer.get("decision") else 0.0
             return self._map_answer({"noul": float(probability)}, typ, levels)
@@ -215,13 +215,20 @@ class JevEngine:
             with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            if e.code in (404, 400, 501):     # not a decision-model server
+            global LAST_ERROR
+            detail = e.read().decode(errors="replace")[:300]
+            if e.code in (404, 501):          # not a decision-model server
                 self._systemone_supported = False
+                return None
+            self._systemone_supported = True
+            self.last_error = f"HTTP {e.code} from {self.systemone_url}: {detail}"
+            LAST_ERROR = self.last_error
             return None
         except Exception:
             return None
 
         self._systemone_supported = True
+        LAST_ERROR = None
         return data.get("answers") or {}
 
     def _map_answer(self, ans: Dict[str, Any], typ: str,
@@ -325,21 +332,11 @@ class JevEngine:
 
         h2o_questions: Dict[str, Dict[str, Any]] = {}
         for qid, spec in built.items():
-            typ = spec["type"]
-            question: Dict[str, Any]
-            if typ == "noul":
-                question = {"type": "bool", "question": spec["instructions"]}
-            elif typ == "choice":
-                question = {
-                    "type": "choice",
-                    "question": spec["instructions"],
-                    "options": list(spec["criteria"]),
-                }
-            else:
-                question = {"type": "score", "criteria": spec["instructions"]}
-                score_levels = levels_by_id[qid]
-                if score_levels:
-                    question["criteria"] += " (ordered levels: " + ", ".join(score_levels) + ")"
+            question: Dict[str, Any] = {"type": spec["type"], "instructions": spec["instructions"]}
+            if spec["type"] == "choice":
+                question["criteria"] = {opt: opt for opt in spec["criteria"]}
+            elif spec["type"] == "score":
+                question["criteria"] = levels_by_id[qid] or []
             h2o_questions[qid] = question
 
         payload: Dict[str, Any] = {

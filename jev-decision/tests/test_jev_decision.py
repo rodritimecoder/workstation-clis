@@ -125,7 +125,7 @@ class TestJevDecision(unittest.TestCase):
         self.assertIn("confidence", res)
         print(f"  ✓ vision decision ({res['source']}) · verified")
 
-    def test_18_backend_accepts_only_h2o_lightning(self):
+    def test_18_backend_accepts_any_decision_server_unless_pinned(self):
         class Response:
             def __init__(self, model_id):
                 self.body = json.dumps({"data": [{"id": model_id}]}).encode()
@@ -143,7 +143,10 @@ class TestJevDecision(unittest.TestCase):
         with patch("jev_engine.urllib.request.urlopen", return_value=Response("/models/h2o-lightning-4b-Q4_K_M.gguf")):
             self.assertEqual(engine.backend(), "systemone")
         with patch("jev_engine.urllib.request.urlopen", return_value=Response("/models/vllm-d3-nano-Q4_K_M.gguf")):
-            self.assertEqual(engine.backend(), "none")
+            self.assertEqual(engine.backend(), "systemone")
+        with patch.dict("os.environ", {"JEV_REQUIRE_H2O": "1"}), \
+             patch("jev_engine.urllib.request.urlopen", return_value=Response("/models/vllm-d3-nano-Q4_K_M.gguf")):
+            self.assertEqual(JevEngine().backend(), "none")
 
     def test_19_h2o_native_payload_and_answer(self):
         engine = JevEngine()
@@ -152,7 +155,7 @@ class TestJevDecision(unittest.TestCase):
 
         def post(payload):
             request_payload.update(payload)
-            return {"answer": {"decision": True, "probability": 0.93}}
+            return {"answer": {"type": "noul", "noul": 0.93}}
 
         with patch.object(engine, "backend", return_value="systemone"), \
              patch.object(engine, "is_online", return_value=True), \
@@ -163,7 +166,7 @@ class TestJevDecision(unittest.TestCase):
 
         self.assertEqual(request_payload["state"], {"context": "browser state"})
         self.assertEqual(request_payload["questions"]["answer"], {
-            "type": "bool", "question": "Is the confirmation visible?"
+            "type": "noul", "instructions": "Is the confirmation visible?"
         })
         self.assertTrue(result["decision"])
         self.assertEqual(result["probabilities"]["true"], 0.93)
