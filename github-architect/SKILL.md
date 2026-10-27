@@ -34,6 +34,33 @@ are **strictly private** by default.
 | **Push** | Pushes upstream, confirming before touching a protected default branch (`main`/`master`); `-y` overrides | Force-pushing over someone else's work |
 | **Report** | Emits a 5-line receipt: commits, pull/push status, files left out | Not knowing what actually happened |
 
+### Commit messages
+
+The subject is derived from the staged diff, so `git log` stays searchable:
+
+```
+chore(academic-pipeline-v2, canvas-cli): 3 files (+4/-0)
+
+academic-pipeline-v2 (2 files, +3/-0)
+  SKILL.md
+  scripts/stage_contracts.py
+
+canvas-cli (1 file, +1/-0)
+  scripts/gates.py
+```
+
+`-m` overrides it verbatim, and that is what a person should use whenever the
+change has an intent a diff cannot express:
+
+```bash
+git-sync -m "refactor(github-architect): derive commit subjects from the diff"
+sync-skills --push -m "feat(kem-thought): add the scribe principle"
+```
+
+Timestamps are not written into the subject. The commit object already stores
+one (`git log --format=%cI`), so a stamped subject duplicates metadata and
+leaves every entry identical.
+
 ---
 
 ## 🛠️ CLI Quickstart

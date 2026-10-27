@@ -211,6 +211,15 @@ def run_cmd(cmd, cwd=None, check=True):
     return res
 
 
+def describe_repo_changes(target: Path) -> str:
+    """Commit subject/body derived from the staged diff, never from a clock."""
+    try:
+        from git_sync import describe_staged_changes
+        return describe_staged_changes(str(target))
+    except Exception:
+        return f"chore: sync changes in {target.name}"
+
+
 def check_gh_status() -> Tuple[bool, str]:
     res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
     if res.returncode != 0:
@@ -590,8 +599,7 @@ def cmd_sync(target: Path, message: Optional[str] = None, force: bool = False) -
     if status:
         print("  📝 Local changes detected. Staging and committing...")
         run_cmd(["git", "add", "."], cwd=target)
-        hostname = os.uname().nodename if hasattr(os, "uname") else "workstation"
-        commit_msg = message or f"chore: sync updates from {hostname}"
+        commit_msg = message or describe_repo_changes(target)
         run_cmd(["git", "commit", "-m", commit_msg], cwd=target)
         print(f"  ✅ Committed local changes: '{commit_msg}'")
     else:

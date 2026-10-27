@@ -281,5 +281,85 @@ class TestGuardedCommit(unittest.TestCase):
         self.assertIn("brand_new.txt", files)
 
 
+class TestCommitMessage(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.run = lambda *a: subprocess.run(["git", "-C", str(self.repo)] + list(a),
+                                             capture_output=True, text=True, check=True)
+        self.run("init", "-b", "main")
+        self.run("config", "user.email", "t@t")
+        self.run("config", "user.name", "t")
+
+    def write(self, rel, text="x\n"):
+        target = self.repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+    def test_subject_names_scope_and_file(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        self.run("add", "-A")
+        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
+
+    def test_multiple_scopes_appear_in_subject(self):
+        self.write("academic/academic-pipeline-v2/SKILL.md")
+        self.write("academic/canvas-cli/scripts/gates.py")
+        self.write("github-architect/scripts/git_sync.py")
+        self.run("add", "-A")
+        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        self.assertIn("(academic-pipeline-v2, canvas-cli +1)", subject)
+        self.assertIn("3 files", subject)
+
+    def test_body_lists_every_path(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        self.write("glitch-cat/kem-thought/principles/code-decides.md")
+        self.run("add", "-A")
+        message = git_sync.describe_staged_changes(str(self.repo))
+        self.assertIn("  SKILL.md", message)
+        self.assertIn("  principles/code-decides.md", message)
+
+    def test_subject_stays_within_the_console_width(self):
+        for i in range(6):
+            self.write(f"hardware/super-long-skill-name-number-{i}/scripts/x.py")
+        self.run("add", "-A")
+        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        self.assertLessEqual(len(subject), git_sync.MAX_SUBJECT)
+
+    def test_no_staged_changes_falls_back(self):
+        self.assertEqual(
+            git_sync.describe_staged_changes(str(self.repo)).splitlines()[0],
+            "chore: sync working tree",
+        )
+
+    def test_guarded_commit_derives_when_message_is_omitted(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        git_sync.guarded_commit(str(self.repo), None)
+        subject = self.run("log", "-1", "--format=%s").stdout.strip()
+        self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
+
+    def test_explicit_message_is_used_verbatim(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        git_sync.guarded_commit(str(self.repo), "docs(kem-thought): state the convention")
+        subject = self.run("log", "-1", "--format=%s").stdout.strip()
+        self.assertEqual(subject, "docs(kem-thought): state the convention")
+
+    def test_secret_in_a_new_directory_is_blocked(self):
+        self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")
+        result = git_sync.guarded_commit(str(self.repo), None)
+        self.assertEqual(len(result["blocked"]), 1)
+        self.assertEqual(result["committed"], [])
+
+    def test_blocked_commit_exits_nonzero(self):
+        self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")
+        proc = subprocess.run(
+            [sys.executable, str(HERE / "git_sync.py"), "guarded-commit", "--repo", str(self.repo)],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
