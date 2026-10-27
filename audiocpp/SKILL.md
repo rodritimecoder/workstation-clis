@@ -2,10 +2,11 @@
 name: audiocpp
 
 description: >
-  Local audio intelligence: speech-to-text, text-to-speech, forced alignment and
-  voice cloning across 12 GGUF models, every one of them faster than real time
-  on dual RX 9060 XT GPUs. Use for transcription, narration, cloning, or
-  millisecond word timestamps.
+  Local audio intelligence: speech-to-text, text-to-speech, forced alignment,
+  voice cloning and speaker diarization across 13 GGUF models, every one of them
+  faster than real time on dual RX 9060 XT GPUs. Use for transcription, narration,
+  cloning, millisecond word timestamps, or working out who said what in a
+  recording.
 
 compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan and the audio.cpp v0.9.0 binary."
 allowed-tools: "Bash(audiocpp:*) Bash(python3:*) Read Write"
@@ -31,6 +32,47 @@ milliseconds.
 | `kokoro` | `tts` | Expressive narration, or a named voice ID |
 | `fish_audio` | `tts` | Zero-shot voice cloning from a reference clip |
 | `qwen3_forced_aligner` | `align` | Millisecond word boundaries for subtitles |
+| `nemotron_3_diar` | `diar` | Who spoke when — up to 8 speakers, no word output |
+
+---
+
+## 🎙️ Speaker Diarization
+
+`run-diarization.sh` is the one-shot tool: it extracts a 16 kHz mono track,
+runs Nemotron 3 Diarization, and stamps an existing WebVTT/SRT with names.
+
+```bash
+DIAR="/run/media/rodri/AI/audio.cpp/run-diarization.sh"
+
+# 1. Who spoke when — turns.json + a talk-time summary
+"$DIAR" talk.mp4
+
+# 2. Label an existing transcript with real speaker turns
+"$DIAR" talk.mp4 --vtt talk.vtt --names Kem,Chase,Vince
+
+# 3. Swap ids if arrival order guessed wrong (or add the 4th name)
+"$DIAR" talk.mp4 --vtt talk.vtt --map 0=Chase,1=Kem,2=Vince
+
+# 4. A directory of recordings, one output folder each
+"$DIAR" recordings/ --out /tmp/diar
+```
+
+Output lands in `<input>.diar/`: `turns.json` (raw, samples at 16 kHz),
+`transcript.vtt` (`<v Name>` voice spans), `transcript.srt`, `transcript.txt`,
+`summary.json` (talk time, share, turn count, mean confidence per speaker).
+
+- **BF16 is the default and is parity-safe.** `--precision q8_0` is 102 MB
+  instead of 189 MB but can move speaker boundaries and change turn counts.
+- **Ids are arrival order, not identity.** `speaker_0` is whoever spoke first,
+  so always check the first line before trusting `--names`.
+- **Overlap is not separated.** Crosstalk lands in one turn; the model does not
+  split simultaneous speech. `summary.json` flags cues where a second speaker
+  held >30% of the cue.
+- **Diarization needs audio.** A transcript alone cannot be diarized; the
+  recording is the input and `--vtt` only supplies the words.
+- **One process, no server.** It runs `audiocpp_cli` directly, so the :8081
+  server keeps its own model loaded. `--latency-profile` and
+  `--threshold/--min-frames/--pad-frames` are passed straight through.
 
 ---
 
