@@ -1,36 +1,22 @@
 #!/usr/bin/env bash
-# h2o.sh — h2o-lightning-4b (4B) decision & visual grounding model on llama-server
-# Min-maxed VRAM profile: 8k context with q4_0 KV cache + tuned 2048 ubatch for Image + Text
+# h2o.sh — h2o-lightning-4b (4B) decision & visual grounding model
+#
+# llama.cpp has no backend for `qwen35.decision.type=h2o-lightning`: every
+# stock llama-server build rejects this GGUF at load with "unsupported decision
+# model type". The decision head and the box readout live in h2oai's shim, so
+# this launcher drives `h2o-serve`, which pins its own llama.cpp backend on the
+# private port the manifest already declares (:8621).
 
 set -uo pipefail
 
-DRIVE="/run/media/rodri/AI"
-SERVER="${DECISION_SERVER:-$DRIVE/llama.cpp/build-vulkan/bin/llama-server}"
-MODEL_DIR="${DECISION_MODEL_DIR:-$DRIVE/models/h2oai/h2o-lightning-4b-gguf}"
-MODEL="$MODEL_DIR/h2o-lightning-4b-Q4_K_M.gguf"
-MMPROJ="$MODEL_DIR/mmproj-lightning-Q8_0.gguf"
-[ -f "$MMPROJ" ] || MMPROJ="$MODEL_DIR/mmproj-lightning-f16.gguf"
-
 PORT="${PORT:-8083}"
-CTX="${CTX:-8192}"
-BATCH="${BATCH:-2048}"
-UBATCH="${UBATCH:-2048}"
-IMG_TOKENS="${IMG_TOKENS:-1280}"
-NGPU="${NGPU:-99}"
+BACKEND="${DECISION_BACKEND:-vulkan}"
+VARIANT="${DECISION_VARIANT:-Q8_0}"
 RESTART="${DECISION_RESTART:-0}"
+SHIM="${H2O_SERVE:-$(command -v h2o-serve 2>/dev/null)}"
+[ -n "$SHIM" ] || SHIM="/run/media/rodri/AI/skills/multimodal/clip-box/scripts/h2o_serve.py"
 
-[ -x "$SERVER" ] || { echo "missing server: $SERVER"; exit 1; }
-[ -f "$MODEL" ] || { echo "missing model: $MODEL"; exit 1; }
-
-MMPROJ_ARGS=()
-[ -f "$MMPROJ" ] && MMPROJ_ARGS=(--mmproj "$MMPROJ" --image-max-tokens "$IMG_TOKENS")
-
-if [ "$RESTART" = "1" ]; then
-  for pid in $(lsof -ti tcp:"$PORT" 2>/dev/null); do
-    kill "$pid" 2>/dev/null && echo "stopped pid $pid on :${PORT}"
-  done
-  sleep 2
-fi
+[ -f "$SHIM" ] || { echo "missing h2o-serve: $SHIM"; exit 1; }
 
 if curl -fsS -m 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
   echo "⚠️ Something is already answering on ${PORT}."
@@ -38,20 +24,14 @@ if curl -fsS -m 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "🚀 Starting h2o-lightning-4b (4B, Q4_K_M) on http://127.0.0.1:${PORT}"
-echo "   native /v1/systemone, ctx: ${CTX}, batch: ${BATCH}, ubatch: ${UBATCH}"
-echo "   KV cache: q4_0 (Key + Value), image budget: ${IMG_TOKENS} tokens"
-echo "   vision projector: ${MMPROJ_ARGS[1]:-disabled}"
-echo
+ARGS=(--backend "$BACKEND" --variant "$VARIANT" --port "$PORT")
+[ "$RESTART" = "1" ] && ARGS+=(--restart)
 
-exec "$SERVER" \
-  -m "$MODEL" \
-  "${MMPROJ_ARGS[@]}" \
-  --host 127.0.0.1 \
-  --port "$PORT" \
-  -ngl "$NGPU" \
-  -c "$CTX" \
-  -b "$BATCH" \
-  -ub "$UBATCH" \
-  -ctk q4_0 \
-  -ctv q4_0
+echo "🚀 Starting h2o-lightning-4b shim on http://127.0.0.1:${PORT}"
+echo "   decisions: /v1/systemone (noul, choice, score), box readout: enabled"
+echo "   variant: ${VARIANT}, backend: ${BACKEND}, private llama.cpp on the declared backend port"
+
+if [ -x "$SHIM" ]; then
+  exec "$SHIM" "${ARGS[@]}"
+fi
+exec python3 "$SHIM" "${ARGS[@]}"
