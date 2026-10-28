@@ -141,8 +141,24 @@ def cmd_claim(run_id: str, worker: str, file_path: str, lines: str = None) -> di
         return {"status": "RESERVED", "claim": new_claim}
 
 
-def cmd_gate(run_id: str, worker: str, test_cmd: str) -> dict:
+def execute_gate_command(command: str, cwd: Path, label: str) -> dict:
+    started = time.time()
+    proc = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True)
+    return {
+        "label": label,
+        "command": command,
+        "passed": proc.returncode == 0,
+        "exit_code": proc.returncode,
+        "duration_seconds": round(time.time() - started, 2),
+        "stdout": proc.stdout[:2000],
+        "stderr": proc.stderr[:2000],
+    }
+
+
+def cmd_gate(run_id: str, worker: str, test_cmd: str = None, verify_cmd: str = None) -> dict:
     """Deterministic Quality Gate: 'Code decides wherever it can'."""
+    if not test_cmd and not verify_cmd:
+        sys.exit("❌ Error: gate needs --test or --verify. A gate with nothing to run is not a gate.")
     repo = get_git_root()
     harness_dir = repo / ".harness" / "runs" / run_id
     manifest = json.loads((harness_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -151,23 +167,26 @@ def cmd_gate(run_id: str, worker: str, test_cmd: str) -> dict:
         sys.exit(f"❌ Error: Worker '{worker}' not found in run '{run_id}'.")
 
     worktree_path = repo / worker_info["worktree_path"]
-    sys.stderr.write(f"🔬 [Quality Gate] Running tests in {worker} worktree: $ {test_cmd}\n")
+    checks = []
+    if test_cmd:
+        sys.stderr.write(f"🔬 [Quality Gate] Running tests in {worker} worktree: $ {test_cmd}\n")
+        checks.append(execute_gate_command(test_cmd, worktree_path, "test"))
+    if verify_cmd:
+        sys.stderr.write(f"🔬 [Quality Gate] Running app verification in {worker} worktree: $ {verify_cmd}\n")
+        checks.append(execute_gate_command(verify_cmd, worktree_path, "verify"))
 
-    start_time = time.time()
-    proc = subprocess.run(test_cmd, shell=True, cwd=worktree_path, capture_output=True, text=True)
-    duration = round(time.time() - start_time, 2)
-
-    passed = proc.returncode == 0
+    passed = all(check["passed"] for check in checks)
     status = "GATE_PASSED" if passed else "GATE_FAILED"
+    duration = round(sum(check["duration_seconds"] for check in checks), 2)
 
     record = {
         "worker": worker,
         "command": test_cmd,
+        "verify_command": verify_cmd,
+        "checks": checks,
         "passed": passed,
-        "exit_code": proc.returncode,
+        "exit_code": next((c["exit_code"] for c in checks if not c["passed"]), 0),
         "duration_seconds": duration,
-        "stdout": proc.stdout[:2000],
-        "stderr": proc.stderr[:2000],
     }
 
     log_event(harness_dir, status, record)
@@ -175,13 +194,15 @@ def cmd_gate(run_id: str, worker: str, test_cmd: str) -> dict:
         "status": status,
         "passed": passed,
         "duration": duration,
+        "checks": [{"label": c["label"], "command": c["command"], "passed": c["passed"]} for c in checks],
     }
     (harness_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     if passed:
         print(f"✅ [Quality Gate Passed] Worker '{worker}' verified successfully in {duration}s.")
     else:
-        print(f"❌ [Quality Gate Failed] Worker '{worker}' exit code {proc.returncode} in {duration}s.\n{proc.stderr[:400]}")
+        failed = next(c for c in checks if not c["passed"])
+        print(f"❌ [Quality Gate Failed] Worker '{worker}' {failed['label']} exit {failed['exit_code']} in {duration}s.\n{failed['stderr'][:400]}")
 
     return record
 
@@ -219,14 +240,26 @@ def arbitrate_merge_conflict(repo: Path, conflict_file: Path, ours_branch: str, 
     return True
 
 
-def cmd_integrate(run_id: str, test_cmd: str = None) -> dict:
-    """Sequentially merges all verified worker branches into integration branch with quality gates."""
+def cmd_integrate(run_id: str, test_cmd: str = None, verify_cmd: str = None, allow_untested: bool = False) -> dict:
+    """Merges GATE_PASSED worker branches, arbitrates conflicts, re-gates the result."""
     repo = get_git_root()
     harness_dir = repo / ".harness" / "runs" / run_id
     manifest = json.loads((harness_dir / "manifest.json").read_text(encoding="utf-8"))
     integration_branch = manifest["integration_branch"]
 
-    # Checkout integration branch
+    ungated = [
+        name for name, info in manifest["workers"].items()
+        if info.get("gate", {}).get("status") != "GATE_PASSED"
+    ]
+    if ungated and not allow_untested:
+        print("\n❌ [Integration Refused] These workers have no passing gate:")
+        for name in ungated:
+            status = manifest["workers"][name].get("gate", {}).get("status", "UNTESTED")
+            print(f"   • {name}: {status}")
+        print("   Run `gate` for each worker, or pass --allow-untested to accept the risk explicitly.")
+        log_event(harness_dir, "INTEGRATION_REFUSED", {"run_id": run_id, "ungated": ungated})
+        sys.exit(2)
+
     subprocess.run(["git", "checkout", integration_branch], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     merged_workers = []
@@ -236,12 +269,10 @@ def cmd_integrate(run_id: str, test_cmd: str = None) -> dict:
         w_branch = w_info["branch"]
         print(f"\n🔀 [Integrating] Merging worker '{w_name}' ({w_branch}) into {integration_branch}...")
 
-        # Attempt merge
         p_merge = subprocess.run(["git", "merge", "--no-ff", "-m", f"Merge {w_name} into {integration_branch}", w_branch], cwd=repo, capture_output=True, text=True)
 
         if p_merge.returncode != 0:
             print(f"⚠️  Merge conflict detected while merging '{w_name}'. Attempting automated arbitration...")
-            # Detect conflicted files
             conflicted = subprocess.check_output(["git", "diff", "--name-only", "--diff-filter=U"], cwd=repo, text=True).splitlines()
             resolved_all = True
             for cf in conflicted:
@@ -258,19 +289,22 @@ def cmd_integrate(run_id: str, test_cmd: str = None) -> dict:
                 failed_merges.append(w_name)
                 continue
 
-        # Post-merge quality gate
-        if test_cmd:
-            p_test = subprocess.run(test_cmd, shell=True, cwd=repo, capture_output=True, text=True)
-            if p_test.returncode != 0:
-                print(f"❌ [Integration Gate Failed] Tests failed after merging '{w_name}'. Reverting merge commit...")
-                subprocess.run(["git", "reset", "--hard", "HEAD~1"], cwd=repo, check=True)
-                failed_merges.append(w_name)
-                continue
-            else:
-                print(f"✅ [Integration Gate Passed] Tests green after merging '{w_name}'.")
+        post_checks = [
+            execute_gate_command(test_cmd, repo, "integration_test") if test_cmd else None,
+            execute_gate_command(verify_cmd, repo, "integration_verify") if verify_cmd else None,
+        ]
+        post_checks = [c for c in post_checks if c]
+        failed_check = next((c for c in post_checks if not c["passed"]), None)
+        if failed_check:
+            print(f"❌ [Integration Gate Failed] {failed_check['label']} exit {failed_check['exit_code']} after merging '{w_name}'. Reverting merge commit...")
+            subprocess.run(["git", "reset", "--hard", "HEAD~1"], cwd=repo, check=True)
+            failed_merges.append(w_name)
+            continue
+        if post_checks:
+            print(f"✅ [Integration Gate Passed] {', '.join(c['label'] for c in post_checks)} green after merging '{w_name}'.")
 
         merged_workers.append(w_name)
-        log_event(harness_dir, "WORKER_INTEGRATED", {"worker": w_name, "branch": w_branch})
+        log_event(harness_dir, "WORKER_INTEGRATED", {"worker": w_name, "branch": w_branch, "post_checks": post_checks})
 
     summary = {
         "run_id": run_id,
@@ -348,6 +382,7 @@ def cmd_dispatch(
     goal: str = None,
     workers_spec: list = None,
     test_cmd: str = None,
+    verify_cmd: str = None,
     run_name: str = None,
     max_turns: int = 6,
     timeout_worker: int = 300,
@@ -409,21 +444,27 @@ def cmd_dispatch(
         w_task = t.get("task", f"Subtask for {w_name}")
         w_files = ", ".join(t.get("files", [])) or "None specified upfront"
         w_test = t.get("test") or test_cmd or "pytest"
+        w_verify = t.get("verify") or verify_cmd
         w_model = model_override or t.get("model") or "gemini-3.5-flash-lite"
         w_path = repo / manifest["workers"][w_name]["worktree_path"]
+
+        gate_flags = f"--test \"{w_test}\""
+        if w_verify:
+            gate_flags += f" --verify \"{w_verify}\""
 
         prompt = (
             f"You are autonomous subagent '{w_name}' working in isolated git worktree: {w_path.name}\n\n"
             f"🎯 Goal: {w_task}\n"
             f"📁 Pre-Claimed Files: {w_files}\n"
-            f"🔬 Quality Gate Command: {w_test}\n\n"
+            f"🔬 Quality Gate Command: {w_test}\n"
+            f"👁️  App Verification Command: {w_verify or 'not configured'}\n\n"
             f"INSTRUCTIONS:\n"
             f"1. Use bash commands (ls, cat, etc.) to inspect existing files in this directory.\n"
             f"2. If you need to edit additional files not listed above, claim them first:\n"
             f"   python3 \"$HARNESS_CLI\" claim --run-id \"$HARNESS_RUN_ID\" --worker \"$HARNESS_WORKER\" --file <relative_path>\n"
             f"3. Implement the necessary code and unit tests.\n"
             f"4. Run your deterministic quality gate:\n"
-            f"   python3 \"$HARNESS_CLI\" gate --run-id \"$HARNESS_RUN_ID\" --worker \"$HARNESS_WORKER\" --test \"{w_test}\"\n"
+            f"   python3 \"$HARNESS_CLI\" gate --run-id \"$HARNESS_RUN_ID\" --worker \"$HARNESS_WORKER\" {gate_flags}\n"
             f"5. If the gate fails, examine error output, fix the code, and re-run gate until green.\n"
             f"6. Once the gate passes with status GATE_PASSED, commit your work: git add . && git commit -m 'Implement {w_task[:40]}'\n"
             f"7. Immediately conclude by replying 'TASK_COMPLETED' with no further tool calls so your loop finishes cleanly."
@@ -540,15 +581,18 @@ if __name__ == "__main__":
     p_claim.add_argument("--lines", default=None, help="Line range e.g. '10-45'")
 
     # 3. Gate
-    p_gate = sub.add_parser("gate", help="Run deterministic test quality gate on a worker worktree")
+    p_gate = sub.add_parser("gate", help="Run deterministic test and/or app verification gates on a worker worktree")
     p_gate.add_argument("--run-id", required=True, help="Harness Run ID")
     p_gate.add_argument("--worker", required=True, help="Worker name")
-    p_gate.add_argument("--test", required=True, help="Shell test command (e.g. 'pytest tests/test_auth.py')")
+    p_gate.add_argument("--test", default=None, help="Shell test command (e.g. 'pytest tests/test_auth.py')")
+    p_gate.add_argument("--verify", default=None, help="App verification command (e.g. 'verify-app run --pass .verify/pass.json')")
 
     # 4. Integrate
-    p_int = sub.add_parser("integrate", help="Sequentially merge verified worker branches with conflict arbitration")
+    p_int = sub.add_parser("integrate", help="Merge GATE_PASSED worker branches with conflict arbitration")
     p_int.add_argument("--run-id", required=True, help="Harness Run ID")
     p_int.add_argument("--test", default=None, help="Global integration test command")
+    p_int.add_argument("--verify", default=None, help="Global app verification command")
+    p_int.add_argument("--allow-untested", action="store_true", help="Merge workers whose gate never passed")
 
     # 5. Status
     p_stat = sub.add_parser("status", help="View status of harness runs, worktrees, and claims")
@@ -566,6 +610,7 @@ if __name__ == "__main__":
     p_disp.add_argument("--goal", default=None, help="High-level goal string")
     p_disp.add_argument("--workers", nargs="+", default=None, help="List of worker names (when tasks.json is omitted)")
     p_disp.add_argument("--test", default=None, help="Global test gate command")
+    p_disp.add_argument("--verify", default=None, help="Global app verification command")
     p_disp.add_argument("--run-name", default=None, help="Optional custom run ID")
     p_disp.add_argument("--max-turns", type=int, default=6, help="Maximum turns per subagent")
     p_disp.add_argument("--timeout", type=int, default=300, help="Per-worker timeout in seconds")
@@ -577,9 +622,9 @@ if __name__ == "__main__":
     elif args.action == "claim":
         cmd_claim(args.run_id, args.worker, args.file, args.lines)
     elif args.action == "gate":
-        cmd_gate(args.run_id, args.worker, args.test)
+        cmd_gate(args.run_id, args.worker, args.test, args.verify)
     elif args.action == "integrate":
-        res = cmd_integrate(args.run_id, args.test)
+        res = cmd_integrate(args.run_id, args.test, args.verify, args.allow_untested)
         print(json.dumps(res, indent=2))
     elif args.action == "status":
         cmd_status(args.run_id, as_json=args.json)
@@ -591,6 +636,7 @@ if __name__ == "__main__":
             goal=args.goal,
             workers_spec=args.workers,
             test_cmd=args.test,
+            verify_cmd=args.verify,
             run_name=args.run_name,
             max_turns=args.max_turns,
             timeout_worker=args.timeout,
