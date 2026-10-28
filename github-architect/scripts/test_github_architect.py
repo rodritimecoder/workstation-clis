@@ -365,20 +365,35 @@ class TestCommitMessage(unittest.TestCase):
         subject = self.run("log", "-1", "--format=%s").stdout.strip()
         self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
 
-    def test_explicit_message_becomes_body_under_auto_subject(self):
+    def test_plain_prose_becomes_the_body_under_the_auto_subject(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
-        git_sync.guarded_commit(str(self.repo), "docs(kem-thought): state the convention")
+        git_sync.guarded_commit(str(self.repo), "State the convention so a reader can find it.")
         subject = self.run("log", "-1", "--format=%s").stdout.strip()
         body = self.run("log", "-1", "--format=%b").stdout.strip()
         self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
-        self.assertIn("docs(kem-thought): state the convention", body)
+        self.assertEqual(body, "State the convention so a reader can find it.")
+
+    def test_conventional_message_is_the_commit_verbatim(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        self.write("glitch-cat/kem-thought/principles/code-decides.md")
+        message = (
+            "docs(kem-thought,canvas-cli): state the convention\n"
+            "\n"
+            "Name the principle in the skill body so the gate can cite it."
+        )
+        git_sync.guarded_commit(str(self.repo), message)
+        subject = self.run("log", "-1", "--format=%s").stdout.strip()
+        body = self.run("log", "-1", "--format=%b").stdout.strip()
+        self.assertEqual(subject, "docs(kem-thought,canvas-cli): state the convention")
+        self.assertEqual(body, "Name the principle in the skill body so the gate can cite it.")
+        self.assertNotIn("code-decides.md", body)
 
     def test_body_is_exactly_the_prose_under_the_subject(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
-        git_sync.guarded_commit(str(self.repo), "docs(kem-thought): state the convention")
+        git_sync.guarded_commit(str(self.repo), "State the convention that code decides.")
         body = self.run("log", "-1", "--format=%b").stdout.strip()
-        self.assertEqual(body, "docs(kem-thought): state the convention")
+        self.assertEqual(body, "State the convention that code decides.")
         self.assertNotIn("principles/code-decides.md", body)
 
     def test_secret_in_a_new_directory_is_blocked(self):
@@ -431,8 +446,26 @@ class TestCommitComposition(unittest.TestCase):
         run("add", "-A")
 
     def test_prose_sits_under_the_subject_and_nothing_follows_it(self):
-        message = git_sync.compose_message(str(self.repo), "feat: say why this moved")
-        self.assertEqual(message, "chore(kem-thought): SKILL.md (+1/-0)\n\nfeat: say why this moved")
+        message = git_sync.compose_message(str(self.repo), "Say why this moved.")
+        self.assertEqual(message, "chore(kem-thought): SKILL.md (+1/-0)\n\nSay why this moved.")
+
+    def test_a_conventional_message_replaces_the_generated_subject(self):
+        message = git_sync.compose_message(
+            str(self.repo),
+            "feat(kem-thought): say why this moved\n\nThe diff line would only repeat it.",
+        )
+        self.assertEqual(
+            message,
+            "feat(kem-thought): say why this moved\n\nThe diff line would only repeat it.",
+        )
+
+    def test_a_conventional_subject_without_a_body_is_kept_alone(self):
+        message = git_sync.compose_message(str(self.repo), "fix(github-architect): keep the guard closed")
+        self.assertEqual(message, "fix(github-architect): keep the guard closed")
+
+    def test_prose_that_only_mentions_a_colon_is_not_a_header(self):
+        message = git_sync.compose_message(str(self.repo), "Note: the gate now runs first.")
+        self.assertTrue(message.startswith("chore(kem-thought): SKILL.md (+1/-0)\n\n"))
 
     def test_compose_without_prose_is_the_subject_alone(self):
         message = git_sync.compose_message(str(self.repo), None)

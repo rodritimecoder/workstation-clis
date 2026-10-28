@@ -36,20 +36,28 @@ are **strictly private** by default.
 
 ### Commit messages
 
-The subject is derived from the staged diff and stays deterministic; `-m` supplies the
-prose description that goes under it (never replaces the subject), so `git log`
-stays searchable:
+`-m` is the description, and how it is used depends on how you write it:
+
+| You write | The commit becomes |
+| :--- | :--- |
+| `type(scopes): what changed`, then body paragraphs | your message, verbatim |
+| plain prose | diff-derived subject, your prose underneath |
+| nothing | diff-derived subject alone, e.g. `chore(canvas-cli): gates.py (+1/-0)` |
+
+The header form is the one to use, because the subject is what `git log
+--oneline` shows and it should say what changed:
 
 ```
-chore(academic-pipeline-v2, canvas-cli): 3 files (+4/-0)
+fix(window,terminal,command-palette): guard the palette against a stale index
 
-<your -m prose, if any>
+Strip apostrophes and treat hyphens, underscores and dots as spaces while
+normalizing queries, so typing "whats new" matches "What's New".
 ```
 
-That is the whole message. The subject already carries the scope, the file count
-and the delta, so no file manifest is appended beneath it: it would repeat the
-subject and bury the prose. With no `-m` the message is the subject alone; the
-paths are one `git show --stat` away.
+Name components in the scope, not file paths; comma-separate several with no
+spaces. One prose paragraph per concern, no bullets, no diffstat, no manifest —
+`git show --stat` already answers "which files". The full standard, with a
+worked example, is `references/commit-messages.md`.
 
 `-m` is what a person (or an agent) should use whenever the change has an intent a
 diff cannot express:
@@ -159,3 +167,4 @@ the block instead of claiming success.
 ## Reference
 
 - `references/capabilities.md` — fleet sync, secret guard, onboarding, templates, git identity
+- `references/commit-messages.md` — the commit description standard (header, prose body, worked example)

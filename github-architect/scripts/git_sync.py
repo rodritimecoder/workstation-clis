@@ -176,14 +176,25 @@ def staged_subject(repo: str = None, prefix: str = "chore") -> str:
     return _build_subject(prefix, scopes, len(changes), _delta(added, removed, binary))
 
 
+CONVENTIONAL_SUBJECT = re.compile(
+    r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)"
+    r"(\([^)]+\))?!?: \S"
+)
+
+
 def compose_message(repo: str = None, message: str = None, prefix: str = "chore") -> str:
     """The one commit shape every entry point emits.
 
-    Subject from the diff, then the supplied prose. The prose never replaces
-    the subject, so `git log` stays searchable; nothing else is appended.
+    A supplied message that opens with a conventional header (`type(scopes):
+    what changed`) is the whole commit: the author already named what moved,
+    so a diff-derived subject and a file manifest would only talk over them.
+    Without such a header the diff names the subject and the message is prose
+    underneath it, and a commit with no message at all is the subject alone.
     """
-    subject = staged_subject(repo, prefix)
     prose = (message or "").strip()
+    if prose and CONVENTIONAL_SUBJECT.match(prose):
+        return prose
+    subject = staged_subject(repo, prefix)
     return subject + "\n\n" + prose if prose else subject
 
 
