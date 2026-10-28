@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-git_sync.py — Disciplined 6-Stage Git Branch Synchronization Engine
+git_sync.py - Disciplined 6-Stage Git Branch Synchronization Engine
 Adapted from EricTechPro/super-board git-sync specification with deterministic security gates.
 
 Stages:
@@ -322,7 +322,7 @@ def stage3_commit(safe_files: list[str], message: str = None, repo: str = None) 
         commit_msg = auto_msg
     else:
         # The diff-stat subject stays deterministic; the supplied -m text
-        # is the descriptive body (why/features), keeping commits readable.
+        # is the descriptive body (why and features), keeping commits readable.
         commit_msg = auto_subject + "\n\n" + commit_msg_raw
 
     res = run_git(["commit", "-m", commit_msg], cwd=repo)
