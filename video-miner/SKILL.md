@@ -1,9 +1,9 @@
 ---
 name: video-miner
 
-description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), deterministic frame gating (perceptual dedup + blank rejection), and OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 with the kem-ocr structural gate. Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
+description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local verbatim speech-to-text (CrisperWhisper 2.0 via audiocpp, Nemotron optional), deterministic frame gating (perceptual dedup + blank rejection), and OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 with the kem-ocr structural gate. Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
 
-compatibility: "Requires ffmpeg and the local Nemotron ASR CLI (:8081). OCR needs either LightOnOCR (:8085) or MiniCPM-OCR-1.0 GGUF + the kem-ocr skill. h2o-lightning-4b on :8083 is optional, only for --gate h2o."
+compatibility: "Requires ffmpeg and the `audiocpp` CLI (CrisperWhisper 2.0 Large Q4_K by default — verbatim, 15x real-time; `--asr-model nemotron` to switch). No ASR server is needed. OCR needs either LightOnOCR (:8085) or MiniCPM-OCR-1.0 GGUF + the kem-ocr skill. h2o-lightning-4b on :8083 is optional, only for --gate h2o."
 allowed-tools: "Bash(video-miner:*) Bash(ffmpeg:*) Bash(python3:*) Read Write"
 ---
 
@@ -21,7 +21,7 @@ Follows **Interpretable Context Methodology (ICM)**:
 | Stage | Job | Input | Output & Human Checkpoint |
 |---|---|---|---|
 | `01_acquire` | Download/link video & extract 16 kHz audio | Video URL or path | `output/audio.wav`, `video_meta.json` |
-| `02_audio_asr` | Transcribe speech via local `audiocpp-asr` (:8081 / CLI) | `01_acquire/output/audio.wav` | `output/transcript.md` *(edit/correct terms)* |
+| `02_audio_asr` | Transcribe speech via `audiocpp` (CrisperWhisper 2.0, verbatim + word timings) | `01_acquire/output/audio.wav` | `output/transcript.md` *(edit/correct terms)* |
 | `03_visual_sample` | Keyframe scene sampling, motion accumulator, mpdecimate & PTS timing | `01_acquire/output/source_video.mp4` | `output/frames/`, `manifest.json` |
 | `04_visual_gate` | Perceptual dedup (dHash) + blank rejection, or h2o vision gate | `03_visual_sample/output/manifest.json` | `output/gated_frames.json` *(check kept frames)* |
 | `05_visual_ocr` | OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate) | `04_visual_gate/output/text_frames/` | `output/ocr_timeline.md` *(fix OCR typos)* |
@@ -92,6 +92,9 @@ python3 $CLI run ./my_video_run --ocr minicpm
 
 # h2o-lightning-4b vision gate instead of perceptual dedup
 python3 $CLI run ./my_video_run --gate h2o
+
+# Switch ASR: nemotron (fast, normalized) instead of the verbatim default
+python3 $CLI run ./my_video_run --asr-model nemotron
 ```
 
 `--gate hash` (default) is deterministic and free: the frame is reduced to a

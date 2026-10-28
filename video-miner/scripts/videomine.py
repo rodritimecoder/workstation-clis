@@ -9,7 +9,7 @@ Interpretable Context Methodology (ICM) compliant:
 
 Stages:
   01_acquire       - Ingests video (URL or local), extracts audio & metadata
-  02_audio_asr     - Speech-to-text with timestamps via audiocpp-asr (Nemotron 3.5)
+  02_audio_asr     - Speech-to-text with timestamps via audiocpp (CrisperWhisper 2.0 by default)
   03_visual_sample - Smart frame sampling with ffmpeg & perceptual deduplication
   04_visual_gate   - Deterministic gate: perceptual dedup + blank rejection, or h2o vision gate
   05_visual_ocr    - Visual OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate)
@@ -95,19 +95,23 @@ GATE_MODE = os.environ.get("VIDEOMINE_GATE", "hash")
 OCR_BACKEND = os.environ.get("VIDEOMINE_OCR", "lighton")
 HASH_DISTANCE = int(os.environ.get("VIDEOMINE_HASH_DISTANCE", "20"))
 TEXT_SIMILARITY = float(os.environ.get("VIDEOMINE_TEXT_SIMILARITY", "0.9"))
+ASR_MODEL = os.environ.get("VIDEOMINE_ASR_MODEL", "")
 GRID = 4
 BLOCK_W = 17
 BLOCK_H = 16
 
 
 
-def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, words_out: Path | None = None) -> list[str]:
+def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, words_out: Path | None = None,
+                model: str = "") -> list[str]:
     audiocpp_cli = shutil.which("audiocpp") or str(DRIVE / "skills/audiocpp/scripts/audiocpp_cli.py")
     if shutil.which("audiocpp") or Path(audiocpp_cli).is_file():
         cmd = ["audiocpp" if shutil.which("audiocpp") else sys.executable]
         if not shutil.which("audiocpp"):
             cmd.append(audiocpp_cli)
         cmd.extend(["transcribe", str(audio_wav), "--metrics"])
+        if model:
+            cmd.extend(["--model", model])
         if words_out:
             cmd.extend(["--words-out", str(words_out)])
         return cmd
@@ -400,10 +404,10 @@ def run_stage_02_audio_asr(workspace: Path) -> None:
     if not audio_wav.exists():
         raise FileNotFoundError(f"Missing upstream audio: {audio_wav}")
 
-    print("[02_audio_asr] Transcribing speech with hardware-accelerated ASR (audiocpp)...")
+    print(f"[02_audio_asr] Transcribing speech (audiocpp, model={ASR_MODEL or 'crisperwhisper (audiocpp default)'})...")
     
     words_json = out_dir / "words.json"
-    cmd = get_asr_cmd(audio_wav, details=True, offline=True, words_out=words_json)
+    cmd = get_asr_cmd(audio_wav, details=True, offline=True, words_out=words_json, model=ASR_MODEL)
     res = subprocess.run(cmd, capture_output=True, text=True)
 
     segments = []
@@ -1113,6 +1117,7 @@ def main() -> None:
     p_step.add_argument("--source", type=str, help="Video source if running stage 01")
     p_step.add_argument("--ocr", choices=["lighton", "minicpm"], help="OCR backend (default: lighton)")
     p_step.add_argument("--gate", choices=["hash", "h2o"], help="frame gate (default: hash)")
+    p_step.add_argument("--asr-model", help="audiocpp ASR slug (default: crisperwhisper); e.g. nemotron")
 
     # run
     p_run = subparsers.add_parser("run", help="Run pipeline stages")
@@ -1121,14 +1126,17 @@ def main() -> None:
     p_run.add_argument("--until", type=str, help="Stop at this stage (e.g. 02_audio_asr)")
     p_run.add_argument("--ocr", choices=["lighton", "minicpm"], help="OCR backend (default: lighton)")
     p_run.add_argument("--gate", choices=["hash", "h2o"], help="frame gate (default: hash)")
+    p_run.add_argument("--asr-model", help="audiocpp ASR slug (default: crisperwhisper); e.g. nemotron")
 
     args = parser.parse_args()
 
-    global GATE_MODE, OCR_BACKEND
+    global GATE_MODE, OCR_BACKEND, ASR_MODEL
     if getattr(args, "gate", None):
         GATE_MODE = args.gate
     if getattr(args, "ocr", None):
         OCR_BACKEND = args.ocr
+    if getattr(args, "asr_model", None):
+        ASR_MODEL = args.asr_model
 
     if args.command == "init":
         init_workspace(args.workspace, args.source)
