@@ -10,7 +10,7 @@ flowchart TD
     Plan --> Approve{"plan.md approved?"}
     Approve -- "false" --> Plan
     Approve -- "true" --> Build["03_kanban -> 04_sandboxes"]
-    Build --> Gates["05_gates (deterministic)"]
+    Build --> Gates["05_gates (deterministic + hands and eyes)"]
     Holdouts[("holdouts (concealed)")] -.-> Judge
     Gates --> Judge["06_judge (fresh context)"]
     Judge -- "fail" --> Plan
@@ -35,7 +35,7 @@ Both human gates are files, not conversation:
 | **L2** | `02_plan_split/` | Vertical slices, upfront holdouts, `output/plan.md` awaiting approval |
 | **L2** | `03_kanban/` | Physical Kanban state: `todo/`, `doing/`, `done/`, `rejected/` |
 | **L2** | `04_sandboxes/` | Isolated worker slots (uses `worktree-harness` + `claims.json`) |
-| **L2** | `05_gates/` | Deterministic verification: `pytest`, `cargo test`, `playwright-rs` |
+| **L2** | `05_gates/` | Deterministic verification: `pytest`, `cargo test`, `playwright-rs`, plus hands-and-eyes `verify-app` → `output/verify.json` |
 | **L2** | `06_judge/` | Fresh-context judge: audits code against spec without seeing builder scratchpad |
 | — | `holdouts/` | Concealed acceptance tests: outside the sequence, read only by `06_judge` |
 | **L2** | `07_intent_check/` | Final human gate: verdict per non-goal, evidence a person can read |
@@ -54,7 +54,7 @@ Before editing across stages, query the entity graph: `python3 _memory/memory.py
 - [02_plan_split](02_plan_split/CONTEXT.md): Decompose work into vertical slices, generate holdout tests, emit the plan for approval.
 - [03_kanban](03_kanban/CONTEXT.md): Target-local markdown Kanban board state machine (todo, doing, done, rejected).
 - [04_sandboxes](04_sandboxes/CONTEXT.md): Parallel builder worker slots running in isolated git worktrees.
-- [05_gates](05_gates/CONTEXT.md): Deterministic quality test gates (unit tests, clippy, playwright-rs).
+- [05_gates](05_gates/CONTEXT.md): Deterministic quality test gates (unit tests, clippy, playwright-rs) plus the hands-and-eyes `verify-app` gate (CDP eyes, pixel diff, Storybook walk) emitting `output/verify.json`.
 - [06_judge](06_judge/CONTEXT.md): Fresh-context unbiased evaluation audit logs evaluating against spec.
 - [07_intent_check](07_intent_check/CONTEXT.md): Human verdict against the original why and why-not.
 - [holdouts](holdouts/CONTEXT.md): Concealed acceptance tests, read only by `06_judge`.
