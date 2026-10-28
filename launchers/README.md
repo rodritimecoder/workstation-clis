@@ -24,6 +24,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:8086` | `reranker` | single (1) | jina-reranker-v2-base-multilingual | `jina-reranker.sh` | Cross-encoder reranking for RAG |
 | `:8087` | `embed` | one-of-many (2) | bge-small-en-v1.5 | `bge-small.sh` | Vector embeddings for RAG and semantic caching |
 | `:8088` | `grounding` | single (1) | WeVisOne-VL-4B | `wevisone-vl.sh` | Word-level OCR boxes, open-vocab detection, referring localization, pointing, counting |
+| `:8090` | `ocr-jev` | single (1) | MiniCPM-OCR-Jev | `minicpm-ocr-jev.sh` | OCR consistency gate — scores a candidate transcription against the source image in one forward pass |
 
 | Port | Infra | Service | Role |
 |---|---|---|---|

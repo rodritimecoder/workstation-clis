@@ -3,7 +3,7 @@
   "pinned_port": "8080",
   "port_range": [
     8080,
-    8088
+    8090
   ],
   "models": {
     "8080": {
@@ -85,6 +85,14 @@
       "name": "WeVisOne-VL-4B",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/wevisone-vl.sh",
       "role": "Word-level OCR boxes, open-vocab detection, referring localization, pointing, counting"
+    },
+    "8090": {
+      "alias": "local-ocr-jev",
+      "vram_mb": 5300,
+      "pinned": false,
+      "name": "MiniCPM-OCR-Jev",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/minicpm-ocr-jev.sh",
+      "role": "OCR consistency gate \u2014 scores a candidate transcription against the source image in one forward pass"
     }
   }
 }
