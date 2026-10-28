@@ -312,7 +312,7 @@ class TestCommitMessage(unittest.TestCase):
     def test_subject_names_scope_and_file(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.run("add", "-A")
-        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        subject = git_sync.staged_subject(str(self.repo))
         self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
 
     def test_multiple_scopes_appear_in_subject(self):
@@ -320,44 +320,43 @@ class TestCommitMessage(unittest.TestCase):
         self.write("academic/canvas-cli/scripts/gates.py")
         self.write("github-architect/scripts/git_sync.py")
         self.run("add", "-A")
-        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        subject = git_sync.staged_subject(str(self.repo))
         self.assertIn("(academic-pipeline-v2, canvas-cli +1)", subject)
         self.assertIn("3 files", subject)
 
-    def test_body_lists_every_path(self):
+    def test_subject_is_the_whole_message_when_no_prose_is_supplied(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
         self.run("add", "-A")
-        message = git_sync.describe_staged_changes(str(self.repo))
-        self.assertIn("  SKILL.md", message)
-        self.assertIn("  principles/code-decides.md", message)
+        message = git_sync.compose_message(str(self.repo), None)
+        self.assertNotIn("\n", message)
+        self.assertNotIn("principles/code-decides.md", message)
 
     def test_subject_stays_within_the_console_width(self):
         for i in range(6):
             self.write(f"hardware/super-long-skill-name-number-{i}/scripts/x.py")
         self.run("add", "-A")
-        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        subject = git_sync.staged_subject(str(self.repo))
         self.assertLessEqual(len(subject), git_sync.MAX_SUBJECT)
 
     def test_no_staged_changes_falls_back(self):
         self.assertEqual(
-            git_sync.describe_staged_changes(str(self.repo)).splitlines()[0],
+            git_sync.staged_subject(str(self.repo)),
             "chore: sync working tree",
         )
 
-    def test_root_files_are_grouped_under_a_name_not_a_filename(self):
+    def test_root_files_are_not_labelled_by_a_filename(self):
         self.write("a.txt")
         self.write("pyproject.toml")
         self.run("add", "-A")
-        body = git_sync.describe_staged_changes(str(self.repo))
-        self.assertIn("root (2 files", body)
-        self.assertNotIn("a.txt (2 files", body)
+        subject = git_sync.staged_subject(str(self.repo))
+        self.assertEqual(subject, "chore(root): 2 files (+2/-0)")
 
     def test_root_scope_is_named_not_parenthesised_twice(self):
         self.write("a.txt")
         self.write("b.txt")
         self.run("add", "-A")
-        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        subject = git_sync.staged_subject(str(self.repo))
         self.assertEqual(subject, "chore(root): 2 files (+2/-0)")
 
     def test_guarded_commit_derives_when_message_is_omitted(self):
@@ -374,26 +373,13 @@ class TestCommitMessage(unittest.TestCase):
         self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
         self.assertIn("docs(kem-thought): state the convention", body)
 
-    def test_explicit_message_keeps_the_file_manifest_below_it(self):
+    def test_body_is_exactly_the_prose_under_the_subject(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
         git_sync.guarded_commit(str(self.repo), "docs(kem-thought): state the convention")
         body = self.run("log", "-1", "--format=%b").stdout.strip()
-        prose_at = body.find("docs(kem-thought): state the convention")
-        manifest_at = body.find("kem-thought (2 files")
-        self.assertNotEqual(prose_at, -1, body)
-        self.assertNotEqual(manifest_at, -1, body)
-        self.assertLess(prose_at, manifest_at, "the manifest belongs under the prose")
-        self.assertIn("  principles/code-decides.md", body)
-
-    def test_manifest_is_not_duplicated_when_the_message_already_has_it(self):
-        self.write("glitch-cat/kem-thought/SKILL.md")
-        self.run("add", "-A")
-        manifest = git_sync.staged_change_body(str(self.repo))
-        self.assertIn("kem-thought (1 file", manifest)
-        git_sync.guarded_commit(str(self.repo), "docs: keep this list\n\n" + manifest)
-        body = self.run("log", "-1", "--format=%b").stdout.strip()
-        self.assertEqual(body.count("kem-thought (1 file"), 1, body)
+        self.assertEqual(body, "docs(kem-thought): state the convention")
+        self.assertNotIn("principles/code-decides.md", body)
 
     def test_secret_in_a_new_directory_is_blocked(self):
         self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")
@@ -444,15 +430,13 @@ class TestCommitComposition(unittest.TestCase):
         (self.repo / "glitch-cat" / "kem-thought" / "SKILL.md").write_text("x\n", encoding="utf-8")
         run("add", "-A")
 
-    def test_compose_puts_the_manifest_under_the_prose(self):
+    def test_prose_sits_under_the_subject_and_nothing_follows_it(self):
         message = git_sync.compose_message(str(self.repo), "feat: say why this moved")
-        self.assertEqual(message.splitlines()[0], "chore(kem-thought): SKILL.md (+1/-0)")
-        self.assertLess(message.find("feat: say why this moved"),
-                        message.find("kem-thought (1 file"))
+        self.assertEqual(message, "chore(kem-thought): SKILL.md (+1/-0)\n\nfeat: say why this moved")
 
-    def test_compose_without_prose_is_subject_and_manifest(self):
+    def test_compose_without_prose_is_the_subject_alone(self):
         message = git_sync.compose_message(str(self.repo), None)
-        self.assertEqual(message, git_sync.describe_staged_changes(str(self.repo)))
+        self.assertEqual(message, git_sync.staged_subject(str(self.repo)))
 
 
 if __name__ == "__main__":

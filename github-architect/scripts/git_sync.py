@@ -93,14 +93,6 @@ def _scope_of(path: str) -> str:
     return parts[0]
 
 
-def _rel(path: str, scope: str) -> str:
-    if scope == "(root)":
-        return path
-    marker = scope + "/"
-    idx = path.find(marker)
-    return path[idx + len(marker):] if idx >= 0 else path
-
-
 def _delta(added: int, removed: int, binary: bool) -> str:
     return "binary" if binary else f"+{added}/-{removed}"
 
@@ -165,40 +157,13 @@ def _build_subject(prefix: str, scopes: dict, total: int, delta: str) -> str:
     return candidates[-1][:MAX_SUBJECT - 1] + "…"
 
 
-def _build_body(scopes: dict, per_scope: int = 6) -> str:
-    lines = []
-    for scope in _rank(scopes):
-        info = scopes[scope]
-        count = len(info["files"])
-        # "(root)" is a grouping sentinel, not a path: labelling the group with
-        # its first filename reads as a file that contains files.
-        label = "root" if scope == "(root)" else scope
-        lines.append(f"{label} ({count} file{'' if count == 1 else 's'}, {_delta(info['added'], info['removed'], info['binary'])})")
-        for path in info["files"][:per_scope]:
-            lines.append(f"  {_rel(path, scope)}")
-        if count > per_scope:
-            lines.append(f"  … +{count - per_scope} more")
-        lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def staged_change_body(repo: str = None) -> str:
-    """Diff-derived file manifest (the description of what changed).
-
-    Returned without a subject so callers can append it to an explicit
-    commit message. Empty when there are no staged changes.
-    """
-    changes = staged_changes(repo)
-    if not changes:
-        return ""
-    return _build_body(_group(changes)).strip()
-
-
-def describe_staged_changes(repo: str = None, prefix: str = "chore") -> str:
-    """A subject naming what moved, and a body listing where.
+def staged_subject(repo: str = None, prefix: str = "chore") -> str:
+    """A subject naming what moved.
 
     Derived from the diff rather than from a clock: a timestamp already lives
     in the commit object, and a fixed template leaves `git log` unsearchable.
+    The subject already carries the scope, the file count and the delta, so a
+    file manifest underneath it would only repeat it.
     """
     changes = staged_changes(repo)
     if not changes:
@@ -208,28 +173,18 @@ def describe_staged_changes(repo: str = None, prefix: str = "chore") -> str:
     added = sum(c["added"] for c in changes)
     removed = sum(c["removed"] for c in changes)
     binary = any(c["binary"] for c in changes)
-    subject = _build_subject(prefix, scopes, len(changes), _delta(added, removed, binary))
-    return subject + "\n\n" + _build_body(scopes)
+    return _build_subject(prefix, scopes, len(changes), _delta(added, removed, binary))
 
 
 def compose_message(repo: str = None, message: str = None, prefix: str = "chore") -> str:
     """The one commit shape every entry point emits.
 
-    Subject from the diff, then the supplied prose, then the file manifest.
-    A prose block never replaces the subject, so `git log` stays searchable,
-    and the manifest always sits underneath so the commit still says what
-    moved without re-reading the diff.
+    Subject from the diff, then the supplied prose. The prose never replaces
+    the subject, so `git log` stays searchable; nothing else is appended.
     """
-    auto_msg = describe_staged_changes(repo, prefix)
+    subject = staged_subject(repo, prefix)
     prose = (message or "").strip()
-    if not prose:
-        return auto_msg
-    subject = auto_msg.splitlines()[0] if auto_msg.splitlines() else f"{prefix}: sync working tree"
-    parts = [prose]
-    manifest = staged_change_body(repo)
-    if manifest and manifest not in prose:
-        parts.append(manifest)
-    return subject + "\n\n" + "\n\n".join(parts)
+    return subject + "\n\n" + prose if prose else subject
 
 
 def stage1_look() -> dict:

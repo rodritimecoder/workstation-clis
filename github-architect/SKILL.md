@@ -37,21 +37,19 @@ are **strictly private** by default.
 ### Commit messages
 
 The subject is derived from the staged diff and stays deterministic; `-m` supplies the
-prose description that goes in the body (never replaces the subject), so `git log`
+prose description that goes under it (never replaces the subject), so `git log`
 stays searchable:
 
 ```
 chore(academic-pipeline-v2, canvas-cli): 3 files (+4/-0)
 
 <your -m prose, if any>
-
-academic-pipeline-v2 (2 files, +3/-0)
-  SKILL.md
-  scripts/stage_contracts.py
-
-canvas-cli (1 file, +1/-0)
-  scripts/gates.py
 ```
+
+That is the whole message. The subject already carries the scope, the file count
+and the delta, so no file manifest is appended beneath it: it would repeat the
+subject and bury the prose. With no `-m` the message is the subject alone; the
+paths are one `git show --stat` away.
 
 `-m` is what a person (or an agent) should use whenever the change has an intent a
 diff cannot express:
