@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -152,9 +153,10 @@ def _build_subject(prefix: str, scopes: dict, total: int, delta: str) -> str:
     candidates = []
     for names in ([primary] + others[:1], [primary], []):
         more = len(ranked) - len(names)
+        shown = ["root" if n == "(root)" else n for n in names]
         where = ""
-        if names and names != ["(root)"]:
-            where = "(" + ", ".join(names) + (f" +{more}" if more else "") + ")"
+        if shown:
+            where = "(" + ", ".join(shown) + (f" +{more}" if more else "") + ")"
         candidates.append(f"{prefix}{where}: {noun} ({delta})")
         candidates.append(f"{prefix}{where}: {noun}")
 
@@ -169,7 +171,9 @@ def _build_body(scopes: dict, per_scope: int = 6) -> str:
     for scope in _rank(scopes):
         info = scopes[scope]
         count = len(info["files"])
-        label = info["files"][0] if scope == "(root)" else scope
+        # "(root)" is a grouping sentinel, not a path: labelling the group with
+        # its first filename reads as a file that contains files.
+        label = "root" if scope == "(root)" else scope
         lines.append(f"{label} ({count} file{'' if count == 1 else 's'}, {_delta(info['added'], info['removed'], info['binary'])})")
         for path in info["files"][:per_scope]:
             lines.append(f"  {_rel(path, scope)}")
@@ -321,9 +325,14 @@ def stage3_commit(safe_files: list[str], message: str = None, repo: str = None) 
     if not commit_msg_raw:
         commit_msg = auto_msg
     else:
-        # The diff-stat subject stays deterministic; the supplied -m text
-        # is the descriptive body (why and features), keeping commits readable.
-        commit_msg = auto_subject + "\n\n" + commit_msg_raw
+        # The diff-stat subject stays deterministic; the supplied -m text is
+        # the prose body (why and features), and the file manifest follows it
+        # so `git log` still answers "what changed".
+        parts = [commit_msg_raw]
+        manifest = staged_change_body(repo)
+        if manifest and manifest not in commit_msg_raw:
+            parts.append(manifest)
+        commit_msg = auto_subject + "\n\n" + "\n\n".join(parts)
 
     res = run_git(["commit", "-m", commit_msg], cwd=repo)
     # Extract SHA
@@ -371,6 +380,11 @@ def stage5_pull(upstream: str):
 def stage6_push(branch: str, has_upstream: bool, auto_yes: bool = False):
     is_protected = branch in ("main", "master", "production")
     if is_protected and not auto_yes:
+        if not sys.stdin.isatty():
+            sys.exit(
+                f"❌ Refusing to push to protected branch '{branch}' without confirmation.\n"
+                f"   Re-run with -y, or push manually."
+            )
         confirm = input(f"⚠️  Branch '{branch}' is a protected default branch. Confirm push to remote? [y/N]: ").strip().lower()
         if confirm not in ("y", "yes"):
             sys.exit("Push cancelled by user.")
@@ -392,6 +406,19 @@ def _load_publication_guard():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.scan_file
+
+
+def _load_exclude_matcher():
+    try:
+        from publication_guard import is_excluded
+        return is_excluded
+    except ImportError:
+        import importlib.util
+        script_path = Path(__file__).resolve().parent / "publication_guard.py"
+        spec = importlib.util.spec_from_file_location("publication_guard", script_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.is_excluded
 
 
 def changed_files_in(repo: str) -> list[str]:
@@ -417,9 +444,13 @@ def guarded_commit(repo: str, message: str, excludes: list = None) -> dict:
     in a new file would sail straight through a diff-based guard.
     """
     scan_file = _load_publication_guard()
+    is_excluded = _load_exclude_matcher()
+    excludes = excludes or []
     files = changed_files_in(repo)
     safe, blocked = [], []
     for rel in files:
+        if is_excluded(Path(rel), excludes):
+            continue
         target = Path(repo) / rel
         if not target.is_file():
             # A deletion or a rename source: nothing to scan, and its absence

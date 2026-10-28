@@ -275,6 +275,17 @@ class TestGuardedCommit(unittest.TestCase):
         self.assertEqual(result["blocked"], [])
         self.assertEqual(len(result["committed"]), 1)
 
+    def test_exclude_keeps_a_path_out_of_the_commit(self):
+        (self.repo / "new.txt").write_text("hello\n", encoding="utf-8")
+        (self.repo / "draft.md").write_text("wip\n", encoding="utf-8")
+        result = git_sync.guarded_commit(str(self.repo), "sync: test", excludes=["*.md"])
+        self.assertEqual(result["blocked"], [])
+        committed = subprocess.run(
+            ["git", "-C", str(self.repo), "show", "--name-only", "--format=", "HEAD"],
+            capture_output=True, text=True).stdout
+        self.assertIn("new.txt", committed)
+        self.assertNotIn("draft.md", committed)
+
     def test_changed_files_includes_untracked(self):
         (self.repo / "brand_new.txt").write_text("x\n", encoding="utf-8")
         files = git_sync.changed_files_in(str(self.repo))
@@ -334,6 +345,21 @@ class TestCommitMessage(unittest.TestCase):
             "chore: sync working tree",
         )
 
+    def test_root_files_are_grouped_under_a_name_not_a_filename(self):
+        self.write("a.txt")
+        self.write("pyproject.toml")
+        self.run("add", "-A")
+        body = git_sync.describe_staged_changes(str(self.repo))
+        self.assertIn("root (2 files", body)
+        self.assertNotIn("a.txt (2 files", body)
+
+    def test_root_scope_is_named_not_parenthesised_twice(self):
+        self.write("a.txt")
+        self.write("b.txt")
+        self.run("add", "-A")
+        subject = git_sync.describe_staged_changes(str(self.repo)).splitlines()[0]
+        self.assertEqual(subject, "chore(root): 2 files (+2/-0)")
+
     def test_guarded_commit_derives_when_message_is_omitted(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         git_sync.guarded_commit(str(self.repo), None)
@@ -348,6 +374,27 @@ class TestCommitMessage(unittest.TestCase):
         self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
         self.assertIn("docs(kem-thought): state the convention", body)
 
+    def test_explicit_message_keeps_the_file_manifest_below_it(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        self.write("glitch-cat/kem-thought/principles/code-decides.md")
+        git_sync.guarded_commit(str(self.repo), "docs(kem-thought): state the convention")
+        body = self.run("log", "-1", "--format=%b").stdout.strip()
+        prose_at = body.find("docs(kem-thought): state the convention")
+        manifest_at = body.find("kem-thought (2 files")
+        self.assertNotEqual(prose_at, -1, body)
+        self.assertNotEqual(manifest_at, -1, body)
+        self.assertLess(prose_at, manifest_at, "the manifest belongs under the prose")
+        self.assertIn("  principles/code-decides.md", body)
+
+    def test_manifest_is_not_duplicated_when_the_message_already_has_it(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        self.run("add", "-A")
+        manifest = git_sync.staged_change_body(str(self.repo))
+        self.assertIn("kem-thought (1 file", manifest)
+        git_sync.guarded_commit(str(self.repo), "docs: keep this list\n\n" + manifest)
+        body = self.run("log", "-1", "--format=%b").stdout.strip()
+        self.assertEqual(body.count("kem-thought (1 file"), 1, body)
+
     def test_secret_in_a_new_directory_is_blocked(self):
         self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")
         result = git_sync.guarded_commit(str(self.repo), None)
@@ -361,6 +408,25 @@ class TestCommitMessage(unittest.TestCase):
             capture_output=True, text=True,
         )
         self.assertEqual(proc.returncode, 1)
+
+
+class TestGate(unittest.TestCase):
+    def test_gate_runs_on_a_python_project_without_crashing(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+        previous = Path.cwd()
+        os.chdir(tmp)
+        self.addCleanup(os.chdir, previous)
+        self.assertEqual(git_sync.stage4_gate(), [])
+
+
+class TestProtectedPush(unittest.TestCase):
+    def test_refuses_a_protected_branch_without_a_tty(self):
+        with patch("sys.stdin") as fake_stdin:
+            fake_stdin.isatty.return_value = False
+            with self.assertRaises(SystemExit):
+                git_sync.stage6_push("main", has_upstream=True, auto_yes=False)
 
 
 if __name__ == "__main__":
