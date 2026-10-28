@@ -340,11 +340,13 @@ class TestCommitMessage(unittest.TestCase):
         subject = self.run("log", "-1", "--format=%s").stdout.strip()
         self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
 
-    def test_explicit_message_is_used_verbatim(self):
+    def test_explicit_message_becomes_body_under_auto_subject(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         git_sync.guarded_commit(str(self.repo), "docs(kem-thought): state the convention")
         subject = self.run("log", "-1", "--format=%s").stdout.strip()
-        self.assertEqual(subject, "docs(kem-thought): state the convention")
+        body = self.run("log", "-1", "--format=%b").stdout.strip()
+        self.assertEqual(subject, "chore(kem-thought): SKILL.md (+1/-0)")
+        self.assertIn("docs(kem-thought): state the convention", body)
 
     def test_secret_in_a_new_directory_is_blocked(self):
         self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")

@@ -36,10 +36,14 @@ are **strictly private** by default.
 
 ### Commit messages
 
-The subject is derived from the staged diff, so `git log` stays searchable:
+The subject is derived from the staged diff and stays deterministic; `-m` supplies the
+prose description that goes in the body (never replaces the subject), so `git log`
+stays searchable:
 
 ```
 chore(academic-pipeline-v2, canvas-cli): 3 files (+4/-0)
+
+<your -m prose, if any>
 
 academic-pipeline-v2 (2 files, +3/-0)
   SKILL.md
@@ -49,8 +53,8 @@ canvas-cli (1 file, +1/-0)
   scripts/gates.py
 ```
 
-`-m` overrides it verbatim, and that is what a person should use whenever the
-change has an intent a diff cannot express:
+`-m` is what a person (or an agent) should use whenever the change has an intent a
+diff cannot express:
 
 ```bash
 git-sync -m "refactor(github-architect): derive commit subjects from the diff"
