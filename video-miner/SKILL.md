@@ -1,9 +1,9 @@
 ---
 name: video-miner
 
-description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), smart visual frame sampling with deduplication, text gating (h2o-lightning-4b vision), and multi-column layout & code extraction (LightOnOCR-3-1B). Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
+description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local speech-to-text (Nemotron ASR), deterministic frame gating (perceptual dedup + blank rejection), and OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 with the kem-ocr structural gate. Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
 
-compatibility: "Requires ffmpeg, the local Nemotron ASR server on :8081, the h2o-lightning-4b JEV decision model on :8083 for frame gating, and LightOnOCR on :8085 for layout extraction."
+compatibility: "Requires ffmpeg and the local Nemotron ASR CLI (:8081). OCR needs either LightOnOCR (:8085) or MiniCPM-OCR-1.0 GGUF + the kem-ocr skill. h2o-lightning-4b on :8083 is optional, only for --gate h2o."
 allowed-tools: "Bash(video-miner:*) Bash(ffmpeg:*) Bash(python3:*) Read Write"
 ---
 
@@ -23,8 +23,8 @@ Follows **Interpretable Context Methodology (ICM)**:
 | `01_acquire` | Download/link video & extract 16 kHz audio | Video URL or path | `output/audio.wav`, `video_meta.json` |
 | `02_audio_asr` | Transcribe speech via local `audiocpp-asr` (:8081 / CLI) | `01_acquire/output/audio.wav` | `output/transcript.md` *(edit/correct terms)* |
 | `03_visual_sample` | Keyframe scene sampling, motion accumulator, mpdecimate & PTS timing | `01_acquire/output/source_video.mp4` | `output/frames/`, `manifest.json` |
-| `04_visual_gate` | Filter frames for readable text / code | `03_visual_sample/output/manifest.json` | `output/gated_frames.json` *(check kept frames)* |
-| `05_visual_ocr` | Multi-column layout, tree & code extraction via LightOnOCR-3-1B (Qwen3-VL on Vulkan) | `04_visual_gate/output/text_frames/` | `output/ocr_timeline.md` *(fix OCR typos)* |
+| `04_visual_gate` | Perceptual dedup (dHash) + blank rejection, or h2o vision gate | `03_visual_sample/output/manifest.json` | `output/gated_frames.json` *(check kept frames)* |
+| `05_visual_ocr` | OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate) | `04_visual_gate/output/text_frames/` | `output/ocr_timeline.md` *(fix OCR typos)* |
 | `06_synthesize` | Merge audio transcript & visual OCR into notes | `02_audio_asr` + `05_visual_ocr` | `output/mined_video.md` *(final deliverable)* |
 
 
@@ -84,6 +84,35 @@ python3 $CLI run ./my_video_run --until 02_audio_asr
 python3 $CLI run ./my_video_run
 ```
 
+### 7. Choose the gate and the OCR backend
+
+```bash
+# MiniCPM-OCR-1.0 with the kem-ocr structural gate (tables, charts, dense screen text)
+python3 $CLI run ./my_video_run --ocr minicpm
+
+# h2o-lightning-4b vision gate instead of perceptual dedup
+python3 $CLI run ./my_video_run --gate h2o
+```
+
+`--gate hash` (default) is deterministic and free: the frame is reduced to a
+68×64 grey image and cut into a 4×4 grid of dHash regions (256 bits each).
+Frames are duplicates only when *every* region stays within the Hamming budget
+of the last kept frame, so a scrolling terminal counts as change and a static
+slide does not. The budget is 20 bits (~8% of a region,
+`VIDEOMINE_HASH_DISTANCE`): raise it to 28 to collapse more, lower it to 12 to
+keep more. Frames with no luminance spread are dropped as blank.
+`--gate h2o` spends a vision decision per frame and is the right choice for
+talking-head footage where the screen is not the subject.
+
+`--ocr lighton` (default) keeps LightOnOCR-3-1B. `--ocr minicpm` runs
+MiniCPM-OCR-1.0 with `Text Recognition:` and then applies the `kem-ocr`
+structural gate (`text` mode): frames whose OCR is empty, repetitive or
+non-textual are dropped before they reach the timeline. Frames whose text is
+≥90% the same as the previous kept frame are dropped too, so a slide that sits
+on screen for a minute becomes one entry instead of ten. The gate is imported
+from the sibling `kem-ocr` skill; if that skill is missing the OCR still runs
+and the structural field is simply absent.
+
 The final synthesized markdown document is emitted at:
 `./my_video_run/stages/06_synthesize/output/mined_video.md`
 
@@ -91,7 +120,7 @@ The final synthesized markdown document is emitted at:
 
 Because every stage output is an edit surface:
 - **Audio Transcript Checkpoint (`02_audio_asr`):** Open `stages/02_audio_asr/output/transcript.md` and correct any misrecognized technical jargon or names. Downstream synthesis will use your edits.
-- **Visual Gating Checkpoint (`04_visual_gate`):** Inspect `stages/04_visual_gate/output/gated_frames.json`. If a slide or code frame was excluded, toggle `"keep": true`.
+- **Visual Gating Checkpoint (`04_visual_gate`):** Inspect `stages/04_visual_gate/output/gated_frames.json`. Each record carries `keep`, `reason` (`new`, `duplicate`, `blank`, `no-text`) and `duplicate_of`; toggle `"keep": true` to force a frame back in.
 - **OCR Checkpoint (`05_visual_ocr`):** Open `stages/05_visual_ocr/output/ocr_timeline.md` and polish any code blocks before final merge.
 
 ---

@@ -130,5 +130,47 @@ class TestVideomineTokenShielding(unittest.TestCase):
         self.assertEqual(rows[0]["has_transcript"], "yes")
 
 
+class TestVisualGate(unittest.TestCase):
+
+    def test_hash_distance(self):
+        self.assertEqual(vm.hash_distance(0, 0), 0)
+        self.assertEqual(vm.hash_distance(0, 0b111), 3)
+
+    def test_frame_signature_similarity_and_blank(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            srcs = {
+                "a.png": "testsrc2=s=320x240:d=1",
+                "b.png": "testsrc2=s=320x240:d=1",
+                "c.png": "smptebars=s=320x240:d=1",
+                "blank.png": "color=c=black:s=320x240:d=1",
+            }
+            for name, src in srcs.items():
+                subprocess.run(
+                    ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", src,
+                     "-frames:v", "1", str(d / name), "-y"],
+                    check=True,
+                )
+            a, b, c, blank = (vm.frame_signature(d / n) for n in srcs)
+            self.assertEqual(vm.signature_distance(a, b), 0)
+            self.assertGreater(vm.signature_distance(a, c), vm.HASH_DISTANCE)
+            self.assertGreater(a["spread"], 8.0)
+            self.assertLess(blank["spread"], 8.0)
+
+    def test_kem_structural_gate_is_wired(self):
+        res = vm.kem_gate("48520 Electronics & Circuits")
+        if res is None:
+            self.skipTest("kem-ocr not importable from this checkout")
+        self.assertTrue(res["ok"])
+        self.assertFalse(vm.kem_gate("")["ok"])
+
+    def test_text_similarity(self):
+        a = "alpha\nbeta\ngamma\ndelta"
+        b = "alpha\nbeta\ngamma\ndelta\nepsilon"
+        self.assertGreaterEqual(vm.text_similarity(a, b), 0.75)
+        self.assertEqual(vm.text_similarity(a, a), 1.0)
+        self.assertEqual(vm.text_similarity("alpha\nbeta", "one\ntwo"), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

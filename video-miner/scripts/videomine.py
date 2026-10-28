@@ -11,8 +11,8 @@ Stages:
   01_acquire       - Ingests video (URL or local), extracts audio & metadata
   02_audio_asr     - Speech-to-text with timestamps via audiocpp-asr (Nemotron 3.5)
   03_visual_sample - Smart frame sampling with ffmpeg & perceptual deduplication
-  04_visual_gate   - Gating frames with readable text (h2o-lightning-4b vision / heuristics)
-  05_visual_ocr    - Visual OCR via LightOnOCR-3-1B (Qwen3-VL on llama.cpp Vulkan)
+  04_visual_gate   - Deterministic gate: perceptual dedup + blank rejection, or h2o vision gate
+  05_visual_ocr    - Visual OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate)
   06_synthesize    - Merges transcript & OCR into chronological mined_video.md
 """
 
@@ -83,6 +83,22 @@ LLAMA_SERVER_BIN = Path(os.environ.get("LLAMA_SERVER_BIN", DRIVE / "llama.cpp/bu
 LLAMA_MTMD_CLI = Path(os.environ.get("LLAMA_MTMD_CLI", DRIVE / "llama.cpp/build/bin/llama-mtmd-cli"))
 LIGHTON_PORT = int(os.environ.get("LIGHTON_PORT", "8085"))
 LIGHTON_URL = os.environ.get("LIGHTON_URL", f"http://127.0.0.1:{LIGHTON_PORT}/v1/chat/completions")
+
+MINICPM_MODEL = Path(os.environ.get("MINICPM_OCR_MODEL", DRIVE / "models/openbmb/MiniCPM-OCR-1.0-gguf/MiniCPM-OCR-1_0-Q8_0.gguf"))
+MINICPM_MMPROJ = Path(os.environ.get("MINICPM_OCR_MMPROJ", DRIVE / "models/openbmb/MiniCPM-OCR-1.0-gguf/mmproj-model-f16-4x.gguf"))
+MINICPM_SERVER_BIN = Path(os.environ.get("MINICPM_SERVER_BIN", DRIVE / "llama.cpp/build-vulkan/bin/llama-server"))
+MINICPM_PORT = int(os.environ.get("MINICPM_PORT", "18499"))
+MINICPM_URL = os.environ.get("MINICPM_URL", f"http://127.0.0.1:{MINICPM_PORT}/v1/chat/completions")
+KEM_SCRIPTS = Path(os.environ.get("KEM_OCR_SCRIPTS", Path(__file__).resolve().parents[2] / "kem-ocr" / "scripts"))
+
+GATE_MODE = os.environ.get("VIDEOMINE_GATE", "hash")
+OCR_BACKEND = os.environ.get("VIDEOMINE_OCR", "lighton")
+HASH_DISTANCE = int(os.environ.get("VIDEOMINE_HASH_DISTANCE", "20"))
+TEXT_SIMILARITY = float(os.environ.get("VIDEOMINE_TEXT_SIMILARITY", "0.9"))
+GRID = 4
+BLOCK_W = 17
+BLOCK_H = 16
+
 
 
 def get_asr_cmd(audio_wav: Path, details: bool = True, offline: bool = False, words_out: Path | None = None) -> list[str]:
@@ -482,84 +498,139 @@ def run_stage_03_visual_sample(workspace: Path) -> None:
     print(f"[03_visual_sample] Sampled {len(manifest)} candidate frames into {frames_dir}")
 
 
+def frame_signature(path: Path) -> dict:
+    w, h = GRID * BLOCK_W, GRID * BLOCK_H
+    res = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-vf", f"scale={w}:{h},format=gray",
+         "-frames:v", "1", "-f", "rawvideo", "-"],
+        capture_output=True,
+    )
+    px = res.stdout
+    if len(px) < w * h:
+        return {"hashes": [], "luma": 0.0, "spread": 0.0}
+    hashes = []
+    for gy in range(GRID):
+        for gx in range(GRID):
+            bits = 0
+            for r in range(BLOCK_H):
+                for c in range(BLOCK_W - 1):
+                    i = (gy * BLOCK_H + r) * w + gx * BLOCK_W + c
+                    bits = (bits << 1) | (px[i] < px[i + 1])
+            hashes.append(bits)
+    return {"hashes": hashes, "luma": round(sum(px) / len(px), 1),
+            "spread": float(max(px) - min(px))}
+
+
+def hash_distance(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")
+
+
+def signature_distance(a: dict, b: dict) -> int:
+    if not a["hashes"] or len(a["hashes"]) != len(b["hashes"]):
+        return 999
+    return max(hash_distance(x, y) for x, y in zip(a["hashes"], b["hashes"]))
+
+
+def text_similarity(a: str, b: str) -> float:
+    la = {ln.strip() for ln in a.splitlines() if ln.strip()}
+    lb = {ln.strip() for ln in b.splitlines() if ln.strip()}
+    if not la or not lb:
+        return 0.0
+    return len(la & lb) / len(la | lb)
+
+
+def h2o_has_text(frame_path: Path) -> tuple[bool, float]:
+    ext = frame_path.suffix.lower().lstrip(".")
+    mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+    with open(frame_path, "rb") as img_file:
+        b64_data = base64.b64encode(img_file.read()).decode("utf-8")
+    payload = {
+        "state": {"context": "Frame sampled from a technical video or lecture recording."},
+        "questions": {
+            "answer": {
+                "type": "bool",
+                "question": "Does this image show slides, code, UI text, or diagrams with readable text?",
+                "image": "frame",
+            }
+        },
+        "assets": {
+            "frame": {
+                "type": "image",
+                "format": "jpg" if mime == "image/jpeg" else "png",
+                "data_base64": b64_data,
+            }
+        },
+    }
+    req = urllib.request.Request(
+        DECISION_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    answer = (data.get("answers") or {}).get("answer", {})
+    probabilities = answer.get("probabilities") or {}
+    p_true = float(answer.get("probability", probabilities.get("true", 1.0 if answer.get("decision") else 0.0)))
+    return p_true >= 0.5, round(abs(p_true - 0.5) * 2.0, 4)
+
+
 def run_stage_04_visual_gate(workspace: Path) -> None:
     stage_dir = workspace / "stages" / "04_visual_gate"
     out_dir = stage_dir / "output"
     text_frames_dir = out_dir / "text_frames"
     text_frames_dir.mkdir(parents=True, exist_ok=True)
-    
+
     manifest_file = workspace / "stages" / "03_visual_sample" / "output" / "manifest.json"
     if not manifest_file.exists():
         raise FileNotFoundError(f"Missing upstream manifest: {manifest_file}")
-        
+
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-    print(f"[04_visual_gate] Evaluating {len(manifest)} frames for visible text/code...")
-    h2o_available = _decision_model_is_h2o()
-    
+    print(f"[04_visual_gate] Evaluating {len(manifest)} frames (gate={GATE_MODE})...")
+
+    if GATE_MODE == "h2o" and not _decision_model_is_h2o():
+        raise RuntimeError("gate=h2o requires h2o-lightning-4b on the JEV endpoint")
+
     gated_results = []
+    last_kept_sig = None
+    last_kept_name = None
+    counts = {"new": 0, "duplicate": 0, "blank": 0, "no-text": 0}
+
     for item in manifest:
         frame_path = workspace / item["path"]
         if not frame_path.exists():
             continue
-            
-        # Fast local classifier: use H2O's calibrated vision decision, then a
-        # size heuristic if the expected model is unavailable.
-        has_text = True
-        confidence = 0.8
-        ext = frame_path.suffix.lower().lstrip(".")
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
 
-        try:
-            if not h2o_available:
-                raise RuntimeError("h2o-lightning-4b is not served on the configured JEV endpoint")
-            with open(frame_path, "rb") as img_file:
-                b64_data = base64.b64encode(img_file.read()).decode("utf-8")
+        sig = frame_signature(frame_path)
+        blank = sig["spread"] < 8.0
+        duplicate_of = None
+        if not blank and last_kept_sig is not None and signature_distance(sig, last_kept_sig) <= HASH_DISTANCE:
+            duplicate_of = last_kept_name
 
-            payload = {
-                "state": {"context": "Frame sampled from a technical video or lecture recording."},
-                "questions": {
-                    "answer": {
-                        "type": "bool",
-                        "question": (
-                            "Does this image show slides, code, UI text, or diagrams "
-                            "with readable text?"
-                        ),
-                        "image": "frame",
-                    }
-                },
-                "assets": {
-                    "frame": {
-                        "type": "image",
-                        "format": "jpg" if mime == "image/jpeg" else "png",
-                        "data_base64": b64_data,
-                    }
-                },
-            }
-            req = urllib.request.Request(
-                DECISION_URL,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            answer = (data.get("answers") or {}).get("answer", {})
-            probabilities = answer.get("probabilities") or {}
-            p_true = float(answer.get("probability", probabilities.get("true", 1.0 if answer.get("decision") else 0.0)))
-            has_text = p_true >= 0.5
-            confidence = round(abs(p_true - 0.5) * 2.0, 4)
-        except Exception:
-            # Fallback heuristic: frames above 15KB in JPEG usually carry UI/code/slide details
-            file_sz = frame_path.stat().st_size
-            has_text = file_sz > 15000
-            confidence = 0.65
+        if blank:
+            keep, reason = False, "blank"
+        elif duplicate_of:
+            keep, reason = False, "duplicate"
+        elif GATE_MODE == "h2o":
+            has_text, _ = h2o_has_text(frame_path)
+            keep, reason = has_text, "new" if has_text else "no-text"
+        else:
+            keep, reason = True, "new"
 
+        counts[reason] = counts.get(reason, 0) + 1
         record = dict(item)
-        record["has_text"] = has_text
-        record["confidence"] = confidence
-        record["keep"] = has_text
+        record.update({
+            "hash": "".join(f"{h:016x}" for h in sig["hashes"])[:64],
+            "luma": sig["luma"],
+            "luma_spread": sig["spread"],
+            "keep": keep,
+            "reason": reason,
+            "duplicate_of": duplicate_of,
+        })
         gated_results.append(record)
-        
-        if has_text:
+
+        if keep:
+            last_kept_sig = sig
+            last_kept_name = item["filename"]
             dest = text_frames_dir / item["filename"]
             if not dest.exists():
                 dest.symlink_to(frame_path)
@@ -567,21 +638,36 @@ def run_stage_04_visual_gate(workspace: Path) -> None:
     gated_json = out_dir / "gated_frames.json"
     gated_json.write_text(json.dumps(gated_results, indent=2), encoding="utf-8")
     kept_count = sum(1 for r in gated_results if r["keep"])
-    print(f"[04_visual_gate] Retained {kept_count}/{len(gated_results)} text frames in {text_frames_dir}")
+    print(f"[04_visual_gate] Retained {kept_count}/{len(gated_results)} frames "
+          f"(new={counts['new']} duplicate={counts['duplicate']} blank={counts['blank']} "
+          f"no-text={counts['no-text']}) in {text_frames_dir}")
+
+
+def kem_gate(text: str, block_type: str = "text"):
+    try:
+        scripts = str(KEM_SCRIPTS)
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        from kem_ocr import assert_structure
+        return assert_structure(text, block_type)
+    except Exception:
+        return None
 
 
 def run_stage_05_visual_ocr(workspace: Path) -> None:
     stage_dir = workspace / "stages" / "05_visual_ocr"
     out_dir = stage_dir / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    
+
     gated_json = workspace / "stages" / "04_visual_gate" / "output" / "gated_frames.json"
     if not gated_json.exists():
         raise FileNotFoundError(f"Missing upstream gated frames: {gated_json}")
-        
+
     records = json.loads(gated_json.read_text(encoding="utf-8"))
     kept = [r for r in records if r.get("keep", False)]
-    print(f"[05_visual_ocr] Running OCR (LightOnOCR-3-1B) on {len(kept)} frames...")
+    label = "MiniCPM-OCR-1.0 + structural gate" if OCR_BACKEND == "minicpm" else "LightOnOCR-3-1B"
+    print(f"[05_visual_ocr] Running OCR ({label}) on {len(kept)} frames...")
+
 
     ocr_json = out_dir / "ocr_timeline.json"
     ocr_md = out_dir / "ocr_timeline.md"
@@ -603,15 +689,20 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
 
     if not kept:
         ocr_json.write_text("[]", encoding="utf-8")
-        ocr_md.write_text("# Visual OCR Timeline (LightOnOCR-3-1B)\n\nNo text frames detected.\n", encoding="utf-8")
+        ocr_md.write_text(f"# Visual OCR Timeline ({label})\n\nNo text frames detected.\n", encoding="utf-8")
         return
 
-    if not LIGHTON_MODEL.exists() or not LIGHTON_MMPROJ.exists():
-        raise FileNotFoundError(
-            f"Missing LightOnOCR weights:\n"
-            f"Model: {LIGHTON_MODEL}\n"
-            f"MMProj: {LIGHTON_MMPROJ}"
-        )
+    if OCR_BACKEND == "minicpm":
+        ocr_bin, ocr_model, ocr_mmproj = MINICPM_SERVER_BIN, MINICPM_MODEL, MINICPM_MMPROJ
+        ocr_port, ocr_url = MINICPM_PORT, MINICPM_URL
+    else:
+        ocr_bin, ocr_model, ocr_mmproj = LLAMA_SERVER_BIN, LIGHTON_MODEL, LIGHTON_MMPROJ
+        ocr_port, ocr_url = LIGHTON_PORT, LIGHTON_URL
+
+    for kind, path in (("model", ocr_model), ("mmproj", ocr_mmproj)):
+        if not path.exists():
+            raise FileNotFoundError(f"Missing {OCR_BACKEND} {kind}: {path}")
+
 
     server_proc = None
     started_server = False
@@ -626,17 +717,19 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
             return False
 
     # Check if a server is already listening, or spawn an ephemeral one for speed
-    if not is_server_listening(LIGHTON_URL):
-        if LLAMA_SERVER_BIN.exists():
-            print(f"[05_visual_ocr] Spawning ephemeral LightOnOCR server on port {LIGHTON_PORT}...")
+    if not is_server_listening(ocr_url):
+        if ocr_bin.exists():
+            print(f"[05_visual_ocr] Spawning ephemeral {OCR_BACKEND} server on port {ocr_port}...")
             cmd = [
-                str(LLAMA_SERVER_BIN),
-                "-m", str(LIGHTON_MODEL),
-                "--mmproj", str(LIGHTON_MMPROJ),
-                "--port", str(LIGHTON_PORT),
+                str(ocr_bin),
+                "-m", str(ocr_model),
+                "--mmproj", str(ocr_mmproj),
+                "--port", str(ocr_port),
                 "-ngl", "99",
-                "-c", "4096",
+                "-c", "8192" if OCR_BACKEND == "minicpm" else "4096",
             ]
+            if OCR_BACKEND == "minicpm":
+                cmd += ["--reasoning", "off"]
             server_proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -645,13 +738,48 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
             started_server = True
             for _ in range(30):
                 time.sleep(0.5)
-                if is_server_listening(LIGHTON_URL):
-                    print(f"[05_visual_ocr] Server ready on http://127.0.0.1:{LIGHTON_PORT}")
+                if is_server_listening(ocr_url):
+                    print(f"[05_visual_ocr] Server ready on http://127.0.0.1:{ocr_port}")
                     break
             else:
                 print("[05_visual_ocr] Warning: Server start timed out, falling back to CLI if needed.")
 
+
+    def minicpm_single_frame(frame_file: Path) -> str:
+        if not is_server_listening(ocr_url):
+            return ""
+        try:
+            with open(frame_file, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            mime = "png" if frame_file.suffix.lower() == ".png" else "jpeg"
+            payload = {
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/{mime};base64,{b64}"}},
+                        {"type": "text", "text": "Text Recognition:"},
+                    ],
+                }],
+                "max_tokens": 1536,
+                "temperature": 0.0,
+            }
+            req = urllib.request.Request(
+                ocr_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return ""
+
     def ocr_single_frame(frame_file: Path) -> str:
+        if OCR_BACKEND == "minicpm":
+            return minicpm_single_frame(frame_file)
+        return lighton_single_frame(frame_file)
+
+    def lighton_single_frame(frame_file: Path) -> str:
         # 1. Try persistent / ephemeral HTTP server
         if is_server_listening(LIGHTON_URL):
             try:
@@ -722,21 +850,35 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
                 continue
                 
             print(f"[05_visual_ocr] Processing frame {idx}/{len(kept)}: {r['filename']} ({r['timestamp_str']})...")
-            ocr_input_file = preprocess_frame_for_ocr(frame_file)
+            ocr_input_file = frame_file if OCR_BACKEND == "minicpm" else preprocess_frame_for_ocr(frame_file)
             text_out = ocr_single_frame(ocr_input_file)
-            
+            structure = kem_gate(text_out) if (OCR_BACKEND == "minicpm" and text_out) else None
+
+            if structure is not None and not structure["ok"]:
+                print(f"[05_visual_ocr]   drop {r['filename']}: structural {'+'.join(structure['failed'])}")
+                continue
+
+            if text_out and last_text and text_similarity(text_out, last_text) >= TEXT_SIMILARITY:
+                print(f"[05_visual_ocr]   drop {r['filename']}: near-duplicate text "
+                      f"({text_similarity(text_out, last_text):.2f})")
+                continue
+
             # Deduplicate consecutive identical text
             if text_out and text_out != last_text:
-                ocr_entries.append({
+                entry = {
                     "timestamp": r["timestamp"],
                     "timestamp_str": r["timestamp_str"],
                     "frame": r["filename"],
-                    "text": text_out
-                })
+                    "text": text_out,
+                }
+                if structure is not None:
+                    entry["structural"] = structure
+                ocr_entries.append(entry)
                 last_text = text_out
+
     finally:
         if started_server and server_proc is not None:
-            print("[05_visual_ocr] Stopping ephemeral LightOnOCR server...")
+            print(f"[05_visual_ocr] Stopping ephemeral {OCR_BACKEND} server...")
             server_proc.terminate()
             try:
                 server_proc.wait(timeout=5)
@@ -745,7 +887,7 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
 
     ocr_json.write_text(json.dumps(ocr_entries, indent=2), encoding="utf-8")
     
-    md_lines = ["# Visual OCR Timeline (LightOnOCR-3-1B)\n\n"]
+    md_lines = [f"# Visual OCR Timeline ({label})\n\n"]
     for entry in ocr_entries:
         ts = entry["timestamp_str"]
         frame = entry["frame"]
@@ -969,14 +1111,24 @@ def main() -> None:
     p_step = subparsers.add_parser("step", help="Run the next single stage and stop at human checkpoint")
     p_step.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
     p_step.add_argument("--source", type=str, help="Video source if running stage 01")
+    p_step.add_argument("--ocr", choices=["lighton", "minicpm"], help="OCR backend (default: lighton)")
+    p_step.add_argument("--gate", choices=["hash", "h2o"], help="frame gate (default: hash)")
 
     # run
     p_run = subparsers.add_parser("run", help="Run pipeline stages")
     p_run.add_argument("workspace", type=Path, nargs="?", default=Path("."), help="Workspace directory")
     p_run.add_argument("--source", type=str, help="Video source")
     p_run.add_argument("--until", type=str, help="Stop at this stage (e.g. 02_audio_asr)")
+    p_run.add_argument("--ocr", choices=["lighton", "minicpm"], help="OCR backend (default: lighton)")
+    p_run.add_argument("--gate", choices=["hash", "h2o"], help="frame gate (default: hash)")
 
     args = parser.parse_args()
+
+    global GATE_MODE, OCR_BACKEND
+    if getattr(args, "gate", None):
+        GATE_MODE = args.gate
+    if getattr(args, "ocr", None):
+        OCR_BACKEND = args.ocr
 
     if args.command == "init":
         init_workspace(args.workspace, args.source)
