@@ -211,13 +211,13 @@ def run_cmd(cmd, cwd=None, check=True):
     return res
 
 
-def describe_repo_changes(target: Path) -> str:
-    """Commit subject/body derived from the staged diff, never from a clock."""
+def compose_commit_message(target: Path, message: Optional[str] = None) -> str:
+    """The same commit shape git-sync emits: subject, prose, file manifest."""
     try:
-        from git_sync import describe_staged_changes
-        return describe_staged_changes(str(target))
+        from git_sync import compose_message
+        return compose_message(str(target), message)
     except Exception:
-        return f"chore: sync changes in {target.name}"
+        return message or f"chore: sync changes in {target.name}"
 
 
 def check_gh_status() -> Tuple[bool, str]:
@@ -599,9 +599,9 @@ def cmd_sync(target: Path, message: Optional[str] = None, force: bool = False) -
     if status:
         print("  📝 Local changes detected. Staging and committing...")
         run_cmd(["git", "add", "."], cwd=target)
-        commit_msg = message or describe_repo_changes(target)
+        commit_msg = compose_commit_message(target, message)
         run_cmd(["git", "commit", "-m", commit_msg], cwd=target)
-        print(f"  ✅ Committed local changes: '{commit_msg}'")
+        print(f"  ✅ Committed local changes: '{commit_msg.splitlines()[0]}'")
     else:
         print("  ℹ️  Working tree clean (no new local changes to commit).")
 

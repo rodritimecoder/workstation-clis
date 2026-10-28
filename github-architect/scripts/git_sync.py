@@ -15,7 +15,6 @@ Stages:
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -213,6 +212,26 @@ def describe_staged_changes(repo: str = None, prefix: str = "chore") -> str:
     return subject + "\n\n" + _build_body(scopes)
 
 
+def compose_message(repo: str = None, message: str = None, prefix: str = "chore") -> str:
+    """The one commit shape every entry point emits.
+
+    Subject from the diff, then the supplied prose, then the file manifest.
+    A prose block never replaces the subject, so `git log` stays searchable,
+    and the manifest always sits underneath so the commit still says what
+    moved without re-reading the diff.
+    """
+    auto_msg = describe_staged_changes(repo, prefix)
+    prose = (message or "").strip()
+    if not prose:
+        return auto_msg
+    subject = auto_msg.splitlines()[0] if auto_msg.splitlines() else f"{prefix}: sync working tree"
+    parts = [prose]
+    manifest = staged_change_body(repo)
+    if manifest and manifest not in prose:
+        parts.append(manifest)
+    return subject + "\n\n" + "\n\n".join(parts)
+
+
 def stage1_look() -> dict:
     # 1. Branch name
     res = run_git(["branch", "--show-current"])
@@ -319,20 +338,7 @@ def stage3_commit(safe_files: list[str], message: str = None, repo: str = None) 
         else:
             run_git(["rm", "--cached", "--", f], check=False, cwd=repo)
 
-    commit_msg_raw = (message or "").strip()
-    auto_msg = describe_staged_changes(repo)
-    auto_subject = auto_msg.splitlines()[0] if auto_msg.splitlines() else "chore: sync working tree"
-    if not commit_msg_raw:
-        commit_msg = auto_msg
-    else:
-        # The diff-stat subject stays deterministic; the supplied -m text is
-        # the prose body (why and features), and the file manifest follows it
-        # so `git log` still answers "what changed".
-        parts = [commit_msg_raw]
-        manifest = staged_change_body(repo)
-        if manifest and manifest not in commit_msg_raw:
-            parts.append(manifest)
-        commit_msg = auto_subject + "\n\n" + "\n\n".join(parts)
+    commit_msg = compose_message(repo, message)
 
     res = run_git(["commit", "-m", commit_msg], cwd=repo)
     # Extract SHA

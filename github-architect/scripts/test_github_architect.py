@@ -429,5 +429,31 @@ class TestProtectedPush(unittest.TestCase):
                 git_sync.stage6_push("main", has_upstream=True, auto_yes=False)
 
 
+class TestCommitComposition(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        run = lambda *a: subprocess.run(["git", "-C", str(self.repo)] + list(a),
+                                        capture_output=True, text=True, check=True)
+        run("init", "-b", "main")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        (self.repo / "glitch-cat" / "kem-thought").mkdir(parents=True)
+        (self.repo / "glitch-cat" / "kem-thought" / "SKILL.md").write_text("x\n", encoding="utf-8")
+        run("add", "-A")
+
+    def test_compose_puts_the_manifest_under_the_prose(self):
+        message = git_sync.compose_message(str(self.repo), "feat: say why this moved")
+        self.assertEqual(message.splitlines()[0], "chore(kem-thought): SKILL.md (+1/-0)")
+        self.assertLess(message.find("feat: say why this moved"),
+                        message.find("kem-thought (1 file"))
+
+    def test_compose_without_prose_is_subject_and_manifest(self):
+        message = git_sync.compose_message(str(self.repo), None)
+        self.assertEqual(message, git_sync.describe_staged_changes(str(self.repo)))
+
+
 if __name__ == "__main__":
     unittest.main()
