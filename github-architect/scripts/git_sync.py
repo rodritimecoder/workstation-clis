@@ -322,14 +322,8 @@ def stage3_commit(safe_files: list[str], message: str = None, repo: str = None) 
         commit_msg = auto_msg
     else:
         # The diff-stat subject stays deterministic; the supplied -m text
-        # becomes the body (prose), followed by the file manifest.
-        manifest = ""
-        if "\n\n" in auto_msg:
-            manifest = auto_msg.split("\n\n", 1)[1].strip()
-        parts = [commit_msg_raw]
-        if manifest and manifest not in commit_msg_raw:
-            parts.append(manifest)
-        commit_msg = auto_subject + "\n\n" + "\n\n".join(parts)
+        # is the descriptive body (why/features), keeping commits readable.
+        commit_msg = auto_subject + "\n\n" + commit_msg_raw
 
     res = run_git(["commit", "-m", commit_msg], cwd=repo)
     # Extract SHA
