@@ -10,7 +10,7 @@ Interpretable Context Methodology (ICM) compliant:
 Stages:
   01_acquire       - Ingests video (URL or local), extracts audio & metadata
   02_audio_asr     - Speech-to-text with timestamps via audiocpp (CrisperWhisper 2.0 by default)
-  03_visual_sample - Smart frame sampling with ffmpeg & perceptual deduplication
+  03_visual_sample - Keyframe / scene-cut / fps sampling with PTS-exact timestamps
   04_visual_gate   - Deterministic gate: perceptual dedup + blank rejection, or h2o vision gate
   05_visual_ocr    - Visual OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate)
   06_synthesize    - Merges transcript & OCR into chronological mined_video.md
@@ -96,6 +96,9 @@ OCR_BACKEND = os.environ.get("VIDEOMINE_OCR", "lighton")
 HASH_DISTANCE = int(os.environ.get("VIDEOMINE_HASH_DISTANCE", "20"))
 TEXT_SIMILARITY = float(os.environ.get("VIDEOMINE_TEXT_SIMILARITY", "0.9"))
 ASR_MODEL = os.environ.get("VIDEOMINE_ASR_MODEL", "")
+SAMPLE_MODE = os.environ.get("VIDEOMINE_SAMPLE", "auto")
+SAMPLE_FPS = float(os.environ.get("VIDEOMINE_SAMPLE_FPS", "1.0"))
+KEYFRAME_THRESHOLD_S = float(os.environ.get("VIDEOMINE_KEYFRAME_AFTER", "600"))
 GRID = 4
 BLOCK_W = 17
 BLOCK_H = 16
@@ -442,45 +445,86 @@ def run_stage_02_audio_asr(workspace: Path) -> None:
     print(f"[02_audio_asr] Done. Generated {len(segments)} timestamped segments in {transcript_md}")
 
 
+def probe_duration(video: Path) -> float:
+    res = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(res.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def resolve_sample_mode(requested: str, duration_s: float) -> str:
+    if requested in ("keyframe", "fps"):
+        return requested
+    return "keyframe" if duration_s > KEYFRAME_THRESHOLD_S else "select"
+
+
 def run_stage_03_visual_sample(workspace: Path) -> None:
     stage_dir = workspace / "stages" / "03_visual_sample"
     out_dir = stage_dir / "output"
     frames_dir = out_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
-    
+
     video_mp4 = workspace / "stages" / "01_acquire" / "output" / "source_video.mp4"
     if not video_mp4.exists():
         raise FileNotFoundError(f"Missing upstream video: {video_mp4}")
-        
-    print("[03_visual_sample] Extracting candidate keyframes (motion accumulator + scene cuts + mpdecimate)...")
-    # Native FFmpeg filter:
-    # 1. First frame always captured: eq(n,0)
-    # 2. Cumulative motion accumulator st(0,...): sums inter-frame motion (scene delta). When >= 0.5 (~50% viewport shift), triggers a capture and resets.
-    # 3. Sudden slide/scene jump: gt(scene, 0.22) triggers immediately and resets.
-    # 4. Periodic safety fallback: not(mod(n, 120)) captures every ~4-5s even during perfectly still pauses.
-    # 5. Debounce: max 1 capture per 0.5s during hyper-fast scrolls (prevents blurred duplicate bursts).
-    # 6. mpdecimate: drops identical frames if the video was completely still.
-    # 7. showinfo: emits exact pts_time to eliminate PTS clock drift.
-    select_expr = (
-        "st(0, if(eq(n,0), 0, ld(0)) + scene);"
-        "if(gte(ld(0), 0.5) + gt(scene, 0.22) + eq(n,0) + not(mod(n, 120)),"
-        "  st(0, 0) + (isnan(prev_selected_t) + gte(t - prev_selected_t, 0.5)),"
-        "  0)"
-    )
+
+    duration = probe_duration(video_mp4)
+    mode = resolve_sample_mode(SAMPLE_MODE, duration)
+
     # VLM tile boundary snapping: clamp max dimension to 1568 and snap W & H to multiples of 28px patch grid
     scale_expr = "scale=w='trunc(min(1568,iw)/28)*28':h='trunc((min(1568,iw)*ih/iw)/28)*28':flags=bicubic"
-    vf_chain = f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,{scale_expr},showinfo"
 
-    cmd = [
-        "ffmpeg", "-y", "-i", str(video_mp4),
-        "-an",
-        "-vf", vf_chain,
-        "-vsync", "vfr",
-        "-q:v", "2",
-        str(frames_dir / "frame_%06d.jpg")
-    ]
+    if mode == "keyframe":
+        print(f"[03_visual_sample] Extracting codec keyframes (-skip_frame nokey) from {duration:.0f}s source...")
+        cmd = [
+            "ffmpeg", "-y", "-skip_frame", "nokey", "-i", str(video_mp4),
+            "-an",
+            "-vf", f"{scale_expr},showinfo",
+            "-vsync", "0",
+            "-q:v", "2",
+            str(frames_dir / "frame_%06d.jpg"),
+        ]
+    elif mode == "fps":
+        print(f"[03_visual_sample] Sampling at {SAMPLE_FPS} fps from {duration:.0f}s source...")
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_mp4),
+            "-an",
+            "-vf", f"fps={SAMPLE_FPS},{scale_expr},showinfo",
+            "-vsync", "vfr",
+            "-q:v", "2",
+            str(frames_dir / "frame_%06d.jpg"),
+        ]
+    else:
+        print("[03_visual_sample] Extracting content frames (motion accumulator + scene cuts + mpdecimate)...")
+        # Native FFmpeg filter:
+        # 1. First frame always captured: eq(n,0)
+        # 2. Cumulative motion accumulator st(0,...): sums inter-frame motion (scene delta). When >= 0.5 (~50% viewport shift), triggers a capture and resets.
+        # 3. Sudden slide/scene jump: gt(scene, 0.22) triggers immediately and resets.
+        # 4. Periodic safety fallback: not(mod(n, 120)) captures every ~4-5s even during perfectly still pauses.
+        # 5. Debounce: max 1 capture per 0.5s during hyper-fast scrolls (prevents blurred duplicate bursts).
+        # 6. mpdecimate: drops identical frames if the video was completely still.
+        # 7. showinfo: emits exact pts_time to eliminate PTS clock drift.
+        select_expr = (
+            "st(0, if(eq(n,0), 0, ld(0)) + scene);"
+            "if(gte(ld(0), 0.5) + gt(scene, 0.22) + eq(n,0) + not(mod(n, 120)),"
+            "  st(0, 0) + (isnan(prev_selected_t) + gte(t - prev_selected_t, 0.5)),"
+            "  0)"
+        )
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_mp4),
+            "-an",
+            "-vf", f"select='{select_expr}',mpdecimate=hi=768:lo=320:frac=0.33,{scale_expr},showinfo",
+            "-vsync", "vfr",
+            "-q:v", "2",
+            str(frames_dir / "frame_%06d.jpg"),
+        ]
+
     res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=True)
-    
+
     # Parse exact presentation timestamps (pts_time) directly from ffmpeg showinfo log
     pts_times = [float(x) for x in re.findall(r"pts_time:([0-9.]+)", res.stderr or "")]
     
@@ -499,7 +543,7 @@ def run_stage_03_visual_sample(workspace: Path) -> None:
         
     manifest_file = out_dir / "manifest.json"
     manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"[03_visual_sample] Sampled {len(manifest)} candidate frames into {frames_dir}")
+    print(f"[03_visual_sample] Sampled {len(manifest)} frames ({mode}) into {frames_dir}")
 
 
 def frame_signature(path: Path) -> dict:
@@ -1118,6 +1162,8 @@ def main() -> None:
     p_step.add_argument("--ocr", choices=["lighton", "minicpm"], help="OCR backend (default: lighton)")
     p_step.add_argument("--gate", choices=["hash", "h2o"], help="frame gate (default: hash)")
     p_step.add_argument("--asr-model", help="audiocpp ASR slug (default: crisperwhisper); e.g. nemotron")
+    p_step.add_argument("--sample", choices=["auto", "keyframe", "fps"], help="frame sampling (default: auto — keyframe over 10 min)")
+    p_step.add_argument("--sample-fps", type=float, help="fps for --sample fps (default: 1.0)")
 
     # run
     p_run = subparsers.add_parser("run", help="Run pipeline stages")
@@ -1127,16 +1173,22 @@ def main() -> None:
     p_run.add_argument("--ocr", choices=["lighton", "minicpm"], help="OCR backend (default: lighton)")
     p_run.add_argument("--gate", choices=["hash", "h2o"], help="frame gate (default: hash)")
     p_run.add_argument("--asr-model", help="audiocpp ASR slug (default: crisperwhisper); e.g. nemotron")
+    p_run.add_argument("--sample", choices=["auto", "keyframe", "fps"], help="frame sampling (default: auto — keyframe over 10 min)")
+    p_run.add_argument("--sample-fps", type=float, help="fps for --sample fps (default: 1.0)")
 
     args = parser.parse_args()
 
-    global GATE_MODE, OCR_BACKEND, ASR_MODEL
+    global GATE_MODE, OCR_BACKEND, ASR_MODEL, SAMPLE_MODE, SAMPLE_FPS
     if getattr(args, "gate", None):
         GATE_MODE = args.gate
     if getattr(args, "ocr", None):
         OCR_BACKEND = args.ocr
     if getattr(args, "asr_model", None):
         ASR_MODEL = args.asr_model
+    if getattr(args, "sample", None):
+        SAMPLE_MODE = args.sample
+    if getattr(args, "sample_fps", None):
+        SAMPLE_FPS = args.sample_fps
 
     if args.command == "init":
         init_workspace(args.workspace, args.source)

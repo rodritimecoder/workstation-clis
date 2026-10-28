@@ -22,7 +22,7 @@ Follows **Interpretable Context Methodology (ICM)**:
 |---|---|---|---|
 | `01_acquire` | Download/link video & extract 16 kHz audio | Video URL or path | `output/audio.wav`, `video_meta.json` |
 | `02_audio_asr` | Transcribe speech via `audiocpp` (CrisperWhisper 2.0, verbatim + word timings) | `01_acquire/output/audio.wav` | `output/transcript.md` *(edit/correct terms)* |
-| `03_visual_sample` | Keyframe scene sampling, motion accumulator, mpdecimate & PTS timing | `01_acquire/output/source_video.mp4` | `output/frames/`, `manifest.json` |
+| `03_visual_sample` | Keyframe (`-skip_frame nokey`), scene-cut, or fps sampling with PTS timing | `01_acquire/output/source_video.mp4` | `output/frames/`, `manifest.json` |
 | `04_visual_gate` | Perceptual dedup (dHash) + blank rejection, or h2o vision gate | `03_visual_sample/output/manifest.json` | `output/gated_frames.json` *(check kept frames)* |
 | `05_visual_ocr` | OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate) | `04_visual_gate/output/text_frames/` | `output/ocr_timeline.md` *(fix OCR typos)* |
 | `06_synthesize` | Merge audio transcript & visual OCR into notes | `02_audio_asr` + `05_visual_ocr` | `output/mined_video.md` *(final deliverable)* |
@@ -95,6 +95,10 @@ python3 $CLI run ./my_video_run --gate h2o
 
 # Switch ASR: nemotron (fast, normalized) instead of the verbatim default
 python3 $CLI run ./my_video_run --asr-model nemotron
+
+# Frame sampling: codec keyframes, fixed fps, or the content selector
+python3 $CLI run ./my_video_run --sample keyframe
+python3 $CLI run ./my_video_run --sample fps --sample-fps 0.5
 ```
 
 `--gate hash` (default) is deterministic and free: the frame is reduced to a
@@ -115,6 +119,24 @@ non-textual are dropped before they reach the timeline. Frames whose text is
 on screen for a minute becomes one entry instead of ten. The gate is imported
 from the sibling `kem-ocr` skill; if that skill is missing the OCR still runs
 and the structural field is simply absent.
+
+### Frame sampling modes (`03_visual_sample`)
+
+| Mode | How | Frames / 5.5 min | Wall |
+|---|---|---|---|
+| `keyframe` | `-skip_frame nokey`, no non-key decode | 96 (encoder schedule) | **0.22 s** |
+| `select` | scene cuts + motion accumulator + 4 s tick | 84 (metronome-dominated) | 3.5 s |
+| `fps` | fixed cadence, `--sample-fps` | 335 at 1 fps | ~4 s |
+
+`auto` (default) uses `keyframe` above 10 minutes (`VIDEOMINE_KEYFRAME_AFTER`) and
+`select` below it. Keyframes are ~16× cheaper because the decoder never touches
+a non-key frame; the trade is that positions are chosen by the encoder, not the
+content. On a screen recording the `select` thresholds rarely fire — a terminal
+scrolling a line moves `scene` far below 0.22 — so it degenerates to its 4 s
+tick. The dHash gate in `04_visual_gate` then decides what is new: on the 5.5
+minute lecture 96 keyframes collapsed to 79, because the terminal genuinely
+changes every few seconds. A slide deck collapses much harder.
+
 
 The final synthesized markdown document is emitted at:
 `./my_video_run/stages/06_synthesize/output/mined_video.md`

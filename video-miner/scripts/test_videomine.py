@@ -171,6 +171,13 @@ class TestVisualGate(unittest.TestCase):
         self.assertEqual(vm.text_similarity(a, a), 1.0)
         self.assertEqual(vm.text_similarity("alpha\nbeta", "one\ntwo"), 0.0)
 
+    def test_resolve_sample_mode(self):
+        self.assertEqual(vm.resolve_sample_mode("auto", 120), "select")
+        self.assertEqual(vm.resolve_sample_mode("auto", 1200), "keyframe")
+        self.assertEqual(vm.resolve_sample_mode("keyframe", 60), "keyframe")
+        self.assertEqual(vm.resolve_sample_mode("fps", 3600), "fps")
+        self.assertEqual(vm.resolve_sample_mode("", 1200), "keyframe")
+
 
 if __name__ == "__main__":
     unittest.main()
