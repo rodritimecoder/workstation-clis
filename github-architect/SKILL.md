@@ -41,8 +41,15 @@ are **strictly private** by default.
 | You write | The commit becomes |
 | :--- | :--- |
 | `type(scopes): what changed`, then body paragraphs | your message, verbatim |
+| `type(scopes): what changed` alone | your header, then a generated file manifest |
 | plain prose | diff-derived subject, your prose underneath |
-| nothing | diff-derived subject alone, e.g. `chore(canvas-cli): gates.py (+1/-0)` |
+| nothing | diff-derived subject, then a generated file manifest |
+
+**Every commit carries a body.** A subject is a receipt; the body is the
+description. When you do not write one, the manifest names every staged path
+with its delta, so `git log` answers "which files" without `--stat`. This is
+enforced, not requested: `guarded-commit` refuses to write a bodyless message,
+and the push gate refuses to publish a bodyless commit.
 
 The header form is the one to use, because the subject is what `git log
 --oneline` shows and it should say what changed:
@@ -56,8 +63,9 @@ normalizing queries, so typing "whats new" matches "What's New".
 
 Name components in the scope, not file paths; comma-separate several with no
 spaces. One prose paragraph per concern, no bullets, no diffstat, no manifest —
-`git show --stat` already answers "which files". The full standard, with a
-worked example, is `references/commit-messages.md`.
+`git show --stat` already answers "which files". The manifest exists only for
+commits you did not describe yourself. The full standard, with a worked
+example, is `references/commit-messages.md`.
 
 `-m` is what a person (or an agent) should use whenever the change has an intent a
 diff cannot express:
@@ -108,6 +116,12 @@ github-architect guard --source DIR [--source DIR ...] [--published PATH] [--exc
 
 # 11. Guarded commit — stage by path and refuse to commit a file carrying a credential
 git-sync guarded-commit --repo PATH -m "message" [--exclude PATTERN] [--json]
+
+# 12. Description gate — fail if any outgoing commit has no body (merge commits exempt)
+git-sync check-messages --repo PATH [--upstream ORIGIN/BRANCH]
+
+# 13. Install the pre-push description gate so no bare `git push` can bypass it
+git-sync install-hook --repo PATH [--force]
 ```
 
 ---

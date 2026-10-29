@@ -187,10 +187,11 @@ def _manifest(changes: list[dict]) -> str:
 
     A subject says "6 files (+19/-5)"; it never says which six. The manifest
     is the part `git log --oneline` compresses away and a reader needs when
-    scanning history outside GitHub's changed-files view. A single-file
-    commit already names its file in the subject, so it gets no manifest.
+    scanning history outside GitHub's changed-files view. It is also the body
+    of last resort: a generated commit with no author prose still has to
+    describe itself.
     """
-    if len(changes) < 2:
+    if not changes:
         return ""
     return "\n".join(
         f"- {c['path']} ({_delta(c['added'], c['removed'], c['binary'])})"
@@ -201,24 +202,66 @@ def _manifest(changes: list[dict]) -> str:
 def compose_message(repo: str = None, message: str = None, prefix: str = "chore") -> str:
     """The one commit shape every entry point emits.
 
-    A supplied message that opens with a conventional header (`type(scopes):
-    what changed`) is the whole commit: the author already named what moved,
-    so a generated subject and manifest would talk over them. Without such a
-    header the diff names the subject, the author's prose (if any) sits
-    underneath it, and a multi-file manifest lists exactly which paths the
-    subject's counts cover.
+    Every commit gets a body, because a subject is a receipt and the body is
+    the description. Who supplies it depends on the message:
+
+    - a conventional header with prose: the author's message, verbatim;
+    - a conventional header alone: the header, then the manifest;
+    - prose without a header: the derived subject, then the prose;
+    - no message: the derived subject, then the manifest.
+
+    Only the generated cases get a manifest. An author who wrote paragraphs
+    has already described the change, and `git show --stat` still answers
+    "which files" for them.
     """
     prose = (message or "").strip()
-    if prose and CONVENTIONAL_SUBJECT.match(prose):
-        return prose
     subject = staged_subject(repo, prefix)
+    manifest = _manifest(staged_changes(repo))
+
+    if prose and CONVENTIONAL_SUBJECT.match(prose):
+        if estimate_body(prose):
+            return prose
+        return prose + "\n\n" + manifest if manifest else prose
+
     parts = [subject]
     if prose:
         parts.append(prose)
-    manifest = _manifest(staged_changes(repo))
-    if manifest:
+    elif manifest:
         parts.append(manifest)
     return "\n\n".join(parts)
+
+
+def estimate_body(message: str) -> bool:
+    """Does this commit message already carry a body below its subject?"""
+    _, _, body = message.partition("\n\n")
+    return bool(body.strip())
+
+
+def commits_without_body(upstream: str | None = None, repo: str = None) -> list[tuple[str, str]]:
+    """Commits about to be pushed whose body is empty.
+
+    The composer cannot reach a commit made outside its entry points, so this
+    is the gate that makes "every commit has a description" true rather than
+    aspirational. Merge commits are exempt: git writes their message.
+    """
+    args = ["log", "--format=%H%x1f%s%x1f%b%x1e"]
+    if upstream:
+        args.append(f"{upstream}..HEAD")
+    else:
+        args += ["HEAD", "--not", "--remotes"]
+    res = run_git(args, check=False, cwd=repo)
+    missing = []
+    for record in res.stdout.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        sha, _, rest = record.partition("\x1f")
+        subject, _, body = rest.partition("\x1f")
+        if subject.startswith("Merge "):
+            continue
+        if not body.strip():
+            missing.append((sha[:7], subject))
+    return missing
 
 
 def stage1_look() -> dict:
@@ -328,6 +371,10 @@ def stage3_commit(safe_files: list[str], message: str = None, repo: str = None) 
             run_git(["rm", "--cached", "--", f], check=False, cwd=repo)
 
     commit_msg = compose_message(repo, message)
+    if not estimate_body(commit_msg):
+        raise RuntimeError(
+            f"refusing to commit without a description: {commit_msg.splitlines()[0]!r}"
+        )
 
     res = run_git(["commit", "-m", commit_msg], cwd=repo)
     # Extract SHA
@@ -373,6 +420,20 @@ def stage5_pull(upstream: str):
 
 
 def stage6_push(branch: str, has_upstream: bool, auto_yes: bool = False):
+    upstream = None
+    if has_upstream:
+        up = run_git(["rev-parse", "--abbrev-ref", "@{upstream}"], check=False)
+        upstream = up.stdout.strip() or None
+
+    missing = commits_without_body(upstream)
+    if missing:
+        listing = "\n".join(f"   {sha} {subject}" for sha, subject in missing)
+        sys.exit(
+            f"❌ Refusing to push {len(missing)} commit(s) with no description:\n"
+            f"{listing}\n"
+            f"   Amend each message (`git commit --amend`), then retry."
+        )
+
     is_protected = branch in ("main", "master", "production")
     if is_protected and not auto_yes:
         if not sys.stdin.isatty():
@@ -485,8 +546,61 @@ def cmd_guarded_commit(args) -> int:
     return 1 if result["blocked"] else 0
 
 
+def cmd_check_messages(args) -> int:
+    upstream = args.upstream
+    if not upstream:
+        up = run_git(["rev-parse", "--abbrev-ref", "@{upstream}"], check=False, cwd=args.repo)
+        upstream = up.stdout.strip() or None
+    missing = commits_without_body(upstream, repo=args.repo)
+    if missing:
+        listing = "\n".join(f"  {sha} {subject}" for sha, subject in missing)
+        print(f"❌ {len(missing)} commit(s) with no description:\n{listing}")
+        return 1
+    print("✅ Every outgoing commit has a description.")
+    return 0
+
+
+HOOK_TEMPLATE = """#!/usr/bin/env bash
+# Managed by github-architect. Refuses to publish a commit with no description.
+exec python3 "{script}" check-messages --repo "$(git rev-parse --show-toplevel)"
+"""
+
+
+def cmd_install_hook(args) -> int:
+    root = Path(args.repo).resolve()
+    hook = root / ".git" / "hooks" / "pre-push"
+    if hook.exists():
+        text = hook.read_text(errors="ignore")
+        if "github-architect" not in text and not args.force:
+            print(f"❌ {hook} exists and was not written by github-architect. Pass --force to replace it.")
+            return 1
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(HOOK_TEMPLATE.format(script=Path(__file__).resolve()))
+    hook.chmod(0o755)
+    print(f"🪝 Installed pre-push description gate at {hook}")
+    return 0
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+
+    if argv and argv[0] == "check-messages":
+        cp = argparse.ArgumentParser(
+            prog="git-sync check-messages",
+            description="Fail if any outgoing commit has no description body",
+        )
+        cp.add_argument("--repo", default=".", help="Repository to inspect")
+        cp.add_argument("--upstream", help="Range start (default: @{upstream})")
+        return cmd_check_messages(cp.parse_args(argv[1:]))
+
+    if argv and argv[0] == "install-hook":
+        ip = argparse.ArgumentParser(
+            prog="git-sync install-hook",
+            description="Install the pre-push description gate",
+        )
+        ip.add_argument("--repo", default=".", help="Repository to install into")
+        ip.add_argument("--force", action="store_true", help="Replace a foreign pre-push hook")
+        return cmd_install_hook(ip.parse_args(argv[1:]))
 
     if argv and argv[0] == "guarded-commit":
         gp = argparse.ArgumentParser(

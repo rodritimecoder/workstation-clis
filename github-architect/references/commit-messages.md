@@ -5,12 +5,18 @@
 | Your message | The commit |
 | :--- | :--- |
 | `type(scopes): what changed` (a conventional header) | your message, verbatim — subject and all |
+| `type(scopes): what changed` with no body | your header, then a generated file manifest |
 | prose without that header | diff-derived subject, your prose underneath |
-| nothing | the diff-derived subject alone |
+| nothing | the diff-derived subject, then a generated file manifest |
 
 Write the header when you want the commit to say what you meant. Skip it and
 the diff names the subject for you, in about `chore(scope): 3 files (+4/-2)`,
-which is a receipt, not a description.
+which is a receipt, not a description — so the body carries the manifest of
+paths that the subject only counted.
+
+Every commit has a body, including one you leave blank: `guarded-commit`
+refuses to write a subject-only message, and the push gate refuses to publish
+a commit that has none.
 
 ## The standard
 
@@ -35,8 +41,9 @@ One paragraph on the first thing. One paragraph on the second, or omit it.
    *why*, the behaviour it replaces, and the real symbols, paths or values that
    pin it down. Two to five lines each.
 5. **Never** add a bullet list, a file manifest, a diffstat, a SHA list, or a
-    restatement of the subject. `git show --stat` already answers "which
-    files"; `git log --oneline` already shows the subject.
+   restatement of the subject to a message *you* write. `git show --stat`
+   already answers "which files"; `git log --oneline` already shows the
+   subject. The generated manifest exists only where no human body does.
 
 ## Worked example
 

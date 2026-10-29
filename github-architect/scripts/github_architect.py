@@ -212,12 +212,13 @@ def run_cmd(cmd, cwd=None, check=True):
 
 
 def compose_commit_message(target: Path, message: Optional[str] = None) -> str:
-    """The same commit shape git-sync emits: subject, prose, file manifest."""
-    try:
-        from git_sync import compose_message
-        return compose_message(str(target), message)
-    except Exception:
-        return message or f"chore: sync changes in {target.name}"
+    """The same commit shape git-sync emits: subject, prose, file manifest.
+
+    No fallback: a silent `except` here is how a commit lost its description
+    before. If git_sync cannot be imported the caller must see it.
+    """
+    from git_sync import compose_message
+    return compose_message(str(target), message)
 
 
 def check_gh_status() -> Tuple[bool, str]:
@@ -537,7 +538,8 @@ def cmd_publish(target: Path, repo_name: str, private: bool = True, license_type
     run_cmd(["git", "add", "."], cwd=target)
     status = run_cmd(["git", "status", "--porcelain"], cwd=target).stdout.strip()
     if status:
-        run_cmd(["git", "commit", "-m", "feat: initial commit with github-architect scaffold"], cwd=target)
+        commit_msg = compose_commit_message(target, "feat: initial commit with github-architect scaffold")
+        run_cmd(["git", "commit", "-m", commit_msg], cwd=target)
         print("  ✅ Committed all staged files")
     else:
         print("  ℹ️  No changes to commit (working tree clean)")
@@ -611,6 +613,15 @@ def cmd_sync(target: Path, message: Optional[str] = None, force: bool = False) -
         print(f"  ⚠️ Warning: Pull rebase had warnings/conflicts:\n{pull_res.stderr.strip()}")
     else:
         print(f"  ✅ Branch origin/{branch} rebased cleanly.")
+
+    from git_sync import commits_without_body
+    missing = commits_without_body(f"origin/{branch}", repo=str(target))
+    if missing:
+        listing = "\n".join(f"     {sha} {subject}" for sha, subject in missing)
+        print(f"  ❌ Refusing to push {len(missing)} commit(s) with no description:")
+        print(listing)
+        print("     Amend each message, then retry.")
+        return False
 
     print(f"  📤 Pushing commits to origin/{branch}...")
     push_res = run_cmd(["git", "push", "origin", branch], cwd=target, check=False)

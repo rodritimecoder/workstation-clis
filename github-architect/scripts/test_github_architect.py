@@ -334,15 +334,15 @@ class TestCommitMessage(unittest.TestCase):
         self.assertIn("- glitch-cat/kem-thought/SKILL.md (+1/-0)", manifest)
         self.assertIn("- glitch-cat/kem-thought/principles/code-decides.md (+1/-0)", manifest)
 
-    def test_prose_sits_between_subject_and_manifest(self):
+    def test_prose_is_the_body_and_needs_no_manifest(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
         self.run("add", "-A")
         message = git_sync.compose_message(str(self.repo), "Say why this moved.")
-        subject, prose, manifest = message.split("\n\n")
+        subject, prose = message.split("\n\n")
         self.assertEqual(subject, git_sync.staged_subject(str(self.repo)))
         self.assertEqual(prose, "Say why this moved.")
-        self.assertIn("principles/code-decides.md", manifest)
+        self.assertNotIn("code-decides.md", message)
 
     def test_subject_stays_within_the_console_width(self):
         for i in range(6):
@@ -400,14 +400,12 @@ class TestCommitMessage(unittest.TestCase):
         self.assertEqual(body, "Name the principle in the skill body so the gate can cite it.")
         self.assertNotIn("code-decides.md", body)
 
-    def test_body_is_the_prose_then_the_manifest(self):
+    def test_body_is_the_prose_and_nothing_else(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
         git_sync.guarded_commit(str(self.repo), "State the convention that code decides.")
         body = self.run("log", "-1", "--format=%b").stdout.strip()
-        prose, manifest = body.split("\n\n")
-        self.assertEqual(prose, "State the convention that code decides.")
-        self.assertIn("principles/code-decides.md", manifest)
+        self.assertEqual(body, "State the convention that code decides.")
 
     def test_secret_in_a_new_directory_is_blocked(self):
         self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")
@@ -472,17 +470,30 @@ class TestCommitComposition(unittest.TestCase):
             "feat(kem-thought): say why this moved\n\nThe diff line would only repeat it.",
         )
 
-    def test_a_conventional_subject_without_a_body_is_kept_alone(self):
+    def test_a_conventional_subject_without_a_body_gets_the_manifest(self):
         message = git_sync.compose_message(str(self.repo), "fix(github-architect): keep the guard closed")
-        self.assertEqual(message, "fix(github-architect): keep the guard closed")
+        header, body = message.split("\n\n")
+        self.assertEqual(header, "fix(github-architect): keep the guard closed")
+        self.assertIn("glitch-cat/kem-thought/SKILL.md", body)
 
     def test_prose_that_only_mentions_a_colon_is_not_a_header(self):
         message = git_sync.compose_message(str(self.repo), "Note: the gate now runs first.")
         self.assertTrue(message.startswith("chore(kem-thought): SKILL.md (+1/-0)\n\n"))
 
-    def test_compose_without_prose_is_the_subject_alone(self):
+    def test_single_file_without_prose_still_gets_a_body(self):
         message = git_sync.compose_message(str(self.repo), None)
-        self.assertEqual(message, git_sync.staged_subject(str(self.repo)))
+        subject, body = message.split("\n\n")
+        self.assertEqual(subject, git_sync.staged_subject(str(self.repo)))
+        self.assertIn("glitch-cat/kem-thought/SKILL.md", body)
+
+    def test_bodyless_commit_is_flagged_before_push(self):
+        git_sync.run_git(["commit", "--allow-empty", "-m", "chore: no description here"], cwd=str(self.repo))
+        missing = git_sync.commits_without_body(repo=str(self.repo))
+        self.assertEqual([s for _, s in missing], ["chore: no description here"])
+
+    def test_merge_commits_are_exempt_from_the_body_rule(self):
+        git_sync.run_git(["commit", "--allow-empty", "-m", "Merge branch 'topic'"], cwd=str(self.repo))
+        self.assertEqual(git_sync.commits_without_body(repo=str(self.repo)), [])
 
 
 if __name__ == "__main__":
