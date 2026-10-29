@@ -14,7 +14,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 <!-- ports:begin -->
 | Port | Slot | Cardinality | Default model | Launcher | Role |
 |---|---|---|---|---|---|
-| `:8080` | `llm` | many (7) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
+| `:8080` | `llm` | many (9) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
 | `:8081` | `audio` | many (3) | nemotron-asr | `run-audiocpp.sh` | Speech-to-text, text-to-speech, forced alignment, voice cloning |
 | `:8083` | `decision` | one-of-many (5) | h2o-lightning-4b | `h2o.sh` | The decision engine slot - bool / choice / score primitives |
 | `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint |

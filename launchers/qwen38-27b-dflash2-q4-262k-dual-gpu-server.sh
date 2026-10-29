@@ -6,7 +6,7 @@ SERVER="${HOME}/src/cafe-llama.cpp/build-vulkan/bin/llama-server"
 TARGET="${AI_ROOT}/models/ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp.gguf"
 DRAFT="${AI_ROOT}/models/incoai/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf"
 HOST="${HOST:-127.0.0.1}"
-PORT="${PORT:-9931}"
+PORT="${PORT:-8080}"
 
 for file in "$SERVER" "$TARGET" "$DRAFT"; do
   if [[ ! -f "$file" ]]; then
