@@ -80,5 +80,22 @@ class TestExec(unittest.TestCase):
             self.assertFalse(os.path.exists("/home/omnicli-sandbox-probe.txt"))
 
 
+class TestContractIsolation(unittest.TestCase):
+    def test_help_probe_cannot_write_into_the_caller_directory(self):
+        from catalog import registry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "noisy.py"
+            script.write_text(
+                "import pathlib, sys\n"
+                "if '--help' in sys.argv:\n"
+                "    pathlib.Path(sys.argv[1]).mkdir(exist_ok=True)\n"
+                "print('usage: noisy [-h]')\n",
+                encoding="utf-8",
+            )
+            registry.extract_contract(script)
+            self.assertFalse((Path(tmp) / "--help").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

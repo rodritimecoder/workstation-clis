@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -521,10 +522,15 @@ def extract_contract(path: Path, timeout: float = 12.0,
             cmd = [interp, str(path)] + list(args or []) + ["--help"]
         else:
             cmd = [str(path)] + list(args or []) + ["--help"]
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL,
-        )
+        # Run in a scratch directory. A script whose first positional is a
+        # workspace will treat "--help" as one and create it; inheriting the
+        # caller's cwd drops that directory into whatever repo omnicli was
+        # invoked from.
+        with tempfile.TemporaryDirectory(prefix="omnicli-contract-") as scratch:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout,
+                stdin=subprocess.DEVNULL, cwd=scratch,
+            )
         out = (proc.stdout or "") + (proc.stderr or "")
     except subprocess.TimeoutExpired:
         out = ""
