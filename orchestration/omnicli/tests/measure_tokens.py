@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 DRIVE = Path("/run/media/rodri/AI")
-OMNICLI = DRIVE / "skills/archived/omnicli"
+OMNICLI = DRIVE / "skills/orchestration/omnicli"
 SKILLS_DIR = DRIVE / "skills"
 TOKENIZER = DRIVE / "models/perplexity-ai/pplx-decider-flash-v1.2"
 

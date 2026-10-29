@@ -689,5 +689,25 @@
       "cdp browser control",
       "playwright"
     ]
+  },
+  "omnicli": {
+    "aliases": [
+      "tool registry",
+      "find a tool",
+      "search skills",
+      "run a skill",
+      "gateway",
+      "omnicli",
+      "discover a tool",
+      "tool contract",
+      "what can this machine do",
+      "list my tools"
+    ],
+    "tags": [
+      "gateway",
+      "discovery"
+    ],
+    "index_body": false,
+    "index_tools": false
   }
 }

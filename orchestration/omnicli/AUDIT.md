@@ -1,6 +1,6 @@
 # omnicli audit — 2026-10-23
 
-Scope: `archived/omnicli` at commit `3268926`, both faces (CLI and MCP), the
+Scope: `orchestration/omnicli` at commit `3268926`, both faces (CLI and MCP), the
 catalog, the tests, and the documentation. Every finding below was reproduced
 with a command before it was fixed, and every fix was re-measured afterwards.
 

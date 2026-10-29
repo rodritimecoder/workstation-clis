@@ -1,8 +1,7 @@
 ---
 name: omnicli
 
-description: "On-demand gateway to every tool on this workstation — the index behind the shelf, not a front line. Find the right tool by intent with BM25 full-body search over all skill bodies, pull one tool's exact contract, and invoke it with a bounded response. Also fronts the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). Installed, supported and used directly; `status: archived` only keeps it out of automatic harness discovery and out of the published bundles, because the plain Agent Skills shelf is the default front line."
-status: archived
+description: "Late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skill bodies, pull one tool's exact contract, invoke it with a bounded response, or run a whole multi-step plan in a sandbox. Also fronts the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). First-class skill since 2026-10-30; the routing layer hovers above the shelf rather than replacing it."
 
 compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085, plus the optional embedding server :8087 used to re-rank search results (the catalog works without it). The decision port speaks either native /v1/systemone or the pplx-decider joint protocol v3; the protocol is auto-detected from the served model."
 allowed-tools: "Bash(omnicli:*) Read"
@@ -10,16 +9,16 @@ allowed-tools: "Bash(omnicli:*) Read"
 
 # `omnicli` — The Uber OmniCLI
 
-> **On demand, not a front line.** Since 2026-10-20 harnesses discover the
-> plain Agent Skills shelf first, so this skill is not auto-routed and is not
-> published to the bundles. It is installed (`~/.local/bin/omnicli`),
-> supported, and called directly whenever the shelf is ambiguous; select
-> gateway mode instead and it *becomes* the front line. The mode is a one-line
-> state file (`~/.config/skills-frontline`) that `sync-skills` reads; there is
-> no `skills-frontline` command. It remains the only thing that can answer
-> "which of the 433 catalogued tools does this intent want". The two front
-> lines were compared on 61 golden routing queries with the same model picking
-> both ways — shelf 54/61, gateway 60/61. See
+> **First-class since 2026-10-30.** It was retired as a *front line* on
+> 2026-10-20 so harnesses could discover plain Agent Skills first, then
+> restored as a normal skill once the executor made it worth its turn-0
+> tokens. The binary is installed (`~/.local/bin/omnicli`), and `omnicli exec`
+> runs a whole plan in one turn. It remains the only thing that can answer
+> "which of the 474 catalogued tools does this intent want". On 61 golden
+> routing queries with the same model picking both ways — shelf 54/61,
+> gateway 60/61 top-1 and 61/61 in the top three. Gateway mode still exists as
+> a one-line state file (`~/.config/skills-frontline`) that `sync-skills`
+> reads; there is no `skills-frontline` command. See
 > `docs/front-line-shelf-vs-gateway.md` in the canonical repository.
 
 One gateway, two faces, one catalog. An agent discovers a tool by *intent*,
@@ -38,7 +37,7 @@ Nothing else enters the context window.
                         └───────────────┬───────────────┘
                                         │
                         ┌───────────────▼───────────────┐
-                        │  433 tools  (data plane)       │
+                        │  474 tools  (data plane)       │
                         │  scripts · CLIs · endpoints    │
                         └───────────────────────────────┘
 ```
@@ -94,7 +93,7 @@ still returns their contract, and `omnicli invoke` refuses them with the exact
 command that would open the gate:
 
 ```bash
-omnicli policy            # 367/433 enabled, plus the recent decisions
+omnicli policy            # 367/474 enabled, plus the recent decisions
 omnicli enable <tool_id>  # record the decision against the contract hash
 omnicli disable <tool_id>
 ```

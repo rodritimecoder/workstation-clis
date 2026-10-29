@@ -322,6 +322,14 @@ def build(
     """(Re)build the catalog. Returns a summary dict."""
     skills = registry.load_all_skills(include_sidelined=include_sidelined)
     aliases_cfg = load_aliases()
+    # A router skill's own scripts describe the endpoints it fronts, so their
+    # contracts duplicate the vocabulary of the skills they route to. Indexing
+    # them makes the router out-rank the specialist ("use the local llm to
+    # write a script" -> omnicli instead of local-llm). Registration stays;
+    # only the searchable contract text is withheld.
+    no_tool_docs = {
+        name for name, meta in aliases_cfg.items() if meta.get("index_tools") is False
+    }
 
     now = time.time()
     _ensure_docs_schema(con)
@@ -538,7 +546,7 @@ def build(
 
     # script contracts as searchable documents
     for tool_id, skill, kind, summary, path, argv, contract_json, parent, _enabled, _ in tool_rows:
-        if kind != "script" or not path:
+        if kind != "script" or not path or skill in no_tool_docs:
             continue
         try:
             contract = json.loads(contract_json)
@@ -571,7 +579,10 @@ def build(
     meta_set(con, "built_at", str(now))
     meta_set(con, "schema_version", SCHEMA_VERSION)
     meta_set(con, "skill_count", str(len(skills)))
-    meta_set(con, "tool_count", str(len(tool_rows)))
+    # Count what actually landed in the table. A subcommand id that collides
+    # with another tool is silently replaced by INSERT OR REPLACE, so
+    # len(tool_rows) can claim a tool the catalog does not have.
+    meta_set(con, "tool_count", str(con.execute("SELECT count(*) FROM tools").fetchone()[0]))
     meta_set(con, "doc_count", str(len(doc_rows)))
     con.commit()
 

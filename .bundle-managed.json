@@ -1,6 +1,5 @@
 {
   "managed": [
-    "archived/omnicli",
     "audiocpp",
     "gh-action-subagent",
     "github-architect",
@@ -13,6 +12,7 @@
     "nvidia-nim",
     "ocr",
     "openrouter-free",
+    "orchestration/omnicli",
     "playwright",
     "review-hub",
     "subagent-spaces",
