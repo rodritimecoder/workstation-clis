@@ -162,8 +162,8 @@ def staged_subject(repo: str = None, prefix: str = "chore") -> str:
 
     Derived from the diff rather than from a clock: a timestamp already lives
     in the commit object, and a fixed template leaves `git log` unsearchable.
-    The subject already carries the scope, the file count and the delta, so a
-    file manifest underneath it would only repeat it.
+    The subject carries the scope, the file count and the delta; the paths
+    themselves go in the body written by `compose_message`.
     """
     changes = staged_changes(repo)
     if not changes:
@@ -182,20 +182,43 @@ CONVENTIONAL_SUBJECT = re.compile(
 )
 
 
+def _manifest(changes: list[dict]) -> str:
+    """The paths the subject only counted, one bullet each.
+
+    A subject says "6 files (+19/-5)"; it never says which six. The manifest
+    is the part `git log --oneline` compresses away and a reader needs when
+    scanning history outside GitHub's changed-files view. A single-file
+    commit already names its file in the subject, so it gets no manifest.
+    """
+    if len(changes) < 2:
+        return ""
+    return "\n".join(
+        f"- {c['path']} ({_delta(c['added'], c['removed'], c['binary'])})"
+        for c in sorted(changes, key=lambda c: c["path"])
+    )
+
+
 def compose_message(repo: str = None, message: str = None, prefix: str = "chore") -> str:
     """The one commit shape every entry point emits.
 
     A supplied message that opens with a conventional header (`type(scopes):
     what changed`) is the whole commit: the author already named what moved,
-    so a diff-derived subject and a file manifest would only talk over them.
-    Without such a header the diff names the subject and the message is prose
-    underneath it, and a commit with no message at all is the subject alone.
+    so a generated subject and manifest would talk over them. Without such a
+    header the diff names the subject, the author's prose (if any) sits
+    underneath it, and a multi-file manifest lists exactly which paths the
+    subject's counts cover.
     """
     prose = (message or "").strip()
     if prose and CONVENTIONAL_SUBJECT.match(prose):
         return prose
     subject = staged_subject(repo, prefix)
-    return subject + "\n\n" + prose if prose else subject
+    parts = [subject]
+    if prose:
+        parts.append(prose)
+    manifest = _manifest(staged_changes(repo))
+    if manifest:
+        parts.append(manifest)
+    return "\n\n".join(parts)
 
 
 def stage1_look() -> dict:

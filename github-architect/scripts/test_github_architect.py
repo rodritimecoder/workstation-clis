@@ -324,13 +324,25 @@ class TestCommitMessage(unittest.TestCase):
         self.assertIn("(academic-pipeline-v2, canvas-cli +1)", subject)
         self.assertIn("3 files", subject)
 
-    def test_subject_is_the_whole_message_when_no_prose_is_supplied(self):
+    def test_no_prose_gets_a_manifest_below_the_subject(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
         self.run("add", "-A")
         message = git_sync.compose_message(str(self.repo), None)
-        self.assertNotIn("\n", message)
-        self.assertNotIn("principles/code-decides.md", message)
+        subject, manifest = message.split("\n\n")
+        self.assertEqual(subject, git_sync.staged_subject(str(self.repo)))
+        self.assertIn("- glitch-cat/kem-thought/SKILL.md (+1/-0)", manifest)
+        self.assertIn("- glitch-cat/kem-thought/principles/code-decides.md (+1/-0)", manifest)
+
+    def test_prose_sits_between_subject_and_manifest(self):
+        self.write("glitch-cat/kem-thought/SKILL.md")
+        self.write("glitch-cat/kem-thought/principles/code-decides.md")
+        self.run("add", "-A")
+        message = git_sync.compose_message(str(self.repo), "Say why this moved.")
+        subject, prose, manifest = message.split("\n\n")
+        self.assertEqual(subject, git_sync.staged_subject(str(self.repo)))
+        self.assertEqual(prose, "Say why this moved.")
+        self.assertIn("principles/code-decides.md", manifest)
 
     def test_subject_stays_within_the_console_width(self):
         for i in range(6):
@@ -388,13 +400,14 @@ class TestCommitMessage(unittest.TestCase):
         self.assertEqual(body, "Name the principle in the skill body so the gate can cite it.")
         self.assertNotIn("code-decides.md", body)
 
-    def test_body_is_exactly_the_prose_under_the_subject(self):
+    def test_body_is_the_prose_then_the_manifest(self):
         self.write("glitch-cat/kem-thought/SKILL.md")
         self.write("glitch-cat/kem-thought/principles/code-decides.md")
         git_sync.guarded_commit(str(self.repo), "State the convention that code decides.")
         body = self.run("log", "-1", "--format=%b").stdout.strip()
-        self.assertEqual(body, "State the convention that code decides.")
-        self.assertNotIn("principles/code-decides.md", body)
+        prose, manifest = body.split("\n\n")
+        self.assertEqual(prose, "State the convention that code decides.")
+        self.assertIn("principles/code-decides.md", manifest)
 
     def test_secret_in_a_new_directory_is_blocked(self):
         self.write("academic/new-skill/scripts/config.py", TestPublicationGuard.FAKE_PAT + "\n")
@@ -445,7 +458,7 @@ class TestCommitComposition(unittest.TestCase):
         (self.repo / "glitch-cat" / "kem-thought" / "SKILL.md").write_text("x\n", encoding="utf-8")
         run("add", "-A")
 
-    def test_prose_sits_under_the_subject_and_nothing_follows_it(self):
+    def test_single_file_prose_has_no_manifest(self):
         message = git_sync.compose_message(str(self.repo), "Say why this moved.")
         self.assertEqual(message, "chore(kem-thought): SKILL.md (+1/-0)\n\nSay why this moved.")
 
