@@ -58,11 +58,12 @@
     },
     {
       "query": "browse a website and take a screenshot",
-      "top1": "hybrid-browser",
+      "top1": "playwright",
       "expect": [
-        "hybrid-browser"
+        "playwright"
       ],
-      "kind": "drift"
+      "kind": "drift",
+      "note": "hybrid-browser retired 2026-10; playwright is the browser-control successor"
     },
     {
       "query": "convert a PDF into markdown",

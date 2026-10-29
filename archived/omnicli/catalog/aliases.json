@@ -1,29 +1,4 @@
 {
-  "omnicli": {
-    "aliases": [
-      "tool registry",
-      "find a tool",
-      "search skills",
-      "run a skill",
-      "gateway",
-      "omnicli",
-      "discover a tool",
-      "tool contract",
-      "what can this machine do",
-      "list my tools",
-      "llm",
-      "use the local llm",
-      "llm client",
-      "local llm completion",
-      "use the local llm to write code",
-      "local llm code generation"
-    ],
-    "tags": [
-      "gateway",
-      "discovery"
-    ],
-    "index_body": false
-  },
   "local": {
     "aliases": [
       "llm",
@@ -246,9 +221,11 @@
       "quality gate before push",
       "rebase my branch before pushing",
       "no secrets get committed",
-      "make sure no secrets get committed",
       "block secrets from a commit",
-      "prevent a token leak"
+      "prevent a token leak",
+      "secret scanning before a push",
+      "committed credentials",
+      "guard the commit against secrets"
     ],
     "tags": [
       "git",
@@ -289,26 +266,6 @@
     "tags": [
       "safety",
       "guardrails"
-    ]
-  },
-  "hybrid-browser": {
-    "aliases": [
-      "browse the web",
-      "browser automation",
-      "open a website",
-      "screenshot of page",
-      "navigate",
-      "click button",
-      "fill form",
-      "web scraping with js",
-      "accessibility tree",
-      "keyboard input",
-      "verify a page renders"
-    ],
-    "tags": [
-      "browser",
-      "automation",
-      "web"
     ]
   },
   "icm-architect": {
@@ -456,7 +413,6 @@
       "quality rules",
       "rules before pushing code",
       "pre push review",
-      "what rules should i follow before pushing code",
       "code review before commit"
     ],
     "tags": [
@@ -555,22 +511,6 @@
       "media"
     ]
   },
-  "skill-factory": {
-    "aliases": [
-      "make a skill",
-      "author a skill",
-      "skill authoring",
-      "retrofit a skill",
-      "skill generator",
-      "write a skill for this cli",
-      "token lean skill"
-    ],
-    "tags": [
-      "authoring",
-      "meta"
-    ],
-    "index_body": false
-  },
   "eval-pipeline": {
     "aliases": [
       "step risk tagging",
@@ -600,7 +540,6 @@
       "dispatch to a cheaper tier",
       "self calibrating router",
       "route this prompt to the right model",
-      "which model should handle this prompt",
       "decide which model should answer",
       "choose the model for this prompt",
       "model routing decision"
@@ -735,6 +674,20 @@
       "walk the login flow",
       "interact with the page",
       "click the right button"
+    ]
+  },
+  "playwright": {
+    "aliases": [
+      "browse a website",
+      "browse a web page",
+      "take a screenshot of a website",
+      "screenshot a web page",
+      "open a url and take a screenshot",
+      "browser automation",
+      "drive a browser",
+      "capture a screenshot of a page",
+      "cdp browser control",
+      "playwright"
     ]
   }
 }
