@@ -1,0 +1,60 @@
+{
+  "stage": 5,
+  "stage_name": "verify",
+  "step_type": "P",
+  "status": "failed",
+  "started_at": "2026-10-29T17:31:43.606363+00:00",
+  "finished_at": "2026-10-29T17:31:43.606441+00:00",
+  "inputs": {
+    "workspace": "/home/rodri/src/my-agent-skills/archived/omnicli/--help"
+  },
+  "outputs": [],
+  "evidence": [
+    "gate1_assets: failed - no meta.json found in workspace",
+    "gate2_sift: failed - 02_sift/ is missing",
+    "gate3_okf: failed - no 03_structure/<course>/ directory",
+    "gate4_render: failed - 04_render/ is missing",
+    "gate5_judge: skipped - missing dependency: no fresh-context judge provided (deps['judge'] is absent)",
+    "gates: gate1_assets=failed, gate2_sift=failed, gate3_okf=failed, gate4_render=failed, gate5_judge=skipped"
+  ],
+  "errors": [
+    "gate5_judge: skipped - missing dependency: no fresh-context judge provided (deps['judge'] is absent)"
+  ],
+  "gates": [
+    {
+      "gate": "gate1_assets",
+      "status": "failed",
+      "evidence": [
+        "gate1_assets: failed - no meta.json found in workspace"
+      ]
+    },
+    {
+      "gate": "gate2_sift",
+      "status": "failed",
+      "evidence": [
+        "gate2_sift: failed - 02_sift/ is missing"
+      ]
+    },
+    {
+      "gate": "gate3_okf",
+      "status": "failed",
+      "evidence": [
+        "gate3_okf: failed - no 03_structure/<course>/ directory"
+      ]
+    },
+    {
+      "gate": "gate4_render",
+      "status": "failed",
+      "evidence": [
+        "gate4_render: failed - 04_render/ is missing"
+      ]
+    },
+    {
+      "gate": "gate5_judge",
+      "status": "skipped",
+      "evidence": [
+        "gate5_judge: skipped - missing dependency: no fresh-context judge provided (deps['judge'] is absent)"
+      ]
+    }
+  ]
+}

@@ -244,7 +244,11 @@
       "multi repo",
       "commit without a blanket git add",
       "quality gate before push",
-      "rebase my branch before pushing"
+      "rebase my branch before pushing",
+      "no secrets get committed",
+      "make sure no secrets get committed",
+      "block secrets from a commit",
+      "prevent a token leak"
     ],
     "tags": [
       "git",
@@ -449,7 +453,11 @@
       "review my diff",
       "audit my code",
       "pre commit review",
-      "quality rules"
+      "quality rules",
+      "rules before pushing code",
+      "pre push review",
+      "what rules should i follow before pushing code",
+      "code review before commit"
     ],
     "tags": [
       "code",
@@ -591,7 +599,11 @@
       "harvest failures",
       "dispatch to a cheaper tier",
       "self calibrating router",
-      "route this prompt to the right model"
+      "route this prompt to the right model",
+      "which model should handle this prompt",
+      "decide which model should answer",
+      "choose the model for this prompt",
+      "model routing decision"
     ],
     "tags": [
       "routing",
@@ -693,6 +705,36 @@
       "budget",
       "governance",
       "workers"
+    ]
+  },
+  "verification": {
+    "aliases": [
+      "verify a ui change",
+      "prove the ui change works",
+      "check the console for errors",
+      "before and after screenshots",
+      "does the button actually work",
+      "browser verification",
+      "check for failed requests",
+      "confirm the app still works",
+      "hands and eyes verification",
+      "verify a frontend change",
+      "check the page for errors",
+      "prove it works in the browser"
+    ]
+  },
+  "frontend-uat": {
+    "aliases": [
+      "click through the app",
+      "browser journey test",
+      "uat",
+      "drive the page by intent",
+      "click a target by intent",
+      "sub second browser test",
+      "test the checkout flow",
+      "walk the login flow",
+      "interact with the page",
+      "click the right button"
     ]
   }
 }

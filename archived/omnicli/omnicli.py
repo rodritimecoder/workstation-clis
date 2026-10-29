@@ -42,9 +42,10 @@ sys.path.insert(0, str(SKILL_DIR))
 
 try:
     from catalog import aliases as aliases_mod
+    from catalog import bindings as bindings_mod
     from catalog import builder, health, invoke, policy, registry, search  # noqa: E402
 except ImportError:  # pragma: no cover - degraded install
-    aliases_mod = None
+    aliases_mod = bindings_mod = None
     builder = registry = search = health = invoke = policy = None  # type: ignore
 
 # The response cap. An agent must never be able to pull an unbounded payload
@@ -75,6 +76,10 @@ def _require_catalog():
     if builder is None:
         sys.exit("❌ Error: omnicli catalog package not importable from %s" % SKILL_DIR)
     con = builder.connect()
+    if os.environ.get("OMNICLI_TRUST_INDEX"):
+        row = con.execute("SELECT count(*) FROM tools").fetchone()
+        if row and row[0]:
+            return con
     builder.ensure_built(con, progress=False)
     return con
 
@@ -817,6 +822,127 @@ def cmd_mcp(as_json: bool = False):
 
 
 # --------------------------------------------------------------------------
+# exec / bindings
+# --------------------------------------------------------------------------
+
+def _bwrap_works() -> bool:
+    exe = shutil.which("bwrap")
+    if not exe:
+        return False
+    try:
+        probe = subprocess.run([exe, "--ro-bind", "/", "/", "true"],
+                               capture_output=True, timeout=5)
+        return probe.returncode == 0
+    except Exception:
+        return False
+
+
+def cmd_bindings(out_dir: str | None = None, as_json: bool = False):
+    con = _require_catalog()
+    if builder is None or bindings_mod is None:
+        sys.exit("❌ Error: omnicli catalog package not importable.")
+    built = builder.ensure_built(con, progress=False)
+    fingerprint = builder.meta_get(con, "fingerprint", "")
+    target = bindings_mod.write(con, Path(out_dir) if out_dir else None)
+    if not out_dir:
+        target = bindings_mod.ensure(con, fingerprint, target)
+    payload = {
+        "dir": str(target),
+        "module": str(target / "omnicli_tools.py"),
+        "tools": built.get("tools"),
+        "skills": built.get("skills"),
+        "fingerprint": fingerprint,
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"🐍 Bindings written to {payload['module']}")
+        print(f"   {payload['tools']} tools · {payload['skills']} skills · fingerprint {fingerprint[:12]}")
+
+
+def cmd_exec(script: str, workspace: str | None = None, out_path: str | None = None,
+             no_sandbox: bool = False, timeout: float = 300.0, as_json: bool = False):
+    con = _require_catalog()
+    if builder is None or bindings_mod is None:
+        sys.exit("❌ Error: omnicli catalog package not importable.")
+
+    script_path = Path(script).resolve()
+    if not script_path.is_file():
+        sys.exit(f"❌ Error: no plan script at {script_path}")
+
+    built = builder.ensure_built(con, progress=False)
+    fingerprint = builder.meta_get(con, "fingerprint", "")
+    bindings_dir = bindings_mod.ensure(con, fingerprint)
+
+    work = Path(workspace).resolve() if workspace else script_path.parent
+    if not work.is_dir():
+        sys.exit(f"❌ Error: workspace {work} is not a directory")
+
+    trace = work / ".omnicli_trace.jsonl"
+    if trace.exists():
+        trace.unlink()
+
+    binary = shutil.which("omnicli") or str(SCRIPT_PATH)
+    env = os.environ.copy()
+    env["OMNICLI_BIN"] = binary
+    env["OMNICLI_TRACE"] = str(trace)
+    env["OMNICLI_TRUST_INDEX"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONPATH"] = str(bindings_dir) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+    cmd = [sys.executable, str(script_path)]
+    sandboxed = (not no_sandbox) and _bwrap_works()
+    if sandboxed:
+        # Writes land only in the workspace and a private /tmp. Network stays
+        # up on purpose: the tools this fronts are local inference servers on
+        # loopback, and a netns would cut the 8080/8083 endpoints a plan needs.
+        cmd = [
+            "bwrap", "--die-with-parent", "--unshare-pid", "--unshare-ipc",
+            "--unshare-uts", "--ro-bind", "/", "/", "--tmpfs", "/tmp",
+            "--dev", "/dev", "--proc", "/proc",
+            "--bind", str(work), str(work), "--chdir", str(work),
+            "--setenv", "HOME", str(work),
+        ] + cmd
+
+    started = time.time()
+    try:
+        proc = subprocess.run(cmd, cwd=str(work), env=env, capture_output=True,
+                              text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"❌ Error: plan exceeded {timeout:g}s")
+    elapsed = time.time() - started
+
+    calls = 0
+    if trace.is_file():
+        calls = sum(1 for line in trace.read_text(encoding="utf-8").splitlines() if line.strip())
+
+    if out_path:
+        target = Path(out_path).resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(proc.stdout, encoding="utf-8")
+
+    if as_json:
+        print(json.dumps({
+            "plan": str(script_path),
+            "sandboxed": sandboxed,
+            "exit_code": proc.returncode,
+            "seconds": round(elapsed, 3),
+            "tool_calls": calls,
+            "tools": built.get("tools"),
+            "stdout": proc.stdout,
+            "stderr": proc.stderr[-2000:],
+        }, indent=2))
+    else:
+        sys.stdout.write(proc.stdout)
+        if proc.stderr:
+            sys.stderr.write(proc.stderr if proc.stderr.endswith("\n") else proc.stderr + "\n")
+        print(f"🐍 [exec] {calls} tool call(s) in one turn · {elapsed:.2f}s · "
+              f"sandbox={'bwrap' if sandboxed else 'none'}", file=sys.stderr)
+    sys.exit(proc.returncode)
+
+
+# --------------------------------------------------------------------------
 # compat
 # --------------------------------------------------------------------------
 
@@ -1009,6 +1135,19 @@ def main():
                    help="re-ranker mode used during the eval (default: never; the "
                         "catalog's own default is auto)")
 
+    p = sub.add_parser("bindings", help="Write the Python bindings used by `omnicli exec`")
+    p.add_argument("--out", default=None, help="Output directory (default ~/.local/share/omnicli/bindings)")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("exec", aliases=["plan"],
+                       help="Run one plan script with tool bindings, in a sandbox")
+    p.add_argument("script", help="Path to the Python plan")
+    p.add_argument("--workspace", default=None, help="Writable directory (default: the script's folder)")
+    p.add_argument("--out", default=None, help="Also write the plan's stdout to this file")
+    p.add_argument("--no-sandbox", action="store_true", help="Run without bubblewrap (not recommended)")
+    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument("--json", action="store_true")
+
     sub.add_parser("mcp", help="Run the MCP stdio server (4 meta-tools)")
 
     p = sub.add_parser("status", help="Health of every local service, the catalog, and the retrieval tier")
@@ -1065,6 +1204,11 @@ def main():
                   remove=args.remove, show_all=args.list, as_json=args.json)
     elif args.action == "eval":
         cmd_eval(verbose=args.verbose, as_json=args.json, rerank=args.rerank)
+    elif args.action == "bindings":
+        cmd_bindings(out_dir=args.out, as_json=args.json)
+    elif args.action in ("exec", "plan"):
+        cmd_exec(args.script, workspace=args.workspace, out_path=args.out,
+                 no_sandbox=args.no_sandbox, timeout=args.timeout, as_json=args.json)
     elif args.action == "mcp":
         cmd_mcp()
     elif args.action in ("status", "health"):

@@ -174,6 +174,42 @@ Unknown `--omni-*` flags are reported instead of silently dropped.
 
 ---
 
+## 🐍 One plan, one turn — `omnicli exec`
+
+Step 3 is one tool call per turn. When a job has several steps, write one
+Python plan instead: the intermediates stay in variables and only what you
+print comes back.
+
+```bash
+omnicli bindings            # writes ~/.local/share/omnicli/bindings/omnicli_tools.py
+omnicli exec plan.py        # runs it in bubblewrap; prints only the plan's stdout
+```
+
+```python
+from omnicli_tools import search, describe, invoke
+
+rows = search("audio transcription", limit=3)      # discovery inside the plan
+tool = f"{rows[0]['skill']}/scripts/audiocpp_cli"
+print(describe(tool)["enabled"])                  # contract never enters context
+
+transcript = invoke(tool, "asr", "talk.wav")      # result stays in a variable
+print(transcript["output"][:200])                 # only this reaches the model
+```
+
+| Property | Behaviour |
+|---|---|
+| **Policy** | every call shells out to `omnicli invoke`, so the enable gate, projection and 8 KB cap still apply |
+| **Discovery** | `search()` and `describe()` are callable *inside* the plan — definitions never enter the window |
+| **Isolation** | bubblewrap: writes land only in the workspace and an ephemeral `/tmp`; `/` is read-only |
+| **Network** | stays up on purpose — the tools this fronts are loopback inference servers (`:8080`, `:8083`, …), and a netns would cut them |
+| **Trace** | each call appends to `.omnicli_trace.jsonl`; `exec --json` reports `tool_calls`, seconds and bytes |
+| **Escape hatch** | `--no-sandbox` runs unsandboxed; `--workspace DIR` chooses the writable root |
+
+Token arithmetic: a 9-step job becomes **one** model turn. The plan's own
+reads and writes never cross the boundary.
+
+---
+
 ## 🔌 Face B — the MCP server
 
 ```bash
