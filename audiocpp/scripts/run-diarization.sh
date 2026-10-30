@@ -19,6 +19,11 @@
 
 set -uo pipefail
 
+# Needed only by the HIP/ROCm build of audiocpp_cli, which links the ROCm SDK
+# from /opt/rocm/lib (not in ldconfig). Harmless for the Vulkan build.
+_rocm_lib="${ROCM_LIB_DIR:-/opt/rocm/lib}"
+[ -d "$_rocm_lib" ] && export LD_LIBRARY_PATH="${_rocm_lib}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 CLI="${AUDIOCPP_CLI:-/run/media/rodri/AI/audio.cpp/audiocpp_cli}"
 MODEL_DIR="${DIAR_MODEL_DIR:-/run/media/rodri/AI/models/audio-cpp/audio.cpp-gguf/Nemotron-3-Diarization-GGUF}"
 HF_REPO="audio-cpp/Nemotron-3-Diarization-GGUF"
@@ -50,7 +55,7 @@ Options:
   --map 0=Kem,1=Chase   explicit id→name overrides, wins over --names
   --out DIR             output root (default: alongside each input)
   --precision bf16|q8_0 bf16 is parity-safe (default); q8_0 may shift boundaries
-  --backend NAME        cpu|vulkan|cuda|metal (default: vulkan)
+  --backend NAME        cpu|hip|rocm|vulkan|cuda|metal (default: vulkan)
   --threads N           backend threads (default: 8)
   --latency-profile P   very_high|low|very_low|ultra_low|asr_la0..asr_la13
   --threshold F         speaker activity threshold 0..1 (default: model, 0.5)

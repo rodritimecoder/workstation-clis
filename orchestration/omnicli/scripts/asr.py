@@ -42,12 +42,11 @@ MODEL = os.environ.get("AUDIOCPP_ASR_MODEL", "crisperwhisper")
 FAMILY = os.environ.get("AUDIOCPP_ASR_FAMILY", "crisperwhisper")
 LANGUAGE = os.environ.get("AUDIOCPP_ASR_LANGUAGE", "en")
 # audiocpp_cli lives beside server.json; it needs no server and runs offline mode.
-# audio.cpp v0.9.2 layout: audiocpp_cli / server.json / model_specs/ sit together
+# audio.cpp v0.9.3 layout: audiocpp_cli / server.json / model_specs/ sit together
 _APP_CANDIDATES = [
     os.environ.get("AUDIOCPP_APP_DIR"),
     "/run/media/rodri/AI/audio.cpp",
-    "/run/media/rodri/AI/audio-v0.9.2-bin-ubuntu-x64-vulkan",
-    "/run/media/rodri/AI/audio-v0.9.0-bin-ubuntu-x64-vulkan",
+    "/home/rodri/audio-v0.9.3-bin-ubuntu-x64-vulkan",
     "~/audio-v0.9.0-cpu",
     "~/Desktop/audio-v0.8.2-audio8-perf-hotfix-bin-ubuntu-x64-vulkan",
 ]

@@ -14,7 +14,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 <!-- ports:begin -->
 | Port | Slot | Cardinality | Default model | Launcher | Role |
 |---|---|---|---|---|---|
-| `:8080` | `llm` | many (9) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
+| `:8080` | `llm` | many (11) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
 | `:8081` | `audio` | many (3) | nemotron-asr | `run-audiocpp.sh` | Speech-to-text, text-to-speech, forced alignment, voice cloning |
 | `:8083` | `decision` | one-of-many (5) | h2o-lightning-4b | `h2o.sh` | The decision engine slot - bool / choice / score primitives |
 | `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint |
@@ -65,6 +65,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | **`vllm.sh`** | Interactive vLLM ROCm container (a tool, not a service slot) |
 | **`bench-ttq-iq4nl.sh`** | Vulkan pp2048/tg128 benchmark for Qwen3.6-35B TTQ IQ4_NL |
 | **`bench-luffy-q4km.sh`** / **`bench-luffy-q4-rocmfp4.sh`** | Benchmarks comparing Q4_K_M vs ROCm FP4 on RX 9060 XT |
+| **`bench-qwen36-dflash2-ngram.sh`** | Qwen3.6-35B-A3B speculative benchmark: baseline, DFlash2, 15 n-gram settings and n-gram+DFlash hybrids; records prefill, generation and acceptance |
 | **`bench-gemma-vulkan.sh`** / **`bench-gemma-rocm.sh`** | Benchmarks comparing Vulkan vs ROCm on Gemma models |
 
 `archived/` holds retired launchers kept for reference: the `JPT-4B`,

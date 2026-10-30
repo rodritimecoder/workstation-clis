@@ -41,18 +41,34 @@ CLI_BIN = AUDIO_CPP_DIR / "audiocpp_cli"
 SERVER_BIN = AUDIO_CPP_DIR / "audiocpp_server"
 CONFIG_FILE = AUDIO_CPP_DIR / "server.json"
 
+# The HIP/ROCm build links libamdhip64/libhipblas/libhipblaslt from the ROCm
+# SDK; the system install at /opt/rocm/lib is not in the ldconfig cache. The
+# Vulkan build does not need this, and the loader ignores what nothing links.
+BACKEND = os.environ.get("AUDIOCPP_BACKEND", "vulkan")
+ROCM_LIB_DIR = Path(os.environ.get("ROCM_LIB_DIR", "/opt/rocm/lib"))
+
+
+def _loader_env() -> Dict[str, str]:
+    env = dict(os.environ)
+    if ROCM_LIB_DIR.is_dir():
+        prev = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = f"{ROCM_LIB_DIR}{os.pathsep}{prev}" if prev else str(ROCM_LIB_DIR)
+    return env
+
 MODEL_REGISTRY = {
     # ASR Models
     "nemotron": {
         "family": "nemotron_asr",
         "task": "asr",
         "path": MODELS_DIR / "nemotron-3.5-asr-streaming-0.6b-q8_0.gguf",
+        "server_id": "nemotron-asr",
         "desc": "Nemotron-3.5-ASR 0.6B Q8_0 (62.9x real-time)",
     },
     "nemotron-f16": {
         "family": "nemotron_asr",
         "task": "asr",
         "path": MODELS_DIR / "nemotron-3.5-asr-streaming-0.6b-f16.gguf",
+        "server_id": "nemotron-asr-f16",
         "desc": "Nemotron-3.5-ASR 0.6B F16 (59.0x real-time)",
     },
     "crisperwhisper": {
@@ -85,18 +101,21 @@ MODEL_REGISTRY = {
         "family": "fish_audio",
         "task": "tts",
         "path": MODELS_DIR / "fish-audio-s2-pro-q4_k.gguf",
+        "server_id": "fish-s2-pro",
         "desc": "Fish Audio S2 Pro Q4_K (Real-Time Voice Clone)",
     },
     "audio8": {
         "family": "audio8_tts",
         "task": "tts",
         "path": MODELS_DIR / "audio8-tts-preview-0.6b-q8_0.gguf",
+        "server_id": "audio8-tts",
         "desc": "Audio8 Preview 0.6B Q8_0 (Voice Clone)",
     },
     "higgs": {
         "family": "higgs_audio_tts",
         "task": "tts",
         "path": MODELS_DIR / "higgs-audio-v3-tts-4b-q8_0.gguf",
+        "server_id": "higgs-tts",
         "desc": "Higgs Audio v3 4B Q8_0 (2.25x real-time flagship)",
     },
     "omnivoice": {
@@ -109,6 +128,7 @@ MODEL_REGISTRY = {
         "family": "index_tts2",
         "task": "tts",
         "path": MODELS_DIR / "index-tts2_5-q8_0.gguf",
+        "server_id": "index-tts2",
         "desc": "Index-TTS 2.5 Q8_0 (Voice Clone)",
     },
     # Aligner
@@ -148,7 +168,7 @@ def run_audiocpp_raw(args_list: List[str]) -> subprocess.CompletedProcess:
     if not CLI_BIN.is_file():
         sys.exit(f"❌ Error: audio.cpp CLI binary not found at {CLI_BIN}")
     cmd = [str(CLI_BIN)] + args_list
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True, env=_loader_env())
 
 
 def cmd_transcribe_http(
@@ -172,8 +192,9 @@ def cmd_transcribe_http(
 
     audio_bytes = p.read_bytes()
     boundary = "----WebKitFormBoundary" + uuid.uuid4().hex
+    server_id = MODEL_REGISTRY.get(model_key, {}).get("server_id", model_key)
     body_parts = [
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model_key}\r\n".encode("utf-8"),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{server_id}\r\n".encode("utf-8"),
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{language}\r\n".encode("utf-8"),
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{p.name}\"\r\nContent-Type: audio/wav\r\n\r\n".encode("utf-8"),
         audio_bytes,
@@ -262,7 +283,7 @@ def cmd_speak_http(
         v_id = "af_bella"
 
     payload: Dict[str, Any] = {
-        "model": model_key,
+        "model": MODEL_REGISTRY.get(model_key, {}).get("server_id", model_key),
         "input": text,
     }
     if v_id:
@@ -367,16 +388,16 @@ def cmd_doctor_http(host: str, port: int, scheme: str, ssl_ctx: ssl.SSLContext, 
             "status": "online",
             "remote": True,
             "host": f"{scheme}://{host}:{port}",
-            "backend": data.get("backend", "vulkan"),
+            "backend": data.get("backend", BACKEND),
             "models_total": data.get("models", 15),
-            "vulkan_ready": data.get("backend") == "vulkan",
+            "gpu_ready": data.get("backend") in ("hip", "rocm", "vulkan", "cuda", "metal"),
         }
         print(json.dumps(doc, indent=2))
         return
 
     print(f"🔍 [audiocpp] Remote Diagnostic Health Check ({scheme}://{host}:{port})")
     print(f"  Status:       🟢 ONLINE")
-    print(f"  Backend:      {data.get('backend', 'vulkan')}")
+    print(f"  Backend:      {data.get('backend', BACKEND)}")
     print(f"  Models Total: {data.get('models', 15)} registered models")
 
 
@@ -402,7 +423,7 @@ def cmd_transcribe(
         "--task", "asr",
         "--family", meta["family"],
         "--model", str(meta["path"]),
-        "--backend", "vulkan",
+        "--backend", BACKEND,
         "--device", "0",
         "--audio", str(p),
         "--metrics",
@@ -473,7 +494,7 @@ def cmd_speak(
         "--task", "tts",
         "--family", meta["family"],
         "--model", str(meta["path"]),
-        "--backend", "vulkan",
+        "--backend", BACKEND,
         "--device", "0",
         "--text", text,
         "--out", str(out_p),
@@ -542,7 +563,7 @@ def cmd_align(
         "--task", "align",
         "--family", meta["family"],
         "--model", str(meta["path"]),
-        "--backend", "vulkan",
+        "--backend", BACKEND,
         "--device", "0",
         "--audio", str(Path(audio_path).resolve()),
         "--text", transcript,
@@ -594,8 +615,8 @@ def cmd_models(json_mode: bool = False):
 
 
 def cmd_doctor(json_mode: bool = False):
-    res = run_audiocpp_raw(["--backend", "vulkan", "--list-devices"])
-    vulkan_ok = "Vulkan:0" in res.stdout
+    res = run_audiocpp_raw(["--backend", BACKEND, "--list-devices"])
+    gpu_ok = "[GPU]" in res.stdout
     installed = sum(1 for m in MODEL_REGISTRY.values() if Path(m["path"]).is_file())
     total_models = len(MODEL_REGISTRY)
 
@@ -605,7 +626,8 @@ def cmd_doctor(json_mode: bool = False):
             "cli_bin_ready": CLI_BIN.is_file(),
             "server_bin_ready": SERVER_BIN.is_file(),
             "config_ready": CONFIG_FILE.is_file(),
-            "vulkan_ready": vulkan_ok,
+            "backend": BACKEND,
+            "gpu_ready": gpu_ok,
             "models_installed": installed,
             "models_total": total_models,
         }
@@ -617,7 +639,8 @@ def cmd_doctor(json_mode: bool = False):
     print(f"  CLI binary   : {'✅ Ready' if CLI_BIN.is_file() else '❌ Missing'}")
     print(f"  Server binary: {'✅ Ready' if SERVER_BIN.is_file() else '❌ Missing'}")
     print(f"  Config JSON  : {'✅ Ready' if CONFIG_FILE.is_file() else '❌ Missing'}")
-    print(f"  Vulkan GPU   : {'✅ AMD Radeon Detected' if vulkan_ok else '⚠️ Device error'}")
+    print(f"  Backend      : {BACKEND}")
+    print(f"  GPU          : {'✅ AMD Radeon Detected' if gpu_ok else '⚠️ Device error'}")
     print(f"  Models       : {installed}/{total_models} GGUF models ready")
 
 
@@ -642,7 +665,10 @@ def cmd_benchmark(json_mode: bool = False):
             continue
         try:
             if meta["task"] == "asr":
-                parsed = cmd_transcribe(str(test_audio), model_key=key, metrics=False, quiet=True)
+                parsed = cmd_transcribe(
+                    str(test_audio), model_key=key, metrics=False, quiet=True,
+                    out_file=f"/tmp/bench_{key}.txt",
+                )
             elif meta["task"] == "tts":
                 tmp_out = f"/tmp/bench_{key}.wav"
                 parsed = cmd_speak(test_text, model_key=key, out_file=tmp_out, metrics=False, quiet=True)
@@ -651,7 +677,7 @@ def cmd_benchmark(json_mode: bool = False):
                     "--task", "align",
                     "--family", meta["family"],
                     "--model", str(meta["path"]),
-                    "--backend", "vulkan",
+                    "--backend", BACKEND,
                     "--device", "0",
                     "--audio", str(test_audio),
                     "--text", test_text,

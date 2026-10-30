@@ -44,7 +44,7 @@ command -v curl    >/dev/null || die "need curl"
 curl -fsS -m 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 || {
   say "audio.cpp server is not answering on ${PORT}."
   say "start it first: Desktop icon 'audio.cpp Server', or"
-  say "  ~/audio-v0.9.0-vulkan/run-audiocpp.sh"
+  say "  /run/media/rodri/AI/audio.cpp/run-audiocpp.sh"
   exit 1
 }
 

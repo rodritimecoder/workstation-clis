@@ -8,14 +8,14 @@ description: >
   cloning, millisecond word timestamps, or working out who said what in a
   recording.
 
-compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan and the audio.cpp v0.9.0 binary."
+compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan and the audio.cpp v0.9.3 binary."
 allowed-tools: "Bash(audiocpp:*) Bash(python3:*) Read Write"
 ---
 
 # Local Audio Intelligence (`audiocpp`)
 
 Hardware-accelerated speech-to-text, text-to-speech, forced alignment and voice
-cloning, powered by `audio.cpp v0.9.2` on **dual AMD Radeon RX 9060 XT** GPUs
+cloning, powered by `audio.cpp v0.9.3` on **dual AMD Radeon RX 9060 XT** GPUs
 over Vulkan. Every model runs faster than real time, so a minute of audio
 transcribes in under a second and a sentence narrates in under fifty
 milliseconds.

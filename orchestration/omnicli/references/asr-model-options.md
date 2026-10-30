@@ -95,7 +95,7 @@ All CTC/RNNT-first, all English-or-narrow, none of them solve timestamps better 
 ## Adding a model on this box
 
 No skill changes needed — `asr.py` is already model-agnostic and auto-detects the newest install
-(`/run/media/rodri/AI/audio-v0.9.0-bin-ubuntu-x64-vulkan`, then `-cpu`, then any `AUDIOCPP_APP_DIR` override):
+(`/run/media/rodri/AI/audio.cpp`, then the versioned installs, then any `AUDIOCPP_APP_DIR` override):
 
 ```bash
 # 1. weights: GGUF from https://huggingface.co/audio-cpp/audio.cpp-gguf
@@ -115,7 +115,7 @@ python3 ~/.gemini/config/skills/audiocpp-asr/scripts/asr.py doctor
 `--task align` needs no server at all:
 
 ```bash
-/run/media/rodri/AI/audio-v0.9.0-bin-ubuntu-x64-vulkan/audiocpp_cli \
+/run/media/rodri/AI/audio.cpp/audiocpp_cli \
   --task align --family qwen3_forced_aligner \
   --model /run/media/rodri/AI/models/audio-cpp/audio.cpp-gguf/qwen3-forced-aligner-0.6b-q8_0.gguf \
   --backend vulkan --audio clip.wav --language en --text "exact transcript" --words-out words.json

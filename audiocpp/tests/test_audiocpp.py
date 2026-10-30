@@ -86,7 +86,7 @@ class TestAudiocppDeterministic(unittest.TestCase):
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"Doctor failed: {res.stderr}")
         data = json.loads(res.stdout)
-        self.assertTrue(data["vulkan_ready"])
+        self.assertTrue(data["gpu_ready"])
         self.assertGreater(data["models_installed"], 5)
         print(f"  ✓ doctor health check ({data['models_installed']}/{data['models_total']} models) · verified")
 
