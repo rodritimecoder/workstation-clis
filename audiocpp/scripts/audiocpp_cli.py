@@ -107,9 +107,9 @@ MODEL_REGISTRY = {
     "audio8": {
         "family": "audio8_tts",
         "task": "tts",
-        "path": MODELS_DIR / "audio8-tts-preview-0.6b-q8_0.gguf",
+        "path": DRIVE / "models/audio-cpp/Audio8-TTS-Realistic-0.6b-GGUF/audio8-tts-realistic-0.6b-q8_0.gguf",
         "server_id": "audio8-tts",
-        "desc": "Audio8 Preview 0.6B Q8_0 (Voice Clone)",
+        "desc": "Audio8 Realistic 0.6B Q8_0 (Voice Clone)",
     },
     "higgs": {
         "family": "higgs_audio_tts",
