@@ -14,13 +14,13 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 <!-- ports:begin -->
 | Port | Slot | Cardinality | Default model | Launcher | Role |
 |---|---|---|---|---|---|
-| `:8080` | `llm` | many (11) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
+| `:8080` | `llm` | many (12) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
 | `:8081` | `audio` | many (3) | nemotron-asr | `run-audiocpp.sh` | Speech-to-text, text-to-speech, forced alignment, voice cloning |
 | `:8083` | `decision` | one-of-many (5) | h2o-lightning-4b | `h2o.sh` | The decision engine slot - bool / choice / score primitives |
 | `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint |
 | `:8089` | `decision-fallback` | single (1) | Imajev-4B | `imajev-decider.sh` | Secondary decision engine — Imajev-4B chat path, or letter/readout with READOUT=1 |
 | `:8084` | `ocr-crispembed` | single (1) | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `crispembed-ocr.sh` | Scene text — 2D bounding boxes and structured markdown |
-| `:8085` | `ocr-lighton` | single (1) | LightOnOCR-3-1B | `lighton-ocr.sh` | Documents, PDFs and slides — fast prefill, high-throughput markdown |
+| `:8085` | `ocr-lighton` | single (1) | LightOnOCR-3-0.8B | `lighton-ocr.sh` | Documents, PDFs and slides — fast prefill, high-throughput markdown |
 | `:8086` | `reranker` | single (1) | jina-reranker-v2-base-multilingual | `jina-reranker.sh` | Cross-encoder reranking for RAG |
 | `:8087` | `embed` | one-of-many (2) | bge-small-en-v1.5 | `bge-small.sh` | Vector embeddings for RAG and semantic caching |
 | `:8088` | `grounding` | single (1) | WeVisOne-VL-4B | `wevisone-vl.sh` | Word-level OCR boxes, open-vocab detection, referring localization, pointing, counting |
@@ -34,7 +34,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:9222` | `cdp` | Chromium DevTools | CDP endpoint used by fast-cdp and Playwright |
 | `:9224` | `cdp-desktop` | Chromium DevTools (headed agent profile) | Headed Chromium CDP endpoint so a person can see and drive the automated page |
 | `:9223` | `cdp-internal` | labwc forwarder | Container-internal forwarder 0.0.0.0:9222 -> 127.0.0.1:9223 |
-| `:8761` | `clip-box` | h2o-lightning shim | Box grounding and typed decisions; Python shim, box questions need LIGHTNING_BOX_ENABLED=1 |
+| `:8761` | `clip-box` | h2o-lightning shim | Standalone h2o shim: box grounding and typed decisions when another model occupies the decision slot |
 | `:8621` | `clip-box-backend` | llama-server (private backend) | Pinned stock llama.cpp the h2o-lightning shim drives; one full-context slot, loopback only |
 <!-- ports:end -->
 

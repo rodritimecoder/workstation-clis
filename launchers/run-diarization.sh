@@ -1,0 +1,1 @@
+/home/rodri/src/my-agent-skills/hardware/audiocpp/scripts/run-diarization.sh

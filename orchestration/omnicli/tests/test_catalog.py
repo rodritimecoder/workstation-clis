@@ -228,14 +228,52 @@ class TestRerankMode(unittest.TestCase):
         con = builder.connect()
         builder.ensure_built(con, progress=False)
         never = search.search(con, "transcribe a zoom lecture", limit=3,
-                              rerank_enabled="never")
+                              rerank_enabled="never", fusion="never")
         always = search.search(con, "transcribe a zoom lecture", limit=3,
-                               rerank_enabled="always")
+                               rerank_enabled="always", fusion="never")
         self.assertEqual(never["tier"], "bm25")
         self.assertIn(always["tier"], ("bm25+rerank", "bm25"),
                       "the re-ranker was not consulted")
         if search.embedding_available():
             self.assertEqual(always["tier"], "bm25+rerank")
+
+
+class TestFusionMode(unittest.TestCase):
+    """The dense leg is a second retrieval path, not a re-ranker."""
+
+    def test_strings_map_to_the_tri_state(self):
+        self.assertIs(search.normalize_fusion("always"), True)
+        self.assertIs(search.normalize_fusion("never"), False)
+        self.assertEqual(search.normalize_fusion("auto"), "auto")
+        self.assertIs(search.normalize_fusion(True), True)
+        self.assertIs(search.normalize_fusion(False), False)
+        self.assertEqual(search.normalize_fusion(None), "auto")
+
+    def test_fusion_never_is_pure_lexical(self):
+        con = builder.connect()
+        builder.ensure_built(con, progress=False)
+        res = search.search(con, "transcribe a zoom lecture", limit=3,
+                            rerank_enabled="never", fusion="never")
+        self.assertEqual(res["tier"], "bm25")
+        self.assertFalse(res["dense"]["ran"])
+
+    def test_missing_endpoint_degrades_instead_of_failing(self):
+        """A dead :8087 must cost ranking quality, never the result set."""
+        from catalog import vectors
+
+        con = builder.connect()
+        builder.ensure_built(con, progress=False)
+        original = vectors.EMBEDDING_URL
+        vectors.EMBEDDING_URL = "http://127.0.0.1:9/v1/embeddings"
+        try:
+            res = search.search(con, "transcribe a zoom lecture", limit=3,
+                                rerank_enabled="never", fusion="always")
+        finally:
+            vectors.EMBEDDING_URL = original
+        self.assertTrue(res["results"], "the lexical leg must still answer")
+        self.assertFalse(res["dense"]["ran"])
+        self.assertEqual(res["tier"], "bm25")
+        self.assertIn("unavailable", (res["dense"]["reason"] or ""))
 
 
 class TestPolicyGate(unittest.TestCase):

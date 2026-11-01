@@ -12,7 +12,7 @@ Stages:
   02_audio_asr     - Speech-to-text with timestamps via audiocpp (CrisperWhisper 2.0 by default)
   03_visual_sample - Keyframe / scene-cut / fps sampling with PTS-exact timestamps
   04_visual_gate   - Deterministic gate: perceptual dedup + blank rejection, or h2o vision gate
-  05_visual_ocr    - Visual OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate)
+  05_visual_ocr    - Visual OCR via LightOnOCR-3-0.8B or MiniCPM-OCR-1.0 (+ structural gate)
   06_synthesize    - Merges transcript & OCR into chronological mined_video.md
 """
 
@@ -77,8 +77,8 @@ def _decision_model_is_h2o() -> bool:
     except Exception:
         return False
 
-LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf"))
-LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf"))
+LIGHTON_MODEL = Path(os.environ.get("LIGHTON_MODEL", DRIVE / "models/prithivMLmods/LightOnOCR-3-0.8B-GGUF/LightOnOCR-3-0.8B.Q4_K_M.gguf"))
+LIGHTON_MMPROJ = Path(os.environ.get("LIGHTON_MMPROJ", DRIVE / "models/prithivMLmods/LightOnOCR-3-0.8B-GGUF/LightOnOCR-3-0.8B.mmproj-q8_0.gguf"))
 LLAMA_SERVER_BIN = Path(os.environ.get("LLAMA_SERVER_BIN", DRIVE / "llama.cpp/build/bin/llama-server"))
 LLAMA_MTMD_CLI = Path(os.environ.get("LLAMA_MTMD_CLI", DRIVE / "llama.cpp/build/bin/llama-mtmd-cli"))
 LIGHTON_PORT = int(os.environ.get("LIGHTON_PORT", "8085"))
@@ -713,7 +713,7 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
 
     records = json.loads(gated_json.read_text(encoding="utf-8"))
     kept = [r for r in records if r.get("keep", False)]
-    label = "MiniCPM-OCR-1.0 + structural gate" if OCR_BACKEND == "minicpm" else "LightOnOCR-3-1B"
+    label = "MiniCPM-OCR-1.0 + structural gate" if OCR_BACKEND == "minicpm" else "LightOnOCR-3-0.8B"
     print(f"[05_visual_ocr] Running OCR ({label}) on {len(kept)} frames...")
 
 
@@ -818,7 +818,8 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
             )
             with urllib.request.urlopen(req, timeout=90) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
+            msg = data["choices"][0]["message"]
+            return (msg.get("content") or msg.get("reasoning_content") or "").strip()
         except Exception:
             return ""
 
@@ -837,7 +838,7 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
                     "messages": [{
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Extract all text and code from this image in markdown."},
+                            {"type": "text", "text": "Transcribe all visible text in Markdown. Output only the verbatim text."},
                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
                         ]
                     }],
@@ -852,7 +853,8 @@ def run_stage_05_visual_ocr(workspace: Path) -> None:
                 with urllib.request.urlopen(req, timeout=45) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
-                        text = data["choices"][0]["message"]["content"].strip()
+                        msg = data["choices"][0]["message"]
+                        text = (msg.get("content") or msg.get("reasoning_content") or "").strip()
                         if text:
                             return text
             except Exception:

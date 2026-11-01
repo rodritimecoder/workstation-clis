@@ -21,7 +21,8 @@ from catalog import builder, legacy, search  # noqa: E402
 GOLDEN = HERE / "golden_eval.json"
 
 
-def run(verbose: bool = False, as_json: bool = False, rerank: str = "never") -> dict:
+def run(verbose: bool = False, as_json: bool = False, rerank: str = "never",
+        fusion: str = "never") -> dict:
     cases = json.loads(GOLDEN.read_text(encoding="utf-8"))["cases"]
     con = builder.connect()
     builder.ensure_built(con, progress=False)
@@ -33,7 +34,7 @@ def run(verbose: bool = False, as_json: bool = False, rerank: str = "never") -> 
 
     for case in cases:
         q = case["query"]
-        res = search.search(con, q, limit=3, rerank_enabled=rerank)
+        res = search.search(con, q, limit=3, rerank_enabled=rerank, fusion=fusion)
         new_ids = [r["skill"] for r in res["results"]]
         new_scores = {r["skill"]: r["score"] for r in res["results"]}
 
@@ -157,7 +158,11 @@ def run(verbose: bool = False, as_json: bool = False, rerank: str = "never") -> 
 
 if __name__ == "__main__":
     mode = "never"
+    fusion = "never"
     for arg in sys.argv[1:]:
         if arg.startswith("--rerank="):
             mode = arg.split("=", 1)[1]
-    run(verbose="--verbose" in sys.argv, as_json="--json" in sys.argv, rerank=mode)
+        elif arg.startswith("--fusion="):
+            fusion = arg.split("=", 1)[1]
+    run(verbose="--verbose" in sys.argv, as_json="--json" in sys.argv,
+        rerank=mode, fusion=fusion)

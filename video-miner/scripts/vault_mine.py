@@ -62,12 +62,12 @@ def ocr_frame_http(image_path: Path, port: int = 8085) -> str:
         img_bytes = image_path.read_bytes()
         b64 = base64.b64encode(img_bytes).decode("ascii")
         payload = json.dumps({
-            "model": "LightOnOCR-3-1B",
+            "model": "LightOnOCR-3-0.8B",
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract all diagram labels, text, and architecture flow in markdown."},
+                        {"type": "text", "text": "Transcribe all visible text in Markdown. Output only the verbatim text."},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
                     ]
                 }
@@ -82,7 +82,8 @@ def ocr_frame_http(image_path: Path, port: int = 8085) -> str:
         )
         with urllib.request.urlopen(req, timeout=4.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
+            msg = data["choices"][0]["message"]
+            return (msg.get("content") or msg.get("reasoning_content") or "").strip()
     except Exception:
         return ""
 
@@ -92,11 +93,11 @@ def ocr_frame_cli(image_path: Path) -> str:
     cli = Path(os.environ.get("LLAMA_MTMD_CLI", DRIVE / "llama.cpp/build/bin/llama-mtmd-cli"))
     model = Path(os.environ.get(
         "LIGHTON_MODEL",
-        DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.Q4_K_M.gguf",
+        DRIVE / "models/prithivMLmods/LightOnOCR-3-0.8B-GGUF/LightOnOCR-3-0.8B.Q4_K_M.gguf",
     ))
     mmproj = Path(os.environ.get(
         "LIGHTON_MMPROJ",
-        DRIVE / "models/prithivMLmods/LightOnOCR-3-1B-GGUF/LightOnOCR-3-1B.mmproj-q8_0.gguf",
+        DRIVE / "models/prithivMLmods/LightOnOCR-3-0.8B-GGUF/LightOnOCR-3-0.8B.mmproj-q8_0.gguf",
     ))
     if not (cli.is_file() and model.is_file() and mmproj.is_file()):
         return ""

@@ -36,6 +36,7 @@ Three properties this face must hold, because the agent cannot verify them:
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -45,11 +46,11 @@ from typing import Any
 SKILL_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL_DIR))
 
-from catalog import builder, health, invoke, search  # noqa: E402
+from catalog import argspec, builder, health, invoke, search  # noqa: E402
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "omnicli"
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.2.0"
 
 DEFAULT_MAX_BYTES = invoke.DEFAULT_MAX_BYTES
 DEFAULT_DISCOVER_LIMIT = 5
@@ -123,7 +124,8 @@ def tool_discover(args: dict[str, Any]) -> dict[str, Any]:
         mode = "auto"
 
     con = _con()
-    res = search.search(con, intent, limit=limit, rerank_enabled=mode)
+    fusion: Any = args.get("fusion", "auto")
+    res = search.search(con, intent, limit=limit, rerank_enabled=mode, fusion=fusion)
 
     results = []
     for r in res["results"]:
@@ -170,6 +172,23 @@ def tool_describe(args: dict[str, Any]) -> dict[str, Any]:
     max_bytes = _int_arg(args, "max_bytes", DEFAULT_MAX_BYTES, low=64, high=10_000_000)
 
     con = _con()
+    if args.get("stub") or tool_id in ("*", "all"):
+        pattern = re.compile((args.get("grep") or "").strip(), re.IGNORECASE) \
+            if (args.get("grep") or "").strip() else None
+        rows = con.execute(
+            "SELECT id, skill, kind, summary, contract FROM tools ORDER BY id"
+        ).fetchall()
+        if pattern:
+            rows = [r for r in rows
+                    if pattern.search(r["id"]) or pattern.search(r["summary"] or "")]
+        sigs = argspec.signatures(rows)
+        body = "\n".join(sig.line() for sig in sigs) or "No tool matched that filter."
+        return _bounded({
+            "matched": len(sigs),
+            "signatures": body,
+            "next": "Call omni_invoke with tool_id and those keyword arguments.",
+        }, max_bytes)
+
     row = con.execute("SELECT * FROM tools WHERE id = ?", (tool_id,)).fetchone()
     if row is None:
         # A skill name gives the skill itself. This is checked before the
@@ -380,7 +399,7 @@ def tool_status(args: dict[str, Any]) -> dict[str, Any]:
     tools = con.execute("SELECT count(*) AS c FROM tools").fetchone()["c"]
     enabled = con.execute("SELECT count(*) AS c FROM tools WHERE enabled = 1").fetchone()["c"]
     docs = con.execute("SELECT count(*) AS c FROM docs").fetchone()["c"]
-    tier = "bm25+rerank" if search.embedding_available() else "bm25"
+    tier = "bm25+dense(rrf)" if search.embedding_available() else "bm25"
 
     return _json_result({
         "tailscale_address": probe["tailscale_address"],
@@ -425,6 +444,13 @@ TOOLS = [
                     "description": "Re-ranker mode. auto (default) only re-ranks when the "
                                    "lexical ranking is unsure.",
                 },
+                "fusion": {
+                    "type": "string",
+                    "enum": ["auto", "always", "never"],
+                    "description": "Dense-leg fusion. auto (default) fuses BM25 with the "
+                                   "bge-small skill vectors only when BM25 is unsure; "
+                                   "always fuses every query (better on paraphrase).",
+                },
                 "no_rerank": {"type": "boolean",
                               "description": "Legacy alias for rerank=\"never\"."},
                 "max_bytes": {"type": "integer", "description": "Hard cap on the reply."},
@@ -439,12 +465,14 @@ TOOLS = [
             "subcommands. Call this before invoking. Given a skill name instead of a "
             "tool id, returns the skill's frontmatter and section outline; add "
             "section=\"<heading>\" to read that one section of its body, or "
-            "doc=\"<path>\" to read one of the documents the skill declares."
+            "doc=\"<path>\" to read one of the documents the skill declares. "
+            "Set stub=true with tool_id=\"*\" and an optional grep to get many "
+            "annotated signatures instead of one prose contract."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "tool_id": {"type": "string", "description": "A tool id from omni_discover, or a skill name."},
+                "tool_id": {"type": "string", "description": "A tool id from omni_discover, a skill name, or \"*\" with stub=true."},
                 "section": {
                     "type": "string",
                     "description": "Optional. Heading of the skill section to read.",
@@ -452,6 +480,14 @@ TOOLS = [
                 "doc": {
                     "type": "string",
                     "description": "Optional. Path or title of a document the skill declares, e.g. \"pstack/playbooks/hillclimb.md\".",
+                },
+                "stub": {
+                    "type": "boolean",
+                    "description": "Optional. Return annotated Python signatures instead of one prose contract.",
+                },
+                "grep": {
+                    "type": "string",
+                    "description": "Optional with stub=true: case-insensitive regex over tool ids and summaries.",
                 },
                 "max_bytes": {"type": "integer", "description": "Hard cap on the reply."},
             },

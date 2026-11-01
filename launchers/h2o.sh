@@ -14,7 +14,7 @@ BACKEND="${DECISION_BACKEND:-vulkan}"
 VARIANT="${DECISION_VARIANT:-Q8_0}"
 RESTART="${DECISION_RESTART:-0}"
 SHIM="${H2O_SERVE:-$(command -v h2o-serve 2>/dev/null)}"
-[ -n "$SHIM" ] || SHIM="/run/media/rodri/AI/skills/multimodal/clip-box/scripts/h2o_serve.py"
+[ -n "$SHIM" ] || SHIM="/run/media/rodri/AI/skills/hardware/decision-model/scripts/h2o_serve.py"
 
 [ -f "$SHIM" ] || { echo "missing h2o-serve: $SHIM"; exit 1; }
 

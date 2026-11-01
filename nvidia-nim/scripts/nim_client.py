@@ -411,7 +411,7 @@ def run_agent_loop(
         "Available Workstation & Browser Verification CLIs in PATH:\n"
         "- `fast-cdp verify <url> [--assert-selector <sel>] [--assert-text <txt>] [--screenshot <path>] [--json]`: Sub-second native Chrome DevTools Protocol verification on port :9222.\n"
         "- `fast-cdp snap <url>`: Instant viewport accessibility text snapshot.\n"
-        "- `ocr read <file>`: LightOnOCR-3-1B document and image OCR.\n"
+        "- `ocr read <file>`: LightOnOCR-3-0.8B document and image OCR.\n"
         "- `jev bool / choice / score`: Calibrated non-generative decisions.\n"
         "- `audiocpp tts / asr`: Speech synthesis and verbatim transcription.\n"
         "- `local-llm \"<prompt>\"`: Local Qwen3.6-35B coder on :8080 (see the `local-llm` skill).\n"

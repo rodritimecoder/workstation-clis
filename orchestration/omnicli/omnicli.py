@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -42,10 +43,12 @@ sys.path.insert(0, str(SKILL_DIR))
 
 try:
     from catalog import aliases as aliases_mod
+    from catalog import argspec as argspec_mod
     from catalog import bindings as bindings_mod
-    from catalog import builder, health, invoke, policy, registry, search  # noqa: E402
+    from catalog import bridge as bridge_mod
+    from catalog import builder, health, invoke, policy, registry, search, vectors  # noqa: E402
 except ImportError:  # pragma: no cover - degraded install
-    aliases_mod = bindings_mod = None
+    aliases_mod = bindings_mod = bridge_mod = argspec_mod = None
     builder = registry = search = health = invoke = policy = None  # type: ignore
 
 # The response cap. An agent must never be able to pull an unbounded payload
@@ -173,7 +176,6 @@ def cmd_status(as_json: bool = False):
         try:
             con = builder.connect()
             built = builder.ensure_built(con, progress=False)
-            tier = "bm25+rerank" if search.embedding_available() else "bm25"
             catalog_info = {
                 "skills": built.get("skills"),
                 "tools": built.get("tools"),
@@ -182,6 +184,12 @@ def cmd_status(as_json: bool = False):
                 "rebuilt": built.get("rebuilt"),
                 "db": str(builder.db_path()),
             }
+            vstatus = vectors.status(con)
+            catalog_info["vectors"] = vstatus
+            if vstatus.get("vectors"):
+                tier = "bm25+dense(rrf)" if search.embedding_available() else "bm25 (dense offline)"
+            else:
+                tier = "bm25 (no vectors)"
         except Exception as exc:  # pragma: no cover
             catalog_info = {"error": str(exc)}
 
@@ -222,10 +230,11 @@ def cmd_status(as_json: bool = False):
 
 def cmd_search(query: str, as_json: bool = False, limit: int = 6,
                explain: bool = False, no_rerank: bool = False, rerank: str = "auto",
-               chunks: bool = False):
+               chunks: bool = False, fusion: str = "auto"):
     con = _require_catalog()
     mode = "never" if no_rerank else rerank
-    res = search.search(con, query, limit=limit, rerank_enabled=mode, explain=explain)
+    res = search.search(con, query, limit=limit, rerank_enabled=mode,
+                        fusion=fusion, explain=explain)
 
     if as_json:
         # Routing needs names and scores; the chunk archive is opt-in. The
@@ -754,7 +763,7 @@ def cmd_alias(skill: str = None, aliases: str = None, tags: str = None,
 # --------------------------------------------------------------------------
 
 def cmd_index(rebuild: bool = False, with_contracts: bool = True, as_json: bool = False,
-              check: bool = False):
+              check: bool = False, with_vectors: bool = True):
     con = builder.connect()
 
     if check:
@@ -784,6 +793,9 @@ def cmd_index(rebuild: bool = False, with_contracts: bool = True, as_json: bool 
 
     t0 = time.monotonic()
     summary = builder.ensure_built(con, rebuild=rebuild, with_contracts=with_contracts, progress=True)
+    if with_vectors:
+        from catalog import vectors as vectors_mod
+        summary["vectors"] = vectors_mod.ensure(con)
     elapsed = time.monotonic() - t0
     if as_json:
         summary["elapsed_seconds"] = round(elapsed, 3)
@@ -794,15 +806,23 @@ def cmd_index(rebuild: bool = False, with_contracts: bool = True, as_json: bool 
     detail = f" · {extracted} contracts extracted" if extracted else " · 0 contracts extracted (cached)"
     print(f"\n📇 Catalog {verb}: {summary['skills']} skills · {summary['tools']} tools · "
           f"{summary['docs']} docs{detail}")
+    v = summary.get("vectors") or {}
+    if v:
+        if v.get("error"):
+            print(f"   🧭 Dense leg: {v['error']} (BM25 only)")
+        else:
+            print(f"   🧭 Dense leg: {v.get('built', 0)} embedded · {v.get('dim', 0)}d "
+                  f"· {v.get('skipped', 0)} unchanged")
     print(f"   {builder.db_path()}")
     print(f"   {elapsed * 1000:.0f} ms\n")
 
 
-def cmd_eval(verbose: bool = False, as_json: bool = False, rerank: str = "never"):
+def cmd_eval(verbose: bool = False, as_json: bool = False, rerank: str = "never",
+             fusion: str = "never"):
     runner = SKILL_DIR / "tests" / "eval_runner.py"
     if not runner.is_file():
         sys.exit("❌ Error: tests/eval_runner.py not found next to omnicli.")
-    args = [sys.executable, str(runner), f"--rerank={rerank}"]
+    args = [sys.executable, str(runner), f"--rerank={rerank}", f"--fusion={fusion}"]
     if verbose:
         args.append("--verbose")
     if as_json:
@@ -837,10 +857,90 @@ def _bwrap_works() -> bool:
         return False
 
 
-def cmd_bindings(out_dir: str | None = None, as_json: bool = False):
+def _clip(text: str, max_bytes: int, hint: str) -> str:
+    data = text.encode("utf-8", errors="replace")
+    if len(data) <= max_bytes:
+        return text
+    banner = f"\n… [omnicli] truncated at {max_bytes} bytes. {hint}\n"
+    budget = max(0, max_bytes - len(banner.encode("utf-8")))
+    return data[:budget].decode("utf-8", errors="ignore") + banner
+
+
+def cmd_spec(skill: str | None = None, grep: str | None = None, kind: str | None = None,
+             stubs: bool = False, only_enabled: bool = False, as_json: bool = False,
+             limit: int | None = None, max_bytes: int = DEFAULT_MAX_BYTES):
+    """Query the whole catalog without loading it.
+
+    This is the CLI half of `spec()` in a plan: filter 481 contracts down to
+    the ones a job needs, and read their signatures rather than their prose.
+    """
+    con = _require_catalog()
+    if argspec_mod is None:
+        sys.exit("❌ Error: omnicli catalog package not importable.")
+
+    sql = "SELECT id, skill, kind, summary, contract, enabled FROM tools"
+    clauses, params = [], []
+    if skill:
+        clauses.append("skill = ?")
+        params.append(skill)
+    if kind:
+        clauses.append("kind = ?")
+        params.append(kind)
+    if only_enabled:
+        clauses.append("enabled = 1")
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    rows = con.execute(sql + " ORDER BY id", params).fetchall()
+
+    pattern = re.compile(grep, re.IGNORECASE) if grep else None
+    if pattern:
+        rows = [r for r in rows if pattern.search(r["id"]) or pattern.search(r["summary"] or "")]
+    if limit:
+        rows = rows[: int(limit)]
+
+    sigs = argspec_mod.signatures(rows)
+    if as_json:
+        payload = [{
+            "id": s.id,
+            "fn": s.func,
+            "skill": s.skill,
+            "kind": s.kind,
+            "summary": s.summary[:200],
+            "signature": s.line(),
+            "required": [p.name for p in s.ordered_positionals() if p.required]
+                        + [p.name for p in s.params if p.required],
+            "params": {p.name: {"flag": p.flag, "type": p.kind if p.kind != "choices" else p.choices}
+                       for p in s.params},
+            "positionals": [p.name for p in s.ordered_positionals()],
+            "commands": s.commands[:40],
+            "enabled": bool(rows[i]["enabled"]),
+        } for i, s in enumerate(sigs)]
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    lines = [f"🔎 [omnicli spec] {len(sigs)} of {con.execute('SELECT COUNT(*) FROM tools').fetchone()[0]} tools"]
+    for sig in sigs:
+        if stubs:
+            lines.append(f"  {sig.line()}")
+            if sig.summary:
+                lines.append(f"      # {sig.summary[:110]}")
+        else:
+            lines.append(f"  {sig.id:<58} {sig.kind:<10} {sig.func}")
+    text = _clip("\n".join(lines) + "\n", max_bytes,
+                 "Narrow with --skill/--grep/--limit, or raise --omni-max-bytes.")
+    sys.stdout.write(text)
+
+def cmd_bindings(out_dir: str | None = None, as_json: bool = False,
+                 stubs: bool = False, skill: str | None = None, grep: str | None = None):
     con = _require_catalog()
     if builder is None or bindings_mod is None:
         sys.exit("❌ Error: omnicli catalog package not importable.")
+
+    if stubs:
+        lines = bindings_mod.stubs(con, skill=skill, grep=grep)
+        sys.stdout.write(_clip("\n".join(lines) + "\n", DEFAULT_MAX_BYTES,
+                               "Narrow with --skill/--grep."))
+        return
     built = builder.ensure_built(con, progress=False)
     fingerprint = builder.meta_get(con, "fingerprint", "")
     target = bindings_mod.write(con, Path(out_dir) if out_dir else None)
@@ -861,10 +961,12 @@ def cmd_bindings(out_dir: str | None = None, as_json: bool = False):
 
 
 def cmd_exec(script: str, workspace: str | None = None, out_path: str | None = None,
-             no_sandbox: bool = False, timeout: float = 300.0, as_json: bool = False):
+             sandbox: str = "write", timeout: float = 300.0, as_json: bool = False):
     con = _require_catalog()
     if builder is None or bindings_mod is None:
         sys.exit("❌ Error: omnicli catalog package not importable.")
+    if sandbox not in ("write", "strict", "none"):
+        sys.exit(f"❌ Error: unknown sandbox mode {sandbox!r}")
 
     script_path = Path(script).resolve()
     if not script_path.is_file():
@@ -882,9 +984,8 @@ def cmd_exec(script: str, workspace: str | None = None, out_path: str | None = N
     if trace.exists():
         trace.unlink()
 
-    binary = shutil.which("omnicli") or str(SCRIPT_PATH)
     env = os.environ.copy()
-    env["OMNICLI_BIN"] = binary
+    env["OMNICLI_BIN"] = shutil.which("omnicli") or str(SCRIPT_PATH)
     env["OMNICLI_TRACE"] = str(trace)
     env["OMNICLI_TRUST_INDEX"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
@@ -892,25 +993,62 @@ def cmd_exec(script: str, workspace: str | None = None, out_path: str | None = N
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
 
     cmd = [sys.executable, str(script_path)]
-    sandboxed = (not no_sandbox) and _bwrap_works()
-    if sandboxed:
-        # Writes land only in the workspace and a private /tmp. Network stays
-        # up on purpose: the tools this fronts are local inference servers on
-        # loopback, and a netns would cut the 8080/8083 endpoints a plan needs.
-        cmd = [
+    runtime: Path | None = None
+    serving = None
+    bridge_server = None
+    sandboxed = False
+
+    if sandbox != "none":
+        if not _bwrap_works():
+            sys.exit("❌ Error: bubblewrap is not available; pass --sandbox none to run unsandboxed.")
+        sandboxed = True
+        base = [
             "bwrap", "--die-with-parent", "--unshare-pid", "--unshare-ipc",
             "--unshare-uts", "--ro-bind", "/", "/", "--tmpfs", "/tmp",
             "--dev", "/dev", "--proc", "/proc",
+        ]
+        tail: list[str] = []
+
+        if sandbox == "strict":
+            if bridge_mod is None:
+                sys.exit("❌ Error: omnicli catalog package not importable.")
+            runtime = Path(tempfile.mkdtemp(prefix="omnicli-strict-"))
+            shim = bridge_mod.write_shim(runtime / "bin")
+            shim_dir = shim.parent
+            serving = bridge_mod.Serving(runtime / "bridge.sock", SCRIPT_PATH, timeout)
+            bridge_server = serving.__enter__()
+            base += [
+                "--unshare-net",
+                "--tmpfs", str(Path.home()),
+                "--bind", str(work), str(work),
+                "--dir", "/tmp/omnicli",
+                "--ro-bind", str(bindings_dir), "/tmp/omnicli/bindings",
+                "--ro-bind", str(shim_dir), "/tmp/omnicli/bin",
+                "--bind", str(runtime), "/tmp/omnicli/bridge",
+            ]
+            tail = [
+                "--setenv", "OMNICLI_BRIDGE", "/tmp/omnicli/bridge/bridge.sock",
+                "--setenv", "OMNICLI_BIN", "/tmp/omnicli/bin/omnicli",
+                "--setenv", "PYTHONPATH", "/tmp/omnicli/bindings",
+            ]
+        cmd = base + [
             "--bind", str(work), str(work), "--chdir", str(work),
             "--setenv", "HOME", str(work),
-        ] + cmd
+        ] + tail + [sys.executable, str(script_path)]
 
     started = time.time()
+    if os.environ.get("OMNICLI_EXEC_DEBUG"):
+        print(" ".join(cmd), file=sys.stderr)
     try:
         proc = subprocess.run(cmd, cwd=str(work), env=env, capture_output=True,
                               text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         sys.exit(f"❌ Error: plan exceeded {timeout:g}s")
+    finally:
+        if serving is not None:
+            serving.__exit__()
+        if runtime is not None:
+            shutil.rmtree(runtime, ignore_errors=True)
     elapsed = time.time() - started
 
     calls = 0
@@ -922,13 +1060,18 @@ def cmd_exec(script: str, workspace: str | None = None, out_path: str | None = N
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(proc.stdout, encoding="utf-8")
 
+    bridge_calls = getattr(bridge_server, "calls", 0)
+    bridge_denied = getattr(bridge_server, "denied", [])
     if as_json:
         print(json.dumps({
             "plan": str(script_path),
             "sandboxed": sandboxed,
+            "sandbox": sandbox,
             "exit_code": proc.returncode,
             "seconds": round(elapsed, 3),
             "tool_calls": calls,
+            "bridge_calls": bridge_calls,
+            "bridge_denied": bridge_denied,
             "tools": built.get("tools"),
             "stdout": proc.stdout,
             "stderr": proc.stderr[-2000:],
@@ -937,8 +1080,11 @@ def cmd_exec(script: str, workspace: str | None = None, out_path: str | None = N
         sys.stdout.write(proc.stdout)
         if proc.stderr:
             sys.stderr.write(proc.stderr if proc.stderr.endswith("\n") else proc.stderr + "\n")
-        print(f"🐍 [exec] {calls} tool call(s) in one turn · {elapsed:.2f}s · "
-              f"sandbox={'bwrap' if sandboxed else 'none'}", file=sys.stderr)
+        detail = f"sandbox={sandbox}"
+        if bridge_calls:
+            detail += f" · bridge={bridge_calls} call(s)"
+        print(f"🐍 [exec] {calls} tool call(s) in one turn · {elapsed:.2f}s · {detail}",
+              file=sys.stderr)
     sys.exit(proc.returncode)
 
 
@@ -1068,6 +1214,10 @@ def main():
     p.add_argument("--rerank", choices=["auto", "always", "never"], default="auto",
                    help="auto=only re-rank when the lexical ranking is unsure (default), "
                         "always=re-rank every query, never=never re-rank")
+    p.add_argument("--fusion", choices=["auto", "always", "never"], default="auto",
+                   help="auto=fuse the dense leg only when BM25 is unsure (default), "
+                        "always=fuse on every query (best on unseen phrasing), "
+                        "never=lexical leg only")
     p.add_argument("--chunks", action="store_true",
                    help="With --json: include every matching chunk (default is the "
                         "compact routing view: skill, score, why, top hit)")
@@ -1118,6 +1268,8 @@ def main():
     p.add_argument("--no-contracts", action="store_true", help="Skip --help contract extraction")
     p.add_argument("--check", action="store_true",
                    help="Report whether the index is fresh, without rebuilding")
+    p.add_argument("--no-vectors", action="store_true",
+                   help="Skip refreshing the dense-leg vectors (skill descriptions)")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("alias", help="Read or write a skill's curated routing metadata")
@@ -1134,9 +1286,24 @@ def main():
     p.add_argument("--rerank", choices=["auto", "always", "never"], default="never",
                    help="re-ranker mode used during the eval (default: never; the "
                         "catalog's own default is auto)")
+    p.add_argument("--fusion", choices=["auto", "always", "never"], default="never",
+                   help="dense-leg fusion used during the eval (default: never)")
+
+    p = sub.add_parser("spec", help="Query the catalog surface without loading it")
+    p.add_argument("--skill", default=None)
+    p.add_argument("--grep", default=None, help="Case-insensitive regex over id and summary")
+    p.add_argument("--kind", default=None, choices=["script", "cli", "subcommand", "endpoint"])
+    p.add_argument("--enabled", action="store_true", help="Only tools that passed the gate")
+    p.add_argument("--stubs", action="store_true", help="Print annotated signatures instead of ids")
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--omni-max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("bindings", help="Write the Python bindings used by `omnicli exec`")
     p.add_argument("--out", default=None, help="Output directory (default ~/.local/share/omnicli/bindings)")
+    p.add_argument("--stubs", action="store_true", help="Print the generated signatures instead of writing")
+    p.add_argument("--skill", default=None, help="With --stubs: only this skill")
+    p.add_argument("--grep", default=None, help="With --stubs: only matching ids or summaries")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("exec", aliases=["plan"],
@@ -1144,7 +1311,11 @@ def main():
     p.add_argument("script", help="Path to the Python plan")
     p.add_argument("--workspace", default=None, help="Writable directory (default: the script's folder)")
     p.add_argument("--out", default=None, help="Also write the plan's stdout to this file")
-    p.add_argument("--no-sandbox", action="store_true", help="Run without bubblewrap (not recommended)")
+    p.add_argument("--sandbox", choices=["write", "strict", "none"], default="write",
+                   help="write: writable workspace, open network. "
+                        "strict: no network, home masked, every tool call crosses the bridge. "
+                        "none: unsandboxed.")
+    p.add_argument("--no-sandbox", action="store_true", help="Alias for --sandbox none")
     p.add_argument("--timeout", type=float, default=300.0)
     p.add_argument("--json", action="store_true")
 
@@ -1183,7 +1354,7 @@ def main():
     elif args.action == "search":
         cmd_search(args.query, as_json=args.json, limit=args.limit,
                    explain=args.explain, no_rerank=args.no_rerank,
-                   rerank=args.rerank, chunks=args.chunks)
+                   rerank=args.rerank, chunks=args.chunks, fusion=args.fusion)
     elif args.action == "list":
         cmd_list(as_json=args.json, show_all=args.all)
     elif args.action == "tools":
@@ -1192,7 +1363,7 @@ def main():
         cmd_describe(args.tool_id, as_json=args.json, section=args.section, doc=args.doc)
     elif args.action == "index":
         cmd_index(rebuild=args.rebuild, with_contracts=not args.no_contracts,
-                  as_json=args.json, check=args.check)
+                  as_json=args.json, check=args.check, with_vectors=not args.no_vectors)
     elif args.action == "enable":
         cmd_gate(args.tool_id, True, as_json=args.json, all_tools=args.all)
     elif args.action == "disable":
@@ -1203,12 +1374,19 @@ def main():
         cmd_alias(skill=args.skill, aliases=args.aliases, tags=args.tags,
                   remove=args.remove, show_all=args.list, as_json=args.json)
     elif args.action == "eval":
-        cmd_eval(verbose=args.verbose, as_json=args.json, rerank=args.rerank)
+        cmd_eval(verbose=args.verbose, as_json=args.json, rerank=args.rerank,
+                 fusion=args.fusion)
     elif args.action == "bindings":
-        cmd_bindings(out_dir=args.out, as_json=args.json)
+        cmd_bindings(out_dir=args.out, as_json=args.json, stubs=args.stubs,
+                     skill=args.skill, grep=args.grep)
+    elif args.action == "spec":
+        cmd_spec(skill=args.skill, grep=args.grep, kind=args.kind, stubs=args.stubs,
+                 only_enabled=args.enabled, as_json=args.json, limit=args.limit,
+                 max_bytes=args.omni_max_bytes)
     elif args.action in ("exec", "plan"):
+        mode = "none" if args.no_sandbox else args.sandbox
         cmd_exec(args.script, workspace=args.workspace, out_path=args.out,
-                 no_sandbox=args.no_sandbox, timeout=args.timeout, as_json=args.json)
+                 sandbox=mode, timeout=args.timeout, as_json=args.json)
     elif args.action == "mcp":
         cmd_mcp()
     elif args.action in ("status", "health"):

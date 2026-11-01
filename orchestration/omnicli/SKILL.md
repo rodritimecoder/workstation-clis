@@ -1,25 +1,13 @@
 ---
 name: omnicli
 
-description: "Late-binding gateway to every tool on this workstation. Find the right tool by intent with BM25 full-body search over all skill bodies, pull one tool's exact contract, invoke it with a bounded response, or run a whole multi-step plan in a sandbox. Also fronts the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), vllm-d3-mini calibrated decisions (:8083), Nemotron ASR (:8081). First-class skill since 2026-10-30; the routing layer hovers above the shelf rather than replacing it."
+description: "Late-binding gateway to every tool on this workstation. Find the right tool by intent with hybrid lexical + dense search over all skill bodies, pull one tool's exact contract, invoke it with a bounded response, or run a whole multi-step plan in a sandbox. Use when you do not know which of the installed skills or tools handles something, to list what is installed, to read one tool's arguments before calling it, or to run a multi-step job in one turn. Also fronts the local inference endpoints: Genesis 35B coder (:8080), LightOnOCR (:8085), calibrated decisions (:8083), Nemotron ASR (:8081)."
 
-compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085, plus the optional embedding server :8087 used to re-rank search results (the catalog works without it). The decision port speaks either native /v1/systemone or the pplx-decider joint protocol v3; the protocol is auto-detected from the served model."
+compatibility: "Requires the local inference servers it fronts: :8080, :8081, :8083, :8084 and :8085, plus the optional embedding server :8087, which supplies the dense leg of hybrid search (the catalog works without it, on BM25 alone). The decision port speaks either native /v1/systemone or the pplx-decider joint protocol v3; the protocol is auto-detected from the served model."
 allowed-tools: "Bash(omnicli:*) Read"
 ---
 
 # `omnicli` — The Uber OmniCLI
-
-> **First-class since 2026-10-30.** It was retired as a *front line* on
-> 2026-10-20 so harnesses could discover plain Agent Skills first, then
-> restored as a normal skill once the executor made it worth its turn-0
-> tokens. The binary is installed (`~/.local/bin/omnicli`), and `omnicli exec`
-> runs a whole plan in one turn. It remains the only thing that can answer
-> "which of the 474 catalogued tools does this intent want". On 61 golden
-> routing queries with the same model picking both ways — shelf 54/61,
-> gateway 60/61 top-1 and 61/61 in the top three. Gateway mode still exists as
-> a one-line state file (`~/.config/skills-frontline`) that `sync-skills`
-> reads; there is no `skills-frontline` command. See
-> `docs/front-line-shelf-vs-gateway.md` in the canonical repository.
 
 One gateway, two faces, one catalog. An agent discovers a tool by *intent*,
 pulls the contract for that one tool, invokes it, and gets a bounded response.
@@ -33,7 +21,7 @@ Nothing else enters the context window.
                         ┌───────────────▼───────────────┐
                         │  catalog.db  (control plane)   │
                         │  FTS5 BM25 + weighted aliases  │
-                        │  optional embedding re-ranker  │
+                        │  + bge-small skill vectors     │
                         └───────────────┬───────────────┘
                                         │
                         ┌───────────────▼───────────────┐
@@ -67,23 +55,59 @@ deliberate author intent and outranks incidental prose.
        → omnicli tools zoom-recorder
 ```
 
-### The re-ranker is gated, not always on
+### Two legs, fused by rank
 
-BM25 plus curated aliases is near-saturated on the golden set (60/61 top-1),
-and the semantic re-ranker changes the top hit on **none** of those 61 cases.
-So it runs only when the lexical ranking is unsure: the gap between the top two
-hits, relative to the top score, falls below `RERANK_GATE_MARGIN` (0.25).
+BM25 plus curated aliases is close to saturated on the golden set, and it is
+the leg that matches exact tokens (`:8083`, `canvas-cli`). What it cannot do is
+recognise a paraphrase. The second leg embeds each skill's **description** with
+`bge-small-en-v1.5` (384d, `-ngl 0` — CPU only, zero VRAM) and the two rankings
+are fused with reciprocal rank fusion, `K=60`.
 
-| mode | latency | golden top-1 | fires on |
+`fusion=auto` fuses only when BM25's own margin is thin (below
+`RERANK_GATE_MARGIN`), because fusion buys unseen phrasings and costs tuned
+ones:
+
+| mode | golden top-1 | held-out top-1 | median latency |
 |---|---|---|---|
-| `--rerank never` | 4.0 ms | 60/61 | 0/61 |
-| `--rerank auto` (default) | 24 ms | 60/61 | 9/61 |
-| `--rerank always` | 126 ms | 60/61 | 61/61 |
+| `--fusion never` | 59/61 | 24/30 | 3.8 ms |
+| `--fusion auto` (default) | 56/61 | 26/30 | 4.5 ms |
+| `--fusion always` | 52/61 | 28/30 | 12.8 ms |
 
-Same accuracy, 6x less latency. The re-ranker itself is `bge-small-en-v1.5`
-on the local embedding endpoint, running with `-ngl 0` — **CPU only, zero
-VRAM**. When the embedding server is down, `auto` falls back to `bm25(gated)`
-and the catalog stays fully usable.
+The golden set shares this catalog's vocabulary, so the lexical leg wins it.
+The held-out set is paraphrased intent, authored by this catalog's own author —
+which means it is **a ceiling, not a forecast**: the descriptions were written
+with those 30 queries in view. Read it as "the mechanism responds", not as an
+expected accuracy.
+
+### The description field is the cheapest lever
+
+Frontmatter `description` is the only per-skill text both legs see: BM25
+indexes it as a `skill`-kind doc row, and the dense leg embeds it. The Agent
+Skills spec asks for exactly the two things routing needs — *"when to use it"*
+and *"specific keywords that help agents identify relevant tasks"*.
+
+Twelve descriptions rewritten to that pattern (same claims, plus user
+vocabulary and one differentiator apiece) moved held-out BM25 from 12/30 to
+19/30 before any dense leg was involved, at a cost of one golden case. The
+useful vocabulary is the user's ("school portal", "closed source", "second
+opinion"), not the system's.
+
+### Body length is a ranking bias
+
+BM25 normalises per chunk (`b=0.75`), but aggregation takes the best chunk per
+skill, so a 93-chunk body gets 93 chances at one good chunk while a 1-chunk
+skill gets one. `CHUNK_PENALTY_ALPHA` (default `0.2`, env
+`OMNICLI_CHUNK_ALPHA`) damps the score by `chunks**-alpha`, which removed the
+`icm-architect` hijack of generic queries. Measured: held-out `fusion=always`
+top-3 went 29/30 → 30/30 and top-1 26/30 → 28/30 between alpha 0 and 0.2, for
+one golden case. Above 0.3 the tuned set starts paying for it.
+
+Every result names the legs that found it (`found_by`) and the fused score is
+normalised to 0-1 while `lexical_score` keeps the BM25 value. When :8087 is
+down the tier says `bm25 (dense offline)`, `dense.reason` carries the error,
+and the result set is exactly what BM25 found — retrieval gets worse, it does
+not fail. Vectors are keyed to a fingerprint of each description, so an edited
+`SKILL.md` re-embeds on the next `omnicli index` without a full rebuild.
 
 ### Discovery does not imply exposure
 
@@ -131,6 +155,11 @@ omnicli describe canvas-cli --section "token shield"
 This is the spec's progressive disclosure, routed through the gateway: the
 outline first, then one section. A skill's body is never fetched whole unless
 that is what you ask for.
+
+`omnicli spec --grep <re> --stubs` is the wide-angle version: annotated
+signatures for every matching tool, in one bounded reply. It is what an agent
+reads before writing a plan, and `omni_describe(stub: true)` returns the same
+thing over MCP.
 
 The skills themselves are **never modified**. The catalog is an index over
 them: it reads the files, it does not own them. Delete `catalog.db` and every
@@ -180,28 +209,36 @@ Python plan instead: the intermediates stay in variables and only what you
 print comes back.
 
 ```bash
-omnicli bindings            # writes ~/.local/share/omnicli/bindings/omnicli_tools.py
-omnicli exec plan.py        # runs it in bubblewrap; prints only the plan's stdout
+omnicli spec --grep zoom --stubs   # the typed surface for just those tools
+omnicli bindings                   # writes ~/.local/share/omnicli/bindings/omnicli_tools.py
+omnicli exec plan.py               # runs it in bubblewrap; prints only the plan's stdout
+omnicli exec plan.py --sandbox strict
 ```
 
 ```python
-from omnicli_tools import search, describe, invoke
+from omnicli_tools import search, spec, zoom, invoke
 
-rows = search("audio transcription", limit=3)      # discovery inside the plan
-tool = f"{rows[0]['skill']}/scripts/audiocpp_cli"
-print(describe(tool)["enabled"])                  # contract never enters context
+print(len(spec(grep="zoom")))            # query 481 contracts without loading them
+zoom(url="https://zoom.us/rec/share/x", format="md")   # one annotated function per tool
 
-transcript = invoke(tool, "asr", "talk.wav")      # result stays in a variable
-print(transcript["output"][:200])                 # only this reaches the model
+rows = search("audio transcription", limit=3)          # discovery inside the plan
+print(invoke(f"{rows[0]['skill']}/scripts/audiocpp_cli", "asr", "talk.wav")["output"][:200])
 ```
+
+Every catalogued tool is generated as a function with the flags, metavars and
+choices recovered from its own `--help`: `url: str` is required, `format` is
+`Literal["md","vtt","txt","all"]`, `video` is a bool. A wrong argument fails
+at import time, not at call forty.
 
 | Property | Behaviour |
 |---|---|
 | **Policy** | every call shells out to `omnicli invoke`, so the enable gate, projection and 8 KB cap still apply |
-| **Discovery** | `search()` and `describe()` are callable *inside* the plan — definitions never enter the window |
-| **Isolation** | bubblewrap: writes land only in the workspace and an ephemeral `/tmp`; `/` is read-only |
-| **Network** | stays up on purpose — the tools this fronts are loopback inference servers (`:8080`, `:8083`, …), and a netns would cut them |
-| **Trace** | each call appends to `.omnicli_trace.jsonl`; `exec --json` reports `tool_calls`, seconds and bytes |
+| **Surface** | one annotated function per tool, plus `spec()` to filter the catalog in-plan |
+| **Discovery** | `search()`, `spec()` and `describe()` are callable *inside* the plan — definitions never enter the window |
+| **Isolation (`write`)** | bubblewrap: writes land only in the workspace and an ephemeral `/tmp`; `/` is read-only |
+| **Isolation (`strict`)** | no network, home masked, and every tool call crosses one UNIX socket to the parent; the plan holds no credentials and cannot open a socket |
+| **Allowlist** | a strict plan can reach `search`, `list`, `tools`, `describe`, `invoke`, `policy`, `spec` — `exec` and `mcp` are refused with rc 126 and recorded in `bridge_denied` |
+| **Trace** | each call appends to `.omnicli_trace.jsonl`; `exec --json` reports `tool_calls`, `bridge_calls`, seconds and bytes |
 | **Escape hatch** | `--no-sandbox` runs unsandboxed; `--workspace DIR` chooses the writable root |
 
 Token arithmetic: a 9-step job becomes **one** model turn. The plan's own
@@ -221,7 +258,7 @@ startup instead of 150,000:
 | Tool | Input | Returns |
 |---|---|---|
 | `omni_discover` | `intent`, `limit` (default 5), `rerank`, `max_bytes` | compact routing view: skill, score, why, best tool ids |
-| `omni_describe` | `tool_id`, `section`, `doc`, `max_bytes` | the exact contract for that one tool, or a skill's outline / one section |
+| `omni_describe` | `tool_id`, `section`, `doc`, `stub`, `grep`, `max_bytes` | the exact contract for that one tool, or a skill's outline / one section; `stub: true` with `tool_id: "*"` returns many annotated signatures |
 | `omni_invoke` | `tool_id`, `args`, `projection`, `jq`, `grep`, `max_bytes`, `timeout` | bounded, projected result |
 | `omni_status` | `max_bytes` | endpoint health, catalog freshness, enable count, retrieval tier |
 
@@ -245,7 +282,7 @@ Available both as subcommands and as tools in the catalog:
 | Command | Tool id | Model |
 |---|---|---|
 | `omnicli llm "<prompt>"` | `local/llm` | Qwen3.6-35B Genesis, dual-GPU (:8080) |
-| `omnicli ocr <file>` | `local/ocr` | LightOnOCR-3-1B (:8085) |
+| `omnicli ocr <file>` | `local/ocr` | LightOnOCR-3-0.8B (:8085) |
 | `omnicli decide "<state>" "<q>"` | `local/decide` | the decision model on :8083, protocol auto-detected (pplx-decider-flash v1.2 or vllm-d3-mini) |
 | `omnicli asr transcribe <audio>` | `local/asr` | Nemotron-3.5 ASR (:8081) |
 
@@ -270,21 +307,28 @@ shoulders and onto a BM25 index, and the golden evaluation in `tests/` is the
 falsifiable claim that it works:
 
 ```
-BM25 catalog    top1 60/61 (98.4%)   top3 60/61 (98.4%)
+BM25 catalog    top1 59/61 (96.7%)   top3 61/61 (100%)
 legacy scorer   top1 35/61 (57.4%)   top3 46/61 (75.4%)
 ```
 
 The miss is a generic-token query ("decide which model should handle this
 prompt before answering") where the decision skill matches all six tokens and
-the router matches four; the re-ranker does not separate them either. It is
-recorded, not excluded.
+the router matches four; neither leg separates them. It is recorded, not
+excluded.
 
 The alias set is audited against the eval set (`tests/overfit_check.py`) so a
 router handed the answer key cannot be mistaken for a router that works. It
 currently reports **0** echoes; three verbatim-echo aliases were removed, and
-the case one of them propped up is the miss above. `omnicli eval --rerank
-auto|always|never` re-runs the set under any re-ranker mode; all three
-currently score 60/61.
+the case one of them propped up is the miss above.
+
+**That 96.7% is a tuned-set number and should be quoted as one.** 32 of the 61
+queries share a curated alias string, so the set measures whether the
+vocabulary was written down, not whether a stranger's phrasing lands. The
+held-out set scores 24/30 on BM25 alone — and that number is itself optimistic,
+because the descriptions were written with those queries in view. Both are
+true; neither predicts a stranger's results. `omnicli eval --fusion
+auto|always|never` and `--rerank auto|always|never` re-run the set under either
+semantic mode.
 
 ### Token cost (measured)
 

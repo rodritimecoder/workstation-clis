@@ -1,10 +1,15 @@
 """Generate the Python binding module used by `omnicli exec`.
 
-The bindings are deliberately thin: every call shells out to the `omnicli`
-CLI, so a plan inherits the enable gate, field projection, byte cap and disk
-buffer rather than reimplementing them. What the sandbox buys is not a second
-policy engine — it is the ability to keep intermediate values in variables
-instead of the model's context window.
+The bindings are deliberately thin at the transport layer: every call shells
+out to the `omnicli` CLI, so a plan inherits the enable gate, field
+projection, byte cap and disk buffer rather than reimplementing them. What
+the sandbox buys is not a second policy engine — it is the ability to keep
+intermediate values in variables instead of the model's context window.
+
+The surface layer is not thin. Each catalogued tool gets one annotated
+function, generated from its extracted `--help`, so a plan calls
+`zoom_recording(url=...)` and an unknown or misspelled argument fails at
+import time instead of halfway through a fifty-call run.
 """
 
 from __future__ import annotations
@@ -14,10 +19,15 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-MODULE = '''"""omnicli bindings — generated file, do not edit.
+from . import argspec
 
-One plan, one turn. `search()` picks a tool by intent, `describe()` returns
-one contract, `invoke()` runs it. Intermediate values stay in Python
+BINDINGS_VERSION = "2"
+
+MODULE_HEAD = '''"""omnicli bindings — generated file, do not edit.
+
+One plan, one turn. `search()` picks a tool by intent, `spec()` queries the
+whole catalog without loading it, and every tool also exists as an annotated
+function (`zoom_recording(url=...)`). Intermediate values stay in Python
 variables; only what you print comes back to the model.
 
 Every call goes through the `omnicli` CLI, so the enable gate, projection,
@@ -29,9 +39,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from typing import Any, Literal
 
 OMNICLI = os.environ.get("OMNICLI_BIN", "omnicli")
 TOOL_IDS = __TOOL_IDS__
+SPEC: list[dict[str, Any]] = json.loads(__SPEC__)
+SIGNATURES: dict[str, str] = {row["id"]: row["sig"] for row in SPEC}
 
 
 def _log(event):
@@ -79,6 +92,30 @@ def describe(tool_id):
     return json.loads(proc.stdout)
 
 
+def spec(skill=None, grep=None, kind=None, limit=None):
+    """Query every catalogued tool: id, fn, required args, flags, commands.
+
+    Filtering happens here, in the plan, so 481 contracts never cross into
+    the model's window. `grep` is a case-insensitive regular expression over
+    the id and the summary.
+    """
+    import re
+
+    pattern = re.compile(grep, re.IGNORECASE) if grep else None
+    rows = []
+    for row in SPEC:
+        if skill and row["skill"] != skill:
+            continue
+        if kind and row["kind"] != kind:
+            continue
+        if pattern and not (pattern.search(row["id"]) or pattern.search(row["summary"])):
+            continue
+        rows.append(row)
+        if limit and len(rows) >= int(limit):
+            break
+    return rows
+
+
 def invoke(tool_id, *args, project=None, grep=None, max_bytes=None, timeout=300.0):
     """Run one enabled tool. Returns the CLI envelope: output, exit_code, bytes."""
     argv = [OMNICLI, "invoke", tool_id, *[str(a) for a in args], "--omni-json"]
@@ -98,20 +135,75 @@ def invoke(tool_id, *args, project=None, grep=None, max_bytes=None, timeout=300.
 def output(tool_id, *args, **kwargs):
     """invoke() and return only the shaped stdout, not the envelope."""
     return invoke(tool_id, *args, **kwargs).get("output", "")
+
 '''
 
 
-def _omnicli_command() -> str:
-    return shutil.which("omnicli") or "omnicli"
+def _spec_rows(con: sqlite3.Connection) -> list[dict]:
+    rows = con.execute(
+        "SELECT id, skill, kind, summary, contract FROM tools ORDER BY id"
+    ).fetchall()
+    sigs = argspec.signatures(rows)
+    payload = []
+    for sig in sigs:
+        payload.append({
+            "id": sig.id,
+            "fn": sig.func,
+            "skill": sig.skill,
+            "kind": sig.kind,
+            "summary": sig.summary[:160],
+            "sig": sig.line(),
+            "args": [p.name for p in sig.ordered_positionals()],
+            "required": [p.name for p in sig.ordered_positionals() if p.required]
+                        + [p.name for p in sig.params if p.required],
+            "params": {
+                p.name: {
+                    "flag": p.flag,
+                    "type": p.kind if p.kind != "choices" else p.choices,
+                }
+                for p in sig.params
+            },
+            "commands": sig.commands[:32],
+        })
+    return payload, sigs
+
+
+def module_source(con: sqlite3.Connection) -> str:
+    payload, sigs = _spec_rows(con)
+    ids = [sig.id for sig in sigs]
+    source = MODULE_HEAD.replace("__TOOL_IDS__", json.dumps(ids, ensure_ascii=False, indent=0))
+    source = source.replace("__SPEC__", repr(json.dumps(payload, ensure_ascii=False)))
+
+    generated = [
+        "\n# " + "-" * 70 + "\n# one function per catalogued tool\n# " + "-" * 70 + "\n"
+    ]
+    for sig in sigs:
+        generated.append("\n" + argspec.emit_module(sig))
+    generated.append("\n\nTOOLS = {\n" + "".join(
+        f"    {sig.id!r}: {sig.func},\n" for sig in sigs
+    ) + "}\n")
+    return source + "".join(generated)
+
+
+def stubs(con: sqlite3.Connection, skill: str | None = None, grep: str | None = None) -> list[str]:
+    import re
+
+    pattern = re.compile(grep, re.IGNORECASE) if grep else None
+    rows = con.execute(
+        "SELECT id, skill, kind, summary, contract FROM tools ORDER BY id"
+    ).fetchall()
+    lines = []
+    for sig in argspec.signatures(rows):
+        if skill and sig.skill != skill:
+            continue
+        if pattern and not (pattern.search(sig.id) or pattern.search(sig.summary)):
+            continue
+        lines.append(f"{sig.line()}\n    # {sig.summary[:100]}")
+    return lines
 
 
 def bindings_dir() -> Path:
     return Path.home() / ".local" / "share" / "omnicli" / "bindings"
-
-
-def module_source(con: sqlite3.Connection) -> str:
-    ids = [row[0] for row in con.execute("SELECT id FROM tools ORDER BY id")]
-    return MODULE.replace("__TOOL_IDS__", json.dumps(ids, ensure_ascii=False, indent=0))
 
 
 def write(con: sqlite3.Connection, out_dir: Path | None = None) -> Path:
@@ -122,12 +214,18 @@ def write(con: sqlite3.Connection, out_dir: Path | None = None) -> Path:
 
 
 def ensure(con: sqlite3.Connection, fingerprint: str, out_dir: Path | None = None) -> Path:
-    """Write the module when the catalog fingerprint changed, else reuse it."""
+    """Write the module when its generated source differs from what is cached.
+
+    Comparing the source rather than a fingerprint means a change to the
+    generator invalidates the cache as reliably as a change to the catalog.
+    Generation costs about 20 ms; a stale surface costs a wrong call.
+    """
     out = Path(out_dir) if out_dir else bindings_dir()
-    marker = out / ".fingerprint"
+    out.mkdir(parents=True, exist_ok=True)
+    source = module_source(con)
     module = out / "omnicli_tools.py"
-    if module.is_file() and marker.is_file() and marker.read_text().strip() == fingerprint:
+    if module.is_file() and module.read_text(encoding="utf-8") == source:
         return out
-    write(con, out)
-    marker.write_text(fingerprint, encoding="utf-8")
+    module.write_text(source, encoding="utf-8")
+    (out / ".fingerprint").write_text(f"{fingerprint}:{BINDINGS_VERSION}", encoding="utf-8")
     return out

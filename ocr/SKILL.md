@@ -2,9 +2,12 @@
 name: ocr
 
 description: >
-  Unified High-Performance OCR Hub combining Premier LightOnOCR-3-1B (documents, PDFs, slides,
-  ~16k t/s prefill, ~330 t/s generation) with CrispEmbed (spatial scene-text 2D bounding boxes).
-  Features one-way deterministic markdown stdout piping, typed JSON contracts, and automatic server lifecycle.
+  Unified OCR hub on dual AMD Radeon GPUs: LightOnOCR-3-0.8B (:8085) transcribes documents,
+  PDFs, screenshots and video slides into structured Markdown; CrispEmbed (:8084) returns 2D
+  spatial coordinates and text tokens for scene text and UI elements. Use to read text out of
+  an image, screenshot or scanned page, to OCR a PDF or slide deck, or to get bounding boxes
+  for words on screen. To locate a described object rather than read its text, use clip-box;
+  for layout-typed regions, tables and formulas, use doc-layout.
 
 compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan, plus the LightOnOCR server on :8085 and CrispEmbed on :8084."
 allowed-tools: "Bash(ocr:*) Bash(python3:*) Read Write"
@@ -13,7 +16,7 @@ allowed-tools: "Bash(ocr:*) Bash(python3:*) Read Write"
 # `ocr` — Unified Premier OCR Hub
 
 A unified, hardware-accelerated OCR toolchain on **Dual AMD Radeon RX 9060 XT** GPUs, combining:
-1. **LightOnOCR-3-1B (Premier Engine, `:8085`)**: The flagship model for high-throughput document, PDF, screenshot, and video slide transcription into structured Markdown.
+1. **LightOnOCR-3-0.8B (Premier Engine, `:8085`)**: The flagship model for high-throughput document, PDF, screenshot, and video slide transcription into structured Markdown.
 2. **CrispEmbed (Spatial Engine, `:8084`)**: PP-OCRv6 DB++ / DBNet for detecting 2D spatial coordinates `[x1, y1, x2, y2]`, text tokens, and UI button locations.
 
 ---
@@ -22,7 +25,7 @@ A unified, hardware-accelerated OCR toolchain on **Dual AMD Radeon RX 9060 XT** 
 
 The canonical executable is located at `~/.local/bin/ocr` (and `~/.local/bin/ocr-cli`, symlinked from `/run/media/rodri/AI/skills/ocr/ocr.py`).
 
-### 1. Premier Document & Slide OCR (LightOnOCR-3-1B)
+### 1. Premier Document & Slide OCR (LightOnOCR-3-0.8B)
 ```bash
 # Clean UNIX stdout: returns only transcribed Markdown text
 ocr slide.png > slide.md
@@ -90,5 +93,5 @@ ocr server stop --engine all
 
 | Capability | Engine | Port | Format | Specialty |
 |---|---|---|---|---|
-| **Document / PDF / Slide** | **LightOnOCR-3-1B** | `:8085` | Structured Markdown | ~16,000 t/s prefill, ~330 t/s gen, flagship text OCR |
+| **Document / PDF / Slide** | **LightOnOCR-3-0.8B** | `:8085` | Structured Markdown | flagship text OCR (thinking variant — output in `reasoning_content`) |
 | **Spatial Scene Text / UI** | **CrispEmbed (PP-OCRv6)** | `:8084` | 2D Bounding Boxes `[x1, y1, x2, y2]` | Sub-second spatial UI detection for `frontend-uat` |

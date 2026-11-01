@@ -169,6 +169,19 @@ def main() -> int:
         results.append(check("omni_describe reports the enable state",
                              isinstance(desc.get("enabled"), bool)))
 
+        # 4b. stub mode: many signatures, still one bounded reply
+        r = c.call("tools/call", {
+            "name": "omni_describe",
+            "arguments": {"tool_id": "*", "stub": True, "grep": "zoom", "max_bytes": 6000},
+        })
+        stubs = json.loads(r["result"]["content"][0]["text"])
+        results.append(check("omni_describe stub mode returns annotated signatures",
+                             stubs.get("matched", 0) >= 1
+                             and "zoom(url: str" in stubs.get("signatures", ""),
+                             f"{stubs.get('matched', 0)} matched"))
+        results.append(check("omni_describe stub mode stays bounded",
+                             len(r["result"]["content"][0]["text"].encode()) <= 6000))
+
         # 5. omni_invoke — bounded output
         r = c.call("tools/call", {
             "name": "omni_invoke",

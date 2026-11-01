@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ocr-cli - local OCR for PDFs, slides, and images via local vision models (LightOnOCR-3-1B).
+ocr-cli - local OCR for PDFs, slides, and images via local vision models (LightOnOCR-3-0.8B).
 
 Talks to any OpenAI-compatible /v1/chat/completions endpoint. The default
-endpoint is a llama-server running LightOnOCR-3-1B on port 8085.
+endpoint is a llama-server running LightOnOCR-3-0.8B on port 8085.
 
 The server is NOT started by this script: `--doctor` and `--server-cmd` report
 whether it is reachable and print the exact llama-server invocation to run.
@@ -89,10 +89,10 @@ import requests  # noqa: E402
 
 ENGINES = {
     "lighton": {
-        "name": "LightOnOCR-3-1B",
+        "name": "LightOnOCR-3-0.8B",
         "port": 8085,
-        "default_model_dir": "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF",
-        "description": "Ultra-fast document and video slide OCR (~16k t/s prefill, ~330 t/s gen). Best for video-miner.",
+        "default_model_dir": "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-0.8B-GGUF",
+        "description": "Ultra-fast document and video slide OCR (thinking variant). Best for video-miner.",
     },
     "navidc": {
         "name": "NaviDC-OCR",
@@ -130,7 +130,7 @@ model_dir_str = os.environ.get("OCR_MODEL_DIR") or os.environ.get("NAVIDC_OCR_MO
 if model_dir_str:
     MODEL_DIR = Path(model_dir_str)
 else:
-    MODEL_DIR = Path(ENGINES.get(DEFAULT_ENGINE, {}).get("default_model_dir", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-1B-GGUF"))
+    MODEL_DIR = Path(ENGINES.get(DEFAULT_ENGINE, {}).get("default_model_dir", "/run/media/rodri/AI/models/prithivMLmods/LightOnOCR-3-0.8B-GGUF"))
 
 DEFAULT_PROMPT = "Extract all text faithfully, preserving layout, tables, and structure in Markdown."
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
@@ -232,7 +232,8 @@ def ocr_image(img_bytes: bytes, endpoint: str, prompt: str,
         try:
             res = requests.post(endpoint, json=payload, timeout=TIMEOUT)
             res.raise_for_status()
-            return res.json()["choices"][0]["message"]["content"]
+            msg = res.json()["choices"][0]["message"]
+            return msg.get("content") or msg.get("reasoning_content") or ""
         except Exception as e:                      # noqa: BLE001 - reported below
             last = e
             if attempt < retries:
@@ -329,7 +330,7 @@ def cmd_server_cmd(ns) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="ocr.py",
-        description="OCR PDFs, slides, and images with local vision models (LightOnOCR-3-1B / SmolDocling / CrispEmbed).",
+        description="OCR PDFs, slides, and images with local vision models (LightOnOCR-3-0.8B / SmolDocling / CrispEmbed).",
     )
     p.add_argument("file", nargs="?", help="PDF or image to OCR")
     p.add_argument("-p", "--prompt", default=DEFAULT_PROMPT, help="extraction prompt")

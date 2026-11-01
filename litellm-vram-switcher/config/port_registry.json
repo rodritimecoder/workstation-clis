@@ -58,7 +58,7 @@
       "alias": "local-ocr-lighton",
       "vram_mb": 1500,
       "pinned": false,
-      "name": "LightOnOCR-3-1B",
+      "name": "LightOnOCR-3-0.8B",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/lighton-ocr.sh",
       "role": "Documents, PDFs and slides \u2014 fast prefill, high-throughput markdown"
     },

@@ -52,13 +52,13 @@ def main():
     parent_parser.add_argument("--crisp-port", type=int, default=8084, help="CrispEmbed port (default: 8084)")
 
     parser = argparse.ArgumentParser(
-        description="ocr — Unified High-Performance OCR Hub (Premier LightOnOCR-3-1B + CrispEmbed Spatial)",
+        description="ocr — Unified High-Performance OCR Hub (Premier LightOnOCR-3-0.8B + CrispEmbed Spatial)",
         parents=[parent_parser]
     )
     sub = parser.add_subparsers(dest="command")
 
     # Primary OCR parser
-    p_read = sub.add_parser("read", aliases=["doc", "scan"], parents=[parent_parser], help="Document & Slide OCR via premier LightOnOCR-3-1B")
+    p_read = sub.add_parser("read", aliases=["doc", "scan"], parents=[parent_parser], help="Document & Slide OCR via premier LightOnOCR-3-0.8B")
     p_read.add_argument("file", help="Input document (.pdf) or image (.png/.jpg)")
     p_read.add_argument("--prompt", "-p", default=None, help="Custom extraction prompt")
     p_read.add_argument("--pages", help="PDF page range selection (e.g. 1-3,5)")
@@ -140,7 +140,7 @@ def main():
         lighton_ok = engine.is_lighton_online()
         crisp_ok = engine.is_crisp_online()
         doc = {
-            "premier_engine": "LightOnOCR-3-1B",
+            "premier_engine": "LightOnOCR-3-0.8B",
             "lighton_online": lighton_ok,
             "lighton_port": args.lighton_port,
             "lighton_models_ready": LIGHTON_MODEL_DIR.is_dir(),
@@ -153,7 +153,7 @@ def main():
             print(json.dumps(doc, indent=2))
         else:
             print("🔍 [ocr] Diagnostic Health Check:")
-            print(f"  Premier Engine   : LightOnOCR-3-1B (port {args.lighton_port})")
+            print(f"  Premier Engine   : LightOnOCR-3-0.8B (port {args.lighton_port})")
             print(f"  LightOn Status   : {'🟢 Active' if lighton_ok else '⚪ Inactive (auto-start ready)'}")
             print(f"  Spatial Engine   : CrispEmbed PP-OCRv6 (port {args.crisp_port})")
             print(f"  CrispEmbed Status: {'🟢 Active' if crisp_ok else '⚪ Inactive (direct fallback ready)'}")

@@ -54,7 +54,7 @@ ENDPOINTS = {
         "argv": ["{python}", "{skill}/scripts/llm_client.py"],
     },
     "local/ocr": {
-        "summary": "Local document/slide/image OCR via LightOnOCR-3-1B (:8085).",
+        "summary": "Local document/slide/image OCR via LightOnOCR-3-0.8B (:8085).",
         "argv": ["{python}", "{skill}/scripts/ocr.py"],
     },
     "local/decide": {

@@ -29,7 +29,7 @@ the auxiliary models are evicted and restored on demand.
 | `gemma4-26b` | ~18 GB | Heavy general model; evicts the King when called, and swaps it back when done |
 | `h2o-lightning-4b` | ~3.2 GB | **The** JEV decision model: native `/v1/systemone` on `:8083`, calibrated text and vision decisions; JEV rejects other served models |
 | `deskforge-4b` | ~3.5 GB | Desktop computer-use coordinate extraction |
-| `lighton-ocr` | ~1.5 GB | Flagship 16k t/s slide and document OCR; runs concurrently alongside the King |
+| `lighton-ocr` | ~0.6 GB | Flagship slide and document OCR; runs concurrently alongside the King |
 
 The **LiteLLM gateway** on `:4000` routes to `llama-swap` on `:8000`, and
 fails over to `openrouter/free` or `gemini/gemini-2.5-flash` when local

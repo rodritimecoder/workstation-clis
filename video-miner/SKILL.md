@@ -1,7 +1,7 @@
 ---
 name: video-miner
 
-description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local verbatim speech-to-text (CrisperWhisper 2.0 via audiocpp, Nemotron optional), deterministic frame gating (perceptual dedup + blank rejection), and OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 with the kem-ocr structural gate. Built on ICM (Interpretable Context Methodology) with staged folders and human review checkpoints."
+description: "Extract, transcribe, and synthesize knowledge from video files or URLs into structured markdown notes using local verbatim speech-to-text, deterministic frame gating (perceptual dedup + blank rejection), and OCR with the kem-ocr structural gate. Built on ICM with staged folders and human review checkpoints. Use to turn a recorded lecture, talk, webinar or screen recording into study notes, to mine a pile of video for what it teaches, or to get a transcript plus slides out of video you already have. For audio with no picture, use audiocpp; for a Zoom cloud recording link, use zoom-recorder."
 
 compatibility: "Requires ffmpeg and the `audiocpp` CLI (CrisperWhisper 2.0 Large Q4_K by default — verbatim, 15x real-time; `--asr-model nemotron` to switch). No ASR server is needed. OCR needs either LightOnOCR (:8085) or MiniCPM-OCR-1.0 GGUF + the kem-ocr skill. h2o-lightning-4b on :8083 is optional, only for --gate h2o."
 allowed-tools: "Bash(video-miner:*) Bash(ffmpeg:*) Bash(python3:*) Read Write"
@@ -24,7 +24,7 @@ Follows **Interpretable Context Methodology (ICM)**:
 | `02_audio_asr` | Transcribe speech via `audiocpp` (CrisperWhisper 2.0, verbatim + word timings) | `01_acquire/output/audio.wav` | `output/transcript.md` *(edit/correct terms)* |
 | `03_visual_sample` | Keyframe (`-skip_frame nokey`), scene-cut, or fps sampling with PTS timing | `01_acquire/output/source_video.mp4` | `output/frames/`, `manifest.json` |
 | `04_visual_gate` | Perceptual dedup (dHash) + blank rejection, or h2o vision gate | `03_visual_sample/output/manifest.json` | `output/gated_frames.json` *(check kept frames)* |
-| `05_visual_ocr` | OCR via LightOnOCR-3-1B or MiniCPM-OCR-1.0 (+ structural gate) | `04_visual_gate/output/text_frames/` | `output/ocr_timeline.md` *(fix OCR typos)* |
+| `05_visual_ocr` | OCR via LightOnOCR-3-0.8B or MiniCPM-OCR-1.0 (+ structural gate) | `04_visual_gate/output/text_frames/` | `output/ocr_timeline.md` *(fix OCR typos)* |
 | `06_synthesize` | Merge audio transcript & visual OCR into notes | `02_audio_asr` + `05_visual_ocr` | `output/mined_video.md` *(final deliverable)* |
 
 
@@ -111,7 +111,7 @@ keep more. Frames with no luminance spread are dropped as blank.
 `--gate h2o` spends a vision decision per frame and is the right choice for
 talking-head footage where the screen is not the subject.
 
-`--ocr lighton` (default) keeps LightOnOCR-3-1B. `--ocr minicpm` runs
+`--ocr lighton` (default) keeps LightOnOCR-3-0.8B. `--ocr minicpm` runs
 MiniCPM-OCR-1.0 with `Text Recognition:` and then applies the `kem-ocr`
 structural gate (`text` mode): frames whose OCR is empty, repetitive or
 non-textual are dropped before they reach the timeline. Frames whose text is

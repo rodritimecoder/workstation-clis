@@ -28,7 +28,7 @@ def _drive_root() -> Path:
 
 AI_DIR = Path(os.environ.get("OCR_AI_DIR", _drive_root()))
 LIGHTON_LAUNCHER = AI_DIR / "sh" / "lighton-ocr.sh"
-LIGHTON_MODEL_DIR = AI_DIR / "models" / "prithivMLmods" / "LightOnOCR-3-1B-GGUF"
+LIGHTON_MODEL_DIR = AI_DIR / "models" / "prithivMLmods" / "LightOnOCR-3-0.8B-GGUF"
 
 CRISP_DIR = AI_DIR / "CrispEmbed"
 CRISP_LAUNCHER = AI_DIR / "sh" / "crispembed-ocr.sh"
@@ -136,7 +136,8 @@ class OCREngine:
         with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
-        raw_content = data["choices"][0]["message"]["content"]
+        msg = data["choices"][0]["message"]
+        raw_content = msg.get("content") or msg.get("reasoning_content") or ""
         cleaned = clean_transcript(raw_content)
         latency_ms = round((time.time() - t0) * 1000, 1)
         return cleaned, latency_ms

@@ -26,7 +26,7 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"Doctor failed: {res.stderr}")
         data = json.loads(res.stdout)
-        self.assertEqual(data["premier_engine"], "LightOnOCR-3-1B")
+        self.assertEqual(data["premier_engine"], "LightOnOCR-3-0.8B")
         self.assertTrue(data["lighton_models_ready"])
         self.assertTrue(data["crisp_models_ready"])
         print("  ✓ doctor health check · verified")
