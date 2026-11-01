@@ -303,7 +303,7 @@
       "decision"
     ]
   },
-  "litellm-vram-switcher": {
+  "model-layer": {
     "aliases": [
       "gpu memory",
       "vram",
@@ -315,7 +315,11 @@
       "thermal",
       "unload the models i don't need",
       "free up headroom",
-      "which model is resident"
+      "which model is resident",
+      "which model is loaded",
+      "weights",
+      "launcher",
+      "ports manifest"
     ],
     "tags": [
       "gpu",

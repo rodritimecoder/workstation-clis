@@ -283,17 +283,17 @@
     },
     {
       "query": "how much gpu vram is free right now",
-      "top1": "litellm-vram-switcher",
+      "top1": "model-layer",
       "expect": [
-        "litellm-vram-switcher"
+        "model-layer"
       ],
       "kind": "drift"
     },
     {
       "query": "swap the running model and check the thermal state",
-      "top1": "litellm-vram-switcher",
+      "top1": "model-layer",
       "expect": [
-        "litellm-vram-switcher"
+        "model-layer"
       ],
       "kind": "prose"
     },
