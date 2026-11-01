@@ -1,5 +1,5 @@
 # llama-swap Configuration for Dual AMD Radeon RX 9060 XT (32 GB VRAM)
-# Upstream canonical: /run/media/rodri/AI/skills/litellm-vram-switcher/config/llama-swap.yaml
+# Upstream canonical: ~/src/my-agent-skills/hardware/model-layer/config/llama-swap.yaml
 
 healthCheckTimeout: 180
 logLevel: info
