@@ -7,6 +7,8 @@ compatibility: "Requires ffmpeg and the `audiocpp` CLI (CrisperWhisper 2.0 Large
 allowed-tools: "Bash(video-miner:*) Bash(ffmpeg:*) Bash(python3:*) Read Write"
 ---
 
+> **Model layer:** the server behind this skill is registered in the `model-layer` skill (slot `:8085`) — launcher, weights files, health and quirks. Read it before starting, swapping or debugging the model.
+
 # video-miner
 
 Video mining pipeline combining local speech ASR and on-screen visual OCR into a unified, chronological markdown notes document.

@@ -13,6 +13,8 @@ compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan, plus the L
 allowed-tools: "Bash(ocr:*) Bash(python3:*) Read Write"
 ---
 
+> **Model layer:** the server behind this skill is registered in the `model-layer` skill (slot `:8084 + :8085`) — launcher, weights files, health and quirks. Read it before starting, swapping or debugging the model.
+
 # `ocr` — Unified Premier OCR Hub
 
 A unified, hardware-accelerated OCR toolchain on **Dual AMD Radeon RX 9060 XT** GPUs, combining:

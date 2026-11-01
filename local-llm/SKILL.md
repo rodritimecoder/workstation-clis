@@ -7,6 +7,8 @@ compatibility: "Requires dual AMD Radeon RX 9060 XT GPUs with Vulkan and the lla
 allowed-tools: "Bash(python3:*) Bash(local-llm:*) Bash(curl:*) Read"
 ---
 
+> **Model layer:** the server behind this skill is registered in the `model-layer` skill (slot `:8080`) — launcher, weights files, health and quirks. Read it before starting, swapping or debugging the model.
+
 # Local LLM — Qwen3.6-35B Genesis (`local-llm`)
 
 An OpenAI-compatible `llama-server` on `:8080`, serving

@@ -14,6 +14,8 @@ compatibility: "Requires a decision server on :8083 answering /v1/systemone (nou
 allowed-tools: "Bash(jev-decision:*) Bash(python3:*) Read Write"
 ---
 
+> **Model layer:** the server behind this skill is registered in the `model-layer` skill (slot `:8083`) — launcher, weights files, health and quirks. Read it before starting, swapping or debugging the model.
+
 # JEV Decision Engine (`jev-decision`)
 
 A decision model, not a generative one. It never writes prose: it takes facts and a

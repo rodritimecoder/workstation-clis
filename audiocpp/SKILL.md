@@ -12,6 +12,8 @@ compatibility: "Requires Dual AMD Radeon RX 9060 XT GPUs with Vulkan and the aud
 allowed-tools: "Bash(audiocpp:*) Bash(python3:*) Read Write"
 ---
 
+> **Model layer:** the server behind this skill is registered in the `model-layer` skill (slot `:8081`) — launcher, weights files, health and quirks. Read it before starting, swapping or debugging the model.
+
 # Local Audio Intelligence (`audiocpp`)
 
 Hardware-accelerated speech-to-text, text-to-speech, forced alignment and voice
