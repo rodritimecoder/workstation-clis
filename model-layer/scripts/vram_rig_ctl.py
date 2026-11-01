@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 vram_rig_ctl.py — Smart GPU VRAM, Port Switcher & llama-swap Controller
-Manages llama-swap (port 8000), direct ports 8080-8090, and LiteLLM gateway on port 4000.
+Manages llama-swap (port 8000) and direct ports 8080-8090.
 """
 
 import argparse
@@ -18,7 +18,6 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = BASE_DIR / "config" / "port_registry.json"
-LITELLM_CONFIG = BASE_DIR / "config" / "litellm_config.yaml"
 LLAMA_SWAP_CONFIG = BASE_DIR / "config" / "llama-swap.yaml"
 LOG_DIR = Path("/tmp/local-llm-ports")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -224,14 +223,12 @@ def cmd_status():
     registry = load_registry()
     vram = get_vram_info()
     active = get_listening_ports(8080, 8090)
-    gw_online = is_port_open(4000)
     swap_info = get_llama_swap_info(8000)
 
     pinned_port = registry.get("pinned_port", "8080")
     report = {
         "vram": vram,
         "llama_swap_8000": swap_info,
-        "litellm_gateway_4000": "ONLINE" if gw_online else "OFFLINE",
         "pinned_king_port": pinned_port,
         "ports_8080_8090": {},
     }
@@ -351,35 +348,12 @@ def cmd_swap(target_port):
     print(f"Launched process on port {target_port} (still loading weights—check {log_file}).")
 
 
-def cmd_gateway_up():
-    if is_port_open(4000):
-        print("ℹ️  LiteLLM Gateway is already running on port 4000.")
-        return
-    log_file = LOG_DIR / "litellm_4000.log"
-    cmd = f"litellm --config {LITELLM_CONFIG} --port 4000 --host 0.0.0.0"
-    print("🚀 Starting LiteLLM Gateway on port 4000...")
-    with open(log_file, "ab") as out:
-        subprocess.Popen(cmd, shell=True, stdout=out, stderr=out, start_new_session=True)
-    time.sleep(2)
-    print(f"✅ LiteLLM Gateway started on http://0.0.0.0:4000 (Logs: {log_file})")
-
-
-def cmd_gateway_down():
-    if not is_port_open(4000):
-        print("ℹ️  LiteLLM Gateway is not running on port 4000.")
-        return
-    kill_port("4000")
-    print("✅ LiteLLM Gateway on port 4000 stopped.")
-
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GPU VRAM & Port Switcher with llama-swap & LiteLLM")
+    parser = argparse.ArgumentParser(description="GPU VRAM & Port Switcher with llama-swap")
     sub = parser.add_subparsers(dest="action", required=True)
 
     sub.add_parser("status")
     sub.add_parser("evict-all")
-    sub.add_parser("gateway-up")
-    sub.add_parser("gateway-down")
 
     p_swap_up = sub.add_parser("llama-swap-up")
     p_swap_up.add_argument("--port", type=int, default=8000)
@@ -416,7 +390,3 @@ if __name__ == "__main__":
         cmd_llama_swap_down(args.port)
     elif args.action == "llama-swap-status":
         cmd_llama_swap_status(args.port)
-    elif args.action == "gateway-up":
-        cmd_gateway_up()
-    elif args.action == "gateway-down":
-        cmd_gateway_down()

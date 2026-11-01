@@ -1,6 +1,6 @@
 ---
 name: model-layer
-description: "The model layer of this machine: every local model server — llm (:8080), audio (:8081), decision (:8083/:8089), ocr (:8084/:8085), rerank + embed (:8086/:8087), grounding (:8088), ocr-jev (:8090) — with its launcher script, weights files, health check, quirks and the skills that consume it, plus the llama-swap rig (:8000) and LiteLLM failover gateway (:4000) via vram-rig-ctl. MUST READ before starting, stopping, swapping or debugging any local model server, or before writing code that calls one. The roster is generated from ports.json; a model swap edits the manifest and re-renders — never this file."
+description: "The model layer of this machine: every local model server — llm (:8080), audio (:8081), decision (:8083/:8089), ocr (:8084/:8085), rerank + embed (:8086/:8087), grounding (:8088), ocr-jev (:8090) — with its launcher script, weights files, health check, quirks and the skills that consume it, plus the llama-swap rig (:8000) via vram-rig-ctl. MUST READ before starting, stopping, swapping or debugging any local model server, or before writing code that calls one. The roster is generated from ports.json; a model swap edits the manifest and re-renders — never this file."
 allowed-tools: "Bash(vram-rig-ctl:*) Bash(python3:*) Bash(ports.py:*) Read"
 ---
 
@@ -41,24 +41,22 @@ on disk.
 
   `--dry-run` prints the whole plan and writes nothing.
 
-## The rig — llama-swap (:8000) and the LiteLLM gateway (:4000)
+## The rig — llama-swap (:8000)
 
 Beyond the slots sits the swapping rig, operated by `vram-rig-ctl`
-([scripts/vram_rig_ctl.py](scripts/vram_rig_ctl.py), configs in [config/](config/)):
+([scripts/vram_rig_ctl.py](scripts/vram_rig_ctl.py), config in [config/](config/)):
 
 - **`:8000` llama-swap** — a Go model-swapping proxy. One model is pinned (the
   llm slot's king holds the VRAM); auxiliary models are evicted and restored on
   demand. Start/inspect/stop with `vram-rig-ctl llama-swap-up | llama-swap-status
   | llama-swap-down`; it watches [config/llama-swap.yaml](config/llama-swap.yaml).
-- **`:4000` LiteLLM gateway** — OpenAI-compatible failover: routes to
-  llama-swap, and falls back to `openrouter/free` or Gemini when local
-  inference is offline or busy. `vram-rig-ctl gateway-up | gateway-down`;
-  config [config/litellm_config.yaml](config/litellm_config.yaml).
 - **Headroom:** `vram-rig-ctl status` (VRAM + every slot's state),
   `evict-all` (free every non-pinned port), `kill --port N`, `swap --port N`.
 
 The rig is `infra` in `ports.json` (owned by this skill); the slots above are
-the models it swaps.
+the models it swaps. Note: the rig config's `qwen3.6-35b` entry names the
+deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
+(`ports.py swap` covers the slots; `llama-swap.yaml` needs a matching edit).
 
 ## Rules
 

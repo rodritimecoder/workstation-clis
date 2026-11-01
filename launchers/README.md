@@ -28,8 +28,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 
 | Port | Infra | Service | Role |
 |---|---|---|---|
-| `:4000` | `litellm` | LiteLLM gateway | OpenAI-compatible failover gateway; routes to llama-swap |
-| `:8000` | `llama-swap` | llama-swap | Model multiplexer behind LiteLLM; swaps models in/out of VRAM |
+| `:8000` | `llama-swap` | llama-swap | Model multiplexer; swaps models in/out of VRAM |
 | `:3010` | `kasmvnc` | KasmVNC (podman) | Live interactive web desktop for browser inspection |
 | `:9222` | `cdp` | Chromium DevTools | CDP endpoint used by fast-cdp and Playwright |
 | `:9224` | `cdp-desktop` | Chromium DevTools (headed agent profile) | Headed Chromium CDP endpoint so a person can see and drive the automated page |

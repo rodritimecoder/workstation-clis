@@ -21,7 +21,6 @@ import urllib.error
 import urllib.request
 
 SERVICES = [
-    {"port": 4000, "name": "LiteLLM Dynamic Gateway", "role": "Multi-model proxy & failover", "probe": "/health/liveliness"},
     {"port": 8000, "name": "llama-swap Controller", "role": "Model hot-swapper", "probe": "/v1/models"},
     {"port": 8080, "name": "Genesis 35B Primary LLM", "role": "Dual-GPU flagship coder", "probe": "/health"},
     {"port": 8081, "name": "audio.cpp ASR & TTS", "role": "Streaming speech-to-text / TTS", "probe": "/health"},

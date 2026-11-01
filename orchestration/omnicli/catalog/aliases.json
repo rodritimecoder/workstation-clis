@@ -310,7 +310,6 @@
       "how much gpu is free",
       "swap model",
       "ollama",
-      "litellm proxy",
       "model server management",
       "thermal",
       "unload the models i don't need",

@@ -47,7 +47,7 @@ tailscale-ops doctor
 ```
 
 ### 5. Expose a Single Local Port Privately (`serve-on`)
-Expose a single dev server or LiteLLM gateway (`localhost:3000` or `localhost:4000`) with automatic HTTPS strictly inside the tailnet:
+Expose a single dev server or local API (`localhost:3000` or `localhost:8000`) with automatic HTTPS strictly inside the tailnet:
 ```bash
 tailscale-ops serve-on 4000
 ```
