@@ -52,7 +52,7 @@
       "pinned": false,
       "name": "CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec)",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/crispembed-ocr.sh",
-      "role": "Scene text \u2014 2D bounding boxes and structured markdown"
+      "role": "Documents & scene text \u2014 OXR-1.0 layout-aware Markdown, PP-OCRv6 bounding boxes"
     },
     "8085": {
       "alias": "local-ocr-lighton",

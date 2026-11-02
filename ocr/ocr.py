@@ -3,10 +3,12 @@ import argparse
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+import time
 
 sys.path.append(str(Path(__file__).resolve().parent / "scripts"))
-from ocr_engine import OCREngine, LIGHTON_LAUNCHER, CRISP_LAUNCHER, LIGHTON_MODEL_DIR, CRISP_MODELS_DIR
+from ocr_engine import OCREngine, LIGHTON_LAUNCHER, CRISP_LAUNCHER, LIGHTON_MODEL_DIR, CRISP_MODELS_DIR, OXR_MODEL, OXR_LAYOUT
 
 
 def _reexec_in_venv() -> None:
@@ -60,8 +62,11 @@ def main():
     # Primary OCR parser
     p_read = sub.add_parser("read", aliases=["doc", "scan"], parents=[parent_parser], help="Document & Slide OCR via premier LightOnOCR-3-0.8B")
     p_read.add_argument("file", help="Input document (.pdf) or image (.png/.jpg)")
-    p_read.add_argument("--prompt", "-p", default=None, help="Custom extraction prompt")
+    p_read.add_argument("--prompt", "-p", default=None, help="Custom extraction prompt (LightOnOCR only)")
     p_read.add_argument("--pages", help="PDF page range selection (e.g. 1-3,5)")
+    p_read.add_argument("--engine", choices=["auto", "oxr", "lighton"], default="auto",
+                        help="Document engine: oxr (OXR-1.0 layout+markdown), lighton, or auto (OXR when already running, else LightOnOCR)")
+    p_read.add_argument("--max-tokens", type=int, default=4096, help="OXR completion budget per region (default: 4096)")
     p_read.add_argument("--boxes", "--spatial", dest="spatial_mode", action="store_true", help="Extract spatial 2D bounding boxes via CrispEmbed")
     p_read.add_argument("--output", "-o", help="Write output to text/markdown file")
 
@@ -77,7 +82,7 @@ def main():
     # Server manager
     p_srv = sub.add_parser("server", parents=[parent_parser], help="Manage local OCR server daemons")
     p_srv.add_argument("action", choices=["start", "stop", "status", "restart"], help="Lifecycle action")
-    p_srv.add_argument("--engine", choices=["lighton", "crispembed", "all"], default="lighton", help="Target engine (default: lighton)")
+    p_srv.add_argument("--engine", choices=["lighton", "crispembed", "oxr", "all"], default="lighton", help="Target engine (default: lighton)")
 
     # Support running `ocr file.png` directly without subcommand
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-") and sys.argv[1] not in ("read", "doc", "scan", "spatial", "boxes", "doctor", "server"):
@@ -107,7 +112,15 @@ def main():
                     print(f"📍 {bbox_str} ({item['confidence']*100:.1f}%) -> {item['text']}")
             return
 
-        res = engine.ocr_document(file_p, prompt=args.prompt, pages=args.pages)
+        doc_engine = args.engine
+        if doc_engine == "auto":
+            doc_engine = "oxr" if (not engine.is_remote and engine.is_oxr_online()) else "lighton"
+
+        if doc_engine == "oxr":
+            res = engine.ocr_document_oxr(file_p, pages=args.pages, max_new_tokens=args.max_tokens)
+        else:
+            res = engine.ocr_document(file_p, prompt=args.prompt, pages=args.pages)
+
         if args.output:
             Path(args.output).resolve().write_text(json.dumps(res, indent=2) if args.json else res["text"], encoding="utf-8")
 
@@ -139,6 +152,7 @@ def main():
     elif args.command == "doctor":
         lighton_ok = engine.is_lighton_online()
         crisp_ok = engine.is_crisp_online()
+        oxr_ok = engine.is_oxr_online()
         doc = {
             "premier_engine": "LightOnOCR-3-0.8B",
             "lighton_online": lighton_ok,
@@ -148,11 +162,17 @@ def main():
             "crisp_online": crisp_ok,
             "crisp_port": args.crisp_port,
             "crisp_models_ready": CRISP_MODELS_DIR.is_dir(),
+            "document_engine": "OXR-1.0 (native D-FINE layout + document route)",
+            "oxr_online": oxr_ok,
+            "oxr_models_ready": OXR_MODEL.is_file() and OXR_LAYOUT.is_file(),
         }
         if args.json:
             print(json.dumps(doc, indent=2))
         else:
             print("🔍 [ocr] Diagnostic Health Check:")
+            print(f"  Document Engine  : OXR-1.0 (port {args.crisp_port})")
+            print(f"  OXR Status       : {'🟢 Active' if oxr_ok else '⚪ Inactive (auto-start ready)'}")
+            print(f"  OXR Weights      : {'🟢 Present' if doc['oxr_models_ready'] else '🔴 Missing'}")
             print(f"  Premier Engine   : LightOnOCR-3-0.8B (port {args.lighton_port})")
             print(f"  LightOn Status   : {'🟢 Active' if lighton_ok else '⚪ Inactive (auto-start ready)'}")
             print(f"  Spatial Engine   : CrispEmbed PP-OCRv6 (port {args.crisp_port})")
@@ -164,17 +184,22 @@ def main():
             st = {
                 "lighton": "online" if engine.is_lighton_online() else "offline",
                 "crispembed": "online" if engine.is_crisp_online() else "offline",
+                "oxr": "online" if engine.is_oxr_online() else "offline",
             }
             if args.json:
                 print(json.dumps(st, indent=2))
             else:
                 print(f"LightOnOCR (:8085): {st['lighton'].upper()}")
                 print(f"CrispEmbed (:8084): {st['crispembed'].upper()}")
+                print(f"OXR-1.0 (:8084)   : {st['oxr'].upper()}")
 
         elif args.action == "start":
             if target in ("lighton", "all"):
                 ok = engine.ensure_lighton()
                 print(f"LightOnOCR (:8085): {'STARTED' if ok else 'FAILED'}")
+            if target in ("oxr", "all"):
+                ok = engine.ensure_oxr()
+                print(f"OXR-1.0 (:8084): {'STARTED' if ok else 'FAILED'}")
             if target in ("crispembed", "all"):
                 if not engine.is_crisp_online():
                     subprocess.Popen([str(CRISP_LAUNCHER)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -185,7 +210,7 @@ def main():
             ports = []
             if target in ("lighton", "all"):
                 ports.append(args.lighton_port)
-            if target in ("crispembed", "all"):
+            if target in ("crispembed", "oxr", "all"):
                 ports.append(args.crisp_port)
             for p in ports:
                 subprocess.run(["fuser", "-k", f"{p}/tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

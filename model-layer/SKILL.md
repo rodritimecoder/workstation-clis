@@ -74,7 +74,7 @@ deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
 | `decision` | `:8083` | `local-decide` | `h2o.sh` | h2o-lightning-4b (Q4_K_M + mmproj F16) | — | jev-decision, decision-model, clip-box, frontend-uat, eval-router |
 | `decision-engine` | `:8082` | `local-decide-engine` | `startlux-decision.sh` | StartLux-Decision-v1.1-4B-Instant (Q4_K_M + mmproj F16) **(candidate)** | `models/startlux-models/StartLux-Decision-v1.1-4B-Instant-GGUF/StartLux-Decision-v1.1-4B-Instant-Q4_K_M.gguf`<br>`models/startlux-models/StartLux-Decision-v1.1-4B-Instant-GGUF/mmproj-StartLux-Decision-v1.1-4B-Instant-F16.gguf` | jev-decision |
 | `decision-fallback` | `:8089` | `local-decide-fallback` | `imajev-decider.sh` | Imajev-4B (Q4_K_M + mmproj f16) | `models/mindchain/imajev-4b-GGUF/imajev-4b-Q4_K_M.gguf`<br>`models/mindchain/imajev-4b-GGUF/imajev-4b-mmproj-f16.gguf` | jev-decision |
-| `ocr-crispembed` | `:8084` | `local-ocr-crispembed` | `crispembed-ocr.sh` | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `models/cstr/PP-OCRv6-small-det-GGUF/PP-OCRv6_small_det-f16.gguf`<br>`models/cstr/PP-OCRv6_small_rec-GGUF/PP-OCRv6_small_rec-q8-head.gguf`<br>`models/cstr/dbnet-ic15-GGUF/dbnet-ic15-f16.gguf`<br>`models/cstr/parseq-GGUF/parseq-q8_0.gguf` | ocr |
+| `ocr-crispembed` | `:8084` | `local-ocr-crispembed` | `crispembed-ocr.sh` | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `models/cstr/OXR-1.0-GGUF/oxr-1.0-f16.gguf`<br>`models/cstr/OXR-1.0-DFINE-layout-GGUF/oxr-1.0-dfine-layout-f32.gguf`<br>`models/cstr/PP-OCRv6-small-det-GGUF/PP-OCRv6_small_det-f16.gguf`<br>`models/cstr/PP-OCRv6_small_rec-GGUF/PP-OCRv6_small_rec-q8-head.gguf`<br>`models/cstr/dbnet-ic15-GGUF/dbnet-ic15-f16.gguf`<br>`models/cstr/parseq-GGUF/parseq-q8_0.gguf` | ocr |
 | `ocr-lighton` | `:8085` | `local-ocr-lighton` | `lighton-ocr.sh` | LightOnOCR-3-0.8B (Q4_K_M + mmproj q8_0) | `models/prithivMLmods/LightOnOCR-3-0.8B-GGUF/LightOnOCR-3-0.8B.Q4_K_M.gguf`<br>`models/prithivMLmods/LightOnOCR-3-0.8B-GGUF/LightOnOCR-3-0.8B.mmproj-q8_0.gguf` | ocr, video-miner, doc-layout, canvas-cli |
 | `reranker` | `:8086` | `local-rerank-jina` | `jina-reranker.sh` | jina-reranker-v2-base-multilingual (Q8_0) | `models/gpustack/jina-reranker-v2-base-multilingual-GGUF/jina-reranker-v2-base-multilingual-Q8_0.gguf` | graph-memory |
 | `embed` | `:8087` | `local-embed-bge` | `bge-small.sh` | bge-small-en-v1.5 (f16) | `models/unsloth/bge-small-en-v1.5-GGUF/bge-small-en-v1.5-f16.gguf` | graph-memory, semantic-cache |
@@ -139,13 +139,13 @@ deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
 
 ### `:8084` ocr-crispembed — `local-ocr-crispembed`
 
-- **Role:** Scene text — 2D bounding boxes and structured markdown
+- **Role:** Documents & scene text — OXR-1.0 layout-aware Markdown, PP-OCRv6 bounding boxes
 - **Service:** crispembed-server
 - **Start:** `crispembed-ocr.sh` (volume `sh/`; in-repo copy `launchers/crispembed-ocr.sh`)
 - **Health:** `curl -s http://127.0.0.1:8084/health`
-- **API:** `/ocr/pipeline`
+- **API:** `/ocr/pipeline, /oxr/document`
 - **Owner:** `ocr` · **Used by:** ocr
-- **Weights:** `models/cstr/PP-OCRv6-small-det-GGUF/PP-OCRv6_small_det-f16.gguf` · `models/cstr/PP-OCRv6_small_rec-GGUF/PP-OCRv6_small_rec-q8-head.gguf` · `models/cstr/dbnet-ic15-GGUF/dbnet-ic15-f16.gguf` · `models/cstr/parseq-GGUF/parseq-q8_0.gguf`
+- **Weights:** `models/cstr/OXR-1.0-GGUF/oxr-1.0-f16.gguf` · `models/cstr/OXR-1.0-DFINE-layout-GGUF/oxr-1.0-dfine-layout-f32.gguf` · `models/cstr/PP-OCRv6-small-det-GGUF/PP-OCRv6_small_det-f16.gguf` · `models/cstr/PP-OCRv6_small_rec-GGUF/PP-OCRv6_small_rec-q8-head.gguf` · `models/cstr/dbnet-ic15-GGUF/dbnet-ic15-f16.gguf` · `models/cstr/parseq-GGUF/parseq-q8_0.gguf`
 - **Quirks:** Default engine ppocrv6.
 
 ### `:8085` ocr-lighton — `local-ocr-lighton`

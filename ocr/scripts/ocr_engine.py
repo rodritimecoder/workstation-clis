@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -37,6 +39,9 @@ CRISP_CPU_DIRECT = CRISP_DIR / "build-cpu" / "test-ppocrv6-direct"
 CRISP_MODELS_DIR = AI_DIR / "models" / "cstr"
 CRISP_DET = CRISP_MODELS_DIR / "PP-OCRv6-small-det-GGUF" / "PP-OCRv6_small_det-f16.gguf"
 CRISP_REC = CRISP_MODELS_DIR / "PP-OCRv6_small_rec-GGUF" / "PP-OCRv6_small_rec-q8-head.gguf"
+
+OXR_MODEL = CRISP_MODELS_DIR / "OXR-1.0-GGUF" / "oxr-1.0-f16.gguf"
+OXR_LAYOUT = CRISP_MODELS_DIR / "OXR-1.0-DFINE-layout-GGUF" / "oxr-1.0-dfine-layout-f32.gguf"
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
 
@@ -219,6 +224,201 @@ class OCREngine:
             "latency_ms": latency_ms,
             "source": "crispembed_direct"
         }
+
+    def is_oxr_online(self) -> bool:
+        if not self.is_crisp_online():
+            return False
+        probe = urllib.request.Request(
+            f"{self.scheme}://{self.host}:{self.crisp_port}/oxr/document",
+            data=json.dumps({"images": []}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        ctx = self.ssl_ctx if self.scheme == "https" else None
+        try:
+            urllib.request.urlopen(probe, timeout=1.5, context=ctx)
+            return True
+        except urllib.error.HTTPError as exc:
+            return exc.code == 400
+        except Exception:
+            return False
+
+    def ensure_oxr(self, timeout: float = 180.0) -> bool:
+        if self.is_oxr_online():
+            return True
+        if not CRISP_LAUNCHER.is_file():
+            return False
+        env = dict(os.environ, ENGINE="oxr")
+        subprocess.Popen(
+            [str(CRISP_LAUNCHER)],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.is_oxr_online():
+                return True
+            time.sleep(1.0)
+        return False
+
+    def _page_images(
+        self, p: Path, pages: Optional[str], scratch: Path
+    ) -> Tuple[List[Path], int]:
+        if p.suffix.lower() in IMAGE_EXTENSIONS:
+            return [p], 1
+
+        import pymupdf
+
+        doc = pymupdf.open(p)
+        total = len(doc)
+        indices = list(range(total))
+        if pages:
+            selected: List[int] = []
+            for part in pages.split(","):
+                part = part.strip()
+                if "-" in part:
+                    start, end = part.split("-", 1)
+                    selected.extend(range(int(start) - 1, int(end)))
+                elif part.isdigit():
+                    selected.append(int(part) - 1)
+            indices = [idx for idx in selected if 0 <= idx < total]
+
+        mat = pymupdf.Matrix(2.0, 2.0)
+        out: List[Path] = []
+        for idx in indices:
+            pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
+            target = scratch / f"page_{idx + 1:04d}.png"
+            pix.save(str(target))
+            out.append(target)
+        doc.close()
+        if not out:
+            raise ValueError(f"No pages selected from {p.name}")
+        return out, len(out)
+
+    def _oxr_recognize(self, p: Path, max_new_tokens: int) -> Tuple[str, float]:
+        binary = CRISP_DIR / "build-vulkan" / "crispembed"
+        if not binary.is_file():
+            binary = CRISP_DIR / "build-cpu" / "crispembed"
+        if not binary.is_file() or not OXR_MODEL.is_file():
+            raise FileNotFoundError(
+                f"OXR binary/model missing: {binary} / {OXR_MODEL}"
+            )
+        base_env = dict(
+            os.environ,
+            CRISPEMBED_OXR="1",
+            CRISPEMBED_ACCEPT_OXR_LICENSE="1",
+        )
+        cmd = [
+            str(binary), "-m", str(OXR_MODEL), "--ocr", str(p),
+            "--ocr-max-tokens", str(max_new_tokens), "-t", str(os.cpu_count() or 4),
+        ]
+        started = time.time()
+        gpu_env = dict(base_env, CRISPEMBED_OXR_GPU="1", CRISPEMBED_OXR_GPU_FLASH="1")
+        res = subprocess.run(cmd, capture_output=True, text=True, env=gpu_env, timeout=900)
+        if res.returncode != 0:
+            cpu_env = dict(base_env, CRISPEMBED_OXR_FORCE_CPU="1")
+            res = subprocess.run(cmd, capture_output=True, text=True, env=cpu_env, timeout=1800)
+        if res.returncode != 0:
+            raise RuntimeError(f"OXR recognition failed: {res.stderr.strip()[-400:]}")
+        return res.stdout.strip(), round((time.time() - started) * 1000, 1)
+
+    def ocr_document_oxr(
+        self,
+        file_path: Path,
+        pages: Optional[str] = None,
+        max_new_tokens: int = 4096,
+    ) -> Dict[str, Any]:
+        p = Path(file_path).resolve()
+        if not p.is_file():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        if self.is_remote:
+            raise RuntimeError(
+                "OXR document parsing reads image paths server-side; it only works on the "
+                "machine hosting the parser. Use --engine lighton for a remote host."
+            )
+        if not self.ensure_oxr():
+            text, ms = self._oxr_recognize(p, max_new_tokens)
+            return {
+                "task": "document_ocr",
+                "engine": "oxr-1.0",
+                "file": str(p),
+                "pages_count": 1,
+                "pages": [{"page": 1, "text": text}],
+                "text": text,
+                "markdown": text,
+                "latency_ms": ms,
+                "source": "oxr_cli",
+            }
+
+        scratch = Path(tempfile.mkdtemp(prefix="ocr-oxr-"))
+        try:
+            images, count = self._page_images(p, pages, scratch)
+            payload = {
+                "images": [str(img) for img in images],
+                "format": "upstream",
+                "options": {"max_new_tokens": max_new_tokens},
+            }
+            req = urllib.request.Request(
+                f"{self.scheme}://{self.host}:{self.crisp_port}/oxr/document",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            ctx = self.ssl_ctx if self.scheme == "https" else None
+            started = time.time()
+            try:
+                with urllib.request.urlopen(req, timeout=900, context=ctx) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                raise RuntimeError(
+                    f"OXR document route failed ({exc.code}): "
+                    f"{exc.read().decode('utf-8', 'replace')[:400]}"
+                )
+            latency_ms = round((time.time() - started) * 1000, 1)
+
+            outputs = data.get("outputs") or {}
+            markdown = (outputs.get("markdown") or "").strip()
+            structure = outputs.get("json") or {}
+            meta = (data.get("metadata") or {}).get("crispembed") or {}
+            page_texts = [
+                {
+                    "page": int(page.get("page_num", idx)) + 1,
+                    "text": "\n\n".join(
+                        str(block.get("content", ""))
+                        for block in page.get("blocks", [])
+                        if block.get("content")
+                    ),
+                }
+                for idx, page in enumerate(structure.get("pages", []))
+            ]
+            if not markdown and count == 1 and p.suffix.lower() in IMAGE_EXTENSIONS:
+                text, ms = self._oxr_recognize(p, max_new_tokens)
+                return {
+                    "task": "document_ocr",
+                    "engine": "oxr-1.0",
+                    "file": str(p),
+                    "pages_count": 1,
+                    "pages": [{"page": 1, "text": text}],
+                    "text": text,
+                    "markdown": text,
+                    "latency_ms": ms,
+                    "source": "oxr_cli",
+                }
+            return {
+                "task": "document_ocr",
+                "engine": "oxr-1.0",
+                "file": str(p),
+                "pages_count": count,
+                "pages": page_texts,
+                "text": markdown,
+                "markdown": markdown,
+                "structure": structure,
+                "layout_source": meta.get("layout_source"),
+                "latency_ms": latency_ms,
+                "source": "oxr_native_document",
+            }
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     def ocr_document(
         self,

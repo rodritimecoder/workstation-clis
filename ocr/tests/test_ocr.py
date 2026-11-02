@@ -32,7 +32,7 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         print("  ✓ doctor health check · verified")
 
     def test_02_lighton_document_ocr(self):
-        cmd = ["python3", OCR_PY, str(SAMPLE_IMG)]
+        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--engine", "lighton"]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"LightOnOCR failed: {res.stderr}")
         text = res.stdout.strip()
@@ -40,7 +40,7 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         print(f"  ✓ premier LightOnOCR document transcription ('{text.splitlines()[0]}') · verified")
 
     def test_03_lighton_json_contract(self):
-        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--json"]
+        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--engine", "lighton", "--json"]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"LightOnOCR JSON failed: {res.stderr}")
         data = json.loads(res.stdout)
@@ -49,6 +49,21 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         self.assertIn("LLaMA", data["text"])
         self.assertIn("latency_ms", data)
         print(f"  ✓ premier LightOnOCR JSON contract ({data['latency_ms']}ms) · verified")
+
+    def test_03b_oxr_document_contract(self):
+        probe = subprocess.run(["python3", OCR_PY, "doctor", "--json"], capture_output=True, text=True)
+        health = json.loads(probe.stdout)
+        if not health.get("oxr_models_ready"):
+            raise unittest.SkipTest("OXR weights are not on this machine")
+        cmd = ["python3", OCR_PY, "read", str(SAMPLE_IMG), "--engine", "oxr", "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"OXR failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data["task"], "document_ocr")
+        self.assertEqual(data["engine"], "oxr-1.0")
+        self.assertIn("LLaMA", data["text"])
+        self.assertTrue(data["source"].startswith("oxr"))
+        print(f"  ✓ OXR-1.0 layout-aware document JSON ({data['latency_ms']}ms, {data['pages_count']} page) · verified")
 
     def test_04_crispembed_spatial_boxes(self):
         cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--boxes", "--json"]

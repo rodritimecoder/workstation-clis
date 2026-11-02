@@ -19,7 +19,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:8083` | `decision` | one-of-many (5) | h2o-lightning-4b | `h2o.sh` | The decision engine slot - bool / choice / score primitives |
 | `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint |
 | `:8089` | `decision-fallback` | single (1) | Imajev-4B | `imajev-decider.sh` | Secondary decision engine — Imajev-4B chat path, or letter/readout with READOUT=1 |
-| `:8084` | `ocr-crispembed` | single (1) | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `crispembed-ocr.sh` | Scene text — 2D bounding boxes and structured markdown |
+| `:8084` | `ocr-crispembed` | single (1) | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `crispembed-ocr.sh` | Documents & scene text — OXR-1.0 layout-aware Markdown, PP-OCRv6 bounding boxes |
 | `:8085` | `ocr-lighton` | single (1) | LightOnOCR-3-0.8B | `lighton-ocr.sh` | Documents, PDFs and slides — fast prefill, high-throughput markdown |
 | `:8086` | `reranker` | single (1) | jina-reranker-v2-base-multilingual | `jina-reranker.sh` | Cross-encoder reranking for RAG |
 | `:8087` | `embed` | one-of-many (2) | bge-small-en-v1.5 | `bge-small.sh` | Vector embeddings for RAG and semantic caching |
