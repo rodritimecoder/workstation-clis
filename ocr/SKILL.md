@@ -52,12 +52,22 @@ The `--assets` pass also cleans two upstream layout artefacts: `Text` blocks tha
 
 ### 2. High-Throughput Slide & Screenshot OCR (LightOnOCR-3-0.8B)
 ```bash
-# Clean UNIX stdout: returns only transcribed Markdown text
+# Plain transcription (unprompted text only)
 ocr slide.png --engine lighton > slide.md
 
-# Transcribe a multi-page PDF document
-ocr document.pdf --engine lighton --pages 1-5 -o output.md
+# Grounding mode: typed blocks with 0-1000 boxes, image descriptions, chart tables
+ocr read page.png --engine lighton --grounding --json
+
+# Notes with figures: same layout-aware output as OXR, from the 0.8B model
+ocr read page.png --engine lighton --assets notes/assets -o notes/page.md
+# `--assets` implies grounding; boxes are cut into PNGs and linked from the Markdown
 ```
+
+LightOnOCR-3 has two supported prompts and nothing else: an empty prompt (transcription)
+and the literal string `grounding`. Grounding labels: `title`, `text`, `list`, `header`,
+`footer`, `page_number`, `footnote`, `caption`, `formula`, `code`, `table`, `image`,
+`chart`, `header_image`, `footer_image`, `aside_text`; `image`/`chart` blocks also carry a
+description or an HTML data table.
 
 ### 3. Spatial Scene-Text & Bounding Boxes (CrispEmbed)
 ```bash
@@ -105,8 +115,9 @@ ocr server stop --engine all
 
 | Capability | Engine | Port | Format | Specialty |
 |---|---|---|---|---|
-| **Document / PDF / Scan** | **OXR-1.0** | `:8084` | Layout-aware Markdown + block JSON | tables, formulas, multi-column reading order; ~5–15 s/page on Vulkan |
-| **Slide / Screenshot** | **LightOnOCR-3-0.8B** | `:8085` | Flat Markdown | high-throughput, sub-second per slide (thinking variant — output in `reasoning_content`) |
+| **Document / PDF / Scan** | **OXR-1.0** (`--engine oxr`) | `:8084` | Layout-aware Markdown + block JSON | tables, formulas, reading order; strongest on clean print/receipts |
+| **Document + figures** | **LightOnOCR-3 grounding** (`--engine lighton --assets`) | `:8085` | Typed blocks + box crops + descriptions | 1.1 GB, ~2 s/page, best text on Fraktur/multilingual |
+| **Slide / Screenshot** | **LightOnOCR-3-0.8B** | `:8085` | Flat Markdown | high-throughput transcription |
 | **Spatial Scene Text / UI** | **CrispEmbed (PP-OCRv6)** | `:8084` | 2D Bounding Boxes `[x1, y1, x2, y2]` | sub-second spatial UI detection for `frontend-uat` |
 
 ### OXR runtime facts

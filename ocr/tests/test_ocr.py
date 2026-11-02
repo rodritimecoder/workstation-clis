@@ -65,6 +65,24 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         self.assertTrue(data["source"].startswith("oxr"))
         print(f"  ✓ OXR-1.0 layout-aware document JSON ({data['latency_ms']}ms, {data['pages_count']} page) · verified")
 
+    def test_03c_lighton_grounding_assets(self):
+        import tempfile
+        page = Path("/run/media/rodri/AI/CrispEmbed/tests/regression/images/page_transcoda.png")
+        if not page.is_file():
+            raise unittest.SkipTest("page_transcoda.png fixture not present")
+        assets = Path(tempfile.mkdtemp(prefix="ocr-grounding-"))
+        cmd = ["python3", OCR_PY, "read", str(page), "--engine", "lighton",
+               "--assets", str(assets), "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Grounding failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data["engine"], "lighton")
+        self.assertEqual(data["mode"], "grounding")
+        self.assertGreaterEqual(len(data.get("assets", [])), 1)
+        for asset in data["assets"]:
+            self.assertTrue(Path(asset["path"]).is_file())
+        print(f"  ✓ LightOnOCR grounding + {len(data['assets'])} figure crop(s) · verified")
+
     def test_04_crispembed_spatial_boxes(self):
         cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--boxes", "--json"]
         res = subprocess.run(cmd, capture_output=True, text=True)

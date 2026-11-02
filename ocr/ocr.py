@@ -68,7 +68,9 @@ def main():
                         help="Document engine: oxr (OXR-1.0 layout+markdown), lighton, or auto (OXR when already running, else LightOnOCR)")
     p_read.add_argument("--max-tokens", type=int, default=4096, help="OXR completion budget per region (default: 4096)")
     p_read.add_argument("--assets", metavar="DIR", default=None,
-                        help="OXR: write figure crops (PNG) into DIR and link them from the Markdown")
+                        help="Write figure crops (PNG) into DIR and link them from the Markdown (OXR, or LightOnOCR grounding)")
+    p_read.add_argument("--grounding", action="store_true",
+                        help="LightOnOCR: use the grounding prompt (typed blocks with 0-1000 boxes, image descriptions, chart tables)")
     p_read.add_argument("--boxes", "--spatial", dest="spatial_mode", action="store_true", help="Extract spatial 2D bounding boxes via CrispEmbed")
     p_read.add_argument("--output", "-o", help="Write output to text/markdown file")
 
@@ -116,13 +118,24 @@ def main():
 
         doc_engine = args.engine
         if doc_engine == "auto":
-            doc_engine = "oxr" if (not engine.is_remote and engine.is_oxr_online()) else "lighton"
+            wants_layout = bool(args.grounding or args.assets)
+            if wants_layout and not engine.is_remote and engine.is_lighton_online():
+                doc_engine = "lighton"
+            else:
+                doc_engine = "oxr" if (not engine.is_remote and engine.is_oxr_online()) else "lighton"
 
         if doc_engine == "oxr":
             res = engine.ocr_document_oxr(
                 file_p,
                 pages=args.pages,
                 max_new_tokens=args.max_tokens,
+                assets_dir=Path(args.assets).expanduser() if args.assets else None,
+            )
+        elif args.grounding or args.assets:
+            res = engine.ocr_document_lighton(
+                file_p,
+                pages=args.pages,
+                grounding=args.grounding,
                 assets_dir=Path(args.assets).expanduser() if args.assets else None,
             )
         else:

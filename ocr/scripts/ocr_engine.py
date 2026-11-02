@@ -118,16 +118,15 @@ class OCREngine:
                 raise RuntimeError(f"LightOnOCR server not reachable on port {self.lighton_port} and auto-start failed.")
 
         b64 = base64.b64encode(img_bytes).decode("ascii")
-        user_prompt = prompt or "Transcribe all visible text in Markdown. Output only the verbatim text."
+        image_part = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+        if prompt == "grounding":
+            content = [image_part, {"type": "text", "text": "grounding"}]
+        else:
+            user_prompt = prompt or "Transcribe all visible text in Markdown. Output only the verbatim text."
+            content = [{"type": "text", "text": user_prompt}, image_part]
         payload = {
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-                ]
-            }],
-            "max_tokens": 2048,
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": 4096 if prompt == "grounding" else 2048,
             "temperature": 0.0
         }
 
@@ -506,6 +505,142 @@ class OCREngine:
                     if cls._bbox_area(inner["bbox"]) >= 0.4 * cls._bbox_area(outer["bbox"]):
                         drop.add(i)
         return drop
+
+    GROUNDED_RE = re.compile(r"!\[([A-Za-z_+]+)\]\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)")
+
+    @classmethod
+    def parse_grounded(cls, text: str) -> List[Dict[str, Any]]:
+        marks = list(cls.GROUNDED_RE.finditer(text))
+        blocks: List[Dict[str, Any]] = []
+        for i, match in enumerate(marks):
+            end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+            blocks.append({
+                "label": match.group(1),
+                "bbox": [int(match.group(j)) for j in range(2, 6)],
+                "content": text[match.end():end].strip(),
+            })
+        return blocks
+
+    @staticmethod
+    def _crop_grounded(src_png: Path, bbox: List[int], dest: Path) -> bool:
+        import pymupdf
+
+        page = pymupdf.open(str(src_png))[0]
+        rect = page.rect
+        pix = pymupdf.Pixmap(str(src_png))
+        matrix = pymupdf.Matrix(pix.width / rect.width, pix.height / rect.height)
+        x1, y1, x2, y2 = (max(0, min(1000, v)) for v in bbox)
+        clip = pymupdf.Rect(rect.width * x1 / 1000, rect.height * y1 / 1000,
+                            rect.width * x2 / 1000, rect.height * y2 / 1000)
+        if clip.is_empty:
+            return False
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        page.get_pixmap(clip=clip, matrix=matrix).save(str(dest))
+        return True
+
+    def _render_grounded(
+        self, raw: str, src_png: Path, assets_dir: Optional[Path], prefix: str
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        assets: List[Dict[str, Any]] = []
+        parts: List[str] = []
+        figure = 0
+        for block in self.parse_grounded(raw):
+            label = block["label"].rstrip("+")
+            content = block["content"]
+            if label in ("image", "header_image", "footer_image", "chart"):
+                if assets_dir is None:
+                    if content:
+                        parts.append(content)
+                    continue
+                figure += 1
+                name = f"{prefix}fig{figure}.png"
+                dest = assets_dir / name
+                if self._crop_grounded(src_png, block["bbox"], dest):
+                    assets.append({
+                        "file": name,
+                        "path": str(dest.resolve()),
+                        "bbox": block["bbox"],
+                        "label": label,
+                    })
+                    parts.append(f"![]({dest.resolve()})")
+                if content:
+                    if label == "chart" and content.lstrip().startswith("<"):
+                        parts.append(content)
+                    elif label != "chart":
+                        parts.append(content)
+                continue
+            if not content:
+                continue
+            if label == "title":
+                parts.append("# " + content.lstrip("# ").strip())
+            elif label == "caption":
+                parts.append(f"*{content}*")
+            else:
+                parts.append(content)
+        return "\n\n".join(parts), assets
+
+    def ocr_document_lighton(
+        self,
+        file_path: Path,
+        pages: Optional[str] = None,
+        grounding: bool = False,
+        assets_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        p = Path(file_path).resolve()
+        if not p.is_file():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        if not self.ensure_lighton():
+            raise RuntimeError(f"LightOnOCR server not reachable on port {self.lighton_port}.")
+
+        mode = "grounding" if (grounding or assets_dir is not None) else None
+        scratch = Path(tempfile.mkdtemp(prefix="ocr-lighton-"))
+        try:
+            if p.suffix.lower() in IMAGE_EXTENSIONS:
+                started = time.time()
+                raw, _ = self.ocr_image_lighton(p.read_bytes(), prompt=mode)
+                markdown, assets = self._render_grounded(raw, p, assets_dir, "")
+                latency = round((time.time() - started) * 1000, 1)
+                return {
+                    "task": "document_ocr",
+                    "engine": "lighton",
+                    "mode": "grounding" if mode else "transcription",
+                    "file": str(p),
+                    "pages_count": 1,
+                    "pages": [{"page": 1, "text": markdown}],
+                    "text": markdown,
+                    "markdown": markdown,
+                    "assets": assets,
+                    "latency_ms": latency,
+                    "source": "lighton_grounding" if mode else "lighton_1b_server",
+                }
+
+            images, count = self._page_images(p, pages, scratch)
+            started = time.time()
+            page_docs = []
+            all_assets: List[Dict[str, Any]] = []
+            for idx, page_png in enumerate(images):
+                raw, _ = self.ocr_image_lighton(page_png.read_bytes(), prompt=mode)
+                prefix = f"p{idx + 1}_" if count > 1 else ""
+                markdown, assets = self._render_grounded(raw, page_png, assets_dir, prefix)
+                page_docs.append({"page": idx + 1, "text": markdown})
+                all_assets.extend(assets)
+            latency = round((time.time() - started) * 1000, 1)
+            combined = "\n\n".join(f"<!-- Page {d['page']} -->\n{d['text']}" for d in page_docs)
+            return {
+                "task": "document_ocr",
+                "engine": "lighton",
+                "mode": "grounding" if mode else "transcription",
+                "file": str(p),
+                "pages_count": count,
+                "pages": page_docs,
+                "text": combined,
+                "markdown": combined,
+                "assets": all_assets,
+                "latency_ms": latency,
+                "source": "lighton_grounding" if mode else "lighton_1b_server",
+            }
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     def ocr_document(
         self,
