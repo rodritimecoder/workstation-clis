@@ -50,24 +50,31 @@ ocr read page.png --engine oxr --assets notes/assets --json
 
 The `--assets` pass also cleans two upstream layout artefacts: `Text` blocks that sit inside a detected `Table`/`Picture` (already captured there) are dropped, and a figure box that merely frames a tighter crop of the same drawing is collapsed to the tighter crop.
 
-### 2. High-Throughput Slide & Screenshot OCR (LightOnOCR-3-0.8B)
+### 2. Document & Slide OCR (LightOnOCR-3-0.8B, grounding by default)
 ```bash
-# Plain transcription (unprompted text only)
-ocr slide.png --engine lighton > slide.md
-
-# Grounding mode: typed blocks with 0-1000 boxes, image descriptions, chart tables
-ocr read page.png --engine lighton --grounding --json
-
-# Notes with figures: same layout-aware output as OXR, from the 0.8B model
+# Notes with figures: typed blocks, 0-1000 boxes, image descriptions, chart tables
 ocr read page.png --engine lighton --assets notes/assets -o notes/page.md
-# `--assets` implies grounding; boxes are cut into PNGs and linked from the Markdown
+
+# Same, without exporting crops
+ocr read page.png --engine lighton --json
+
+# Plain transcription only (no layout, flat Markdown)
+ocr slide.png --transcribe > slide.md
 ```
 
-LightOnOCR-3 has two supported prompts and nothing else: an empty prompt (transcription)
-and the literal string `grounding`. Grounding labels: `title`, `text`, `list`, `header`,
-`footer`, `page_number`, `footnote`, `caption`, `formula`, `code`, `table`, `image`,
-`chart`, `header_image`, `footer_image`, `aside_text`; `image`/`chart` blocks also carry a
-description or an HTML data table.
+LightOnOCR-3 has exactly two supported prompts and nothing else: an empty prompt
+(transcription) and the literal string `grounding`. Grounding labels: `title`, `text`,
+`list`, `header`, `footer`, `page_number`, `footnote`, `caption`, `formula`, `code`,
+`table`, `image`, `chart`, `header_image`, `footer_image`, `aside_text`; `image`/`chart`
+blocks also carry a description or an HTML data table.
+
+**Runtime split (sh + py):** `sh/lighton-ocr.sh` starts `llama-server` with the GGUF and
+mmproj (`--reasoning off`, so output lands in `content`). The prompt is *not* a server
+option — llama-server applies the chat template, and the client sends the prompt text.
+That client is this skill (`scripts/ocr_engine.py`), which is the llama.cpp equivalent of
+the HF card's `if prompt:` branch: image + `grounding` when grounded, prompt + image
+otherwise. The launcher exports `OCR_LIGHTON_PROMPT=grounding` as the machine default and
+`--transcribe` overrides it per call.
 
 ### 3. Spatial Scene-Text & Bounding Boxes (CrispEmbed)
 ```bash

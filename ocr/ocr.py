@@ -70,7 +70,9 @@ def main():
     p_read.add_argument("--assets", metavar="DIR", default=None,
                         help="Write figure crops (PNG) into DIR and link them from the Markdown (OXR, or LightOnOCR grounding)")
     p_read.add_argument("--grounding", action="store_true",
-                        help="LightOnOCR: use the grounding prompt (typed blocks with 0-1000 boxes, image descriptions, chart tables)")
+                        help="LightOnOCR: grounding prompt (default; kept for explicitness)")
+    p_read.add_argument("--transcribe", action="store_true",
+                        help="LightOnOCR: force plain transcription instead of the grounding default")
     p_read.add_argument("--boxes", "--spatial", dest="spatial_mode", action="store_true", help="Extract spatial 2D bounding boxes via CrispEmbed")
     p_read.add_argument("--output", "-o", help="Write output to text/markdown file")
 
@@ -118,11 +120,10 @@ def main():
 
         doc_engine = args.engine
         if doc_engine == "auto":
-            wants_layout = bool(args.grounding or args.assets)
-            if wants_layout and not engine.is_remote and engine.is_lighton_online():
+            if engine.is_remote or engine.is_lighton_online():
                 doc_engine = "lighton"
             else:
-                doc_engine = "oxr" if (not engine.is_remote and engine.is_oxr_online()) else "lighton"
+                doc_engine = "oxr" if engine.is_oxr_online() else "lighton"
 
         if doc_engine == "oxr":
             res = engine.ocr_document_oxr(
@@ -131,15 +132,15 @@ def main():
                 max_new_tokens=args.max_tokens,
                 assets_dir=Path(args.assets).expanduser() if args.assets else None,
             )
-        elif args.grounding or args.assets:
+        elif args.transcribe or args.prompt:
+            res = engine.ocr_document(file_p, prompt=args.prompt, pages=args.pages)
+        else:
             res = engine.ocr_document_lighton(
                 file_p,
                 pages=args.pages,
-                grounding=args.grounding,
+                grounding=True,
                 assets_dir=Path(args.assets).expanduser() if args.assets else None,
             )
-        else:
-            res = engine.ocr_document(file_p, prompt=args.prompt, pages=args.pages)
 
         if args.output:
             target = Path(args.output).resolve()

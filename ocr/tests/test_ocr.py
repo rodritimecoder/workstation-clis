@@ -32,7 +32,7 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         print("  ✓ doctor health check · verified")
 
     def test_02_lighton_document_ocr(self):
-        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--engine", "lighton"]
+        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--engine", "lighton", "--transcribe"]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"LightOnOCR failed: {res.stderr}")
         text = res.stdout.strip()
@@ -40,7 +40,7 @@ class TestUnifiedOCRDeterministic(unittest.TestCase):
         print(f"  ✓ premier LightOnOCR document transcription ('{text.splitlines()[0]}') · verified")
 
     def test_03_lighton_json_contract(self):
-        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--engine", "lighton", "--json"]
+        cmd = ["python3", OCR_PY, str(SAMPLE_IMG), "--engine", "lighton", "--transcribe", "--json"]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"LightOnOCR JSON failed: {res.stderr}")
         data = json.loads(res.stdout)

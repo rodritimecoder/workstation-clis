@@ -354,7 +354,7 @@ class OCREngine:
         scratch = Path(tempfile.mkdtemp(prefix="ocr-oxr-"))
         try:
             images, count = self._page_images(p, pages, scratch)
-            options: Dict[str, Any] = {"max_new_tokens": max_new_tokens}
+            options: Dict[str, Any] = {"max_new_tokens": max_new_tokens, "write_images": False}
             crop_root = None
             if assets_dir is not None:
                 crop_root = scratch / "assets"
@@ -420,6 +420,18 @@ class OCREngine:
                         new = f"![]({dest.resolve()})"
                         markdown = markdown.replace(match.group(0), new)
                         block["content"] = new
+
+            else:
+                for page_idx, page in enumerate(structure.get("pages", [])):
+                    for block_idx, block in enumerate(page.get("blocks", [])):
+                        if block.get("type") != "Picture" or block_idx in dropped.get(page_idx, set()):
+                            continue
+                        match = re.search(r"!\[\]\(([^)]+)\)", str(block.get("content", "")))
+                        if not match:
+                            continue
+                        note = "*[figure omitted — pass --assets DIR to extract]*"
+                        markdown = markdown.replace(match.group(0), note)
+                        block["content"] = note
 
             for page_idx, indexes in dropped.items():
                 for block_idx in indexes:
