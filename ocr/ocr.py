@@ -54,13 +54,13 @@ def main():
     parent_parser.add_argument("--crisp-port", type=int, default=8084, help="CrispEmbed port (default: 8084)")
 
     parser = argparse.ArgumentParser(
-        description="ocr — Unified High-Performance OCR Hub (Premier LightOnOCR-3-0.8B + CrispEmbed Spatial)",
+        description="ocr — Unified OCR Hub (OXR-1.0 document parser + LightOnOCR + CrispEmbed spatial)",
         parents=[parent_parser]
     )
     sub = parser.add_subparsers(dest="command")
 
     # Primary OCR parser
-    p_read = sub.add_parser("read", aliases=["doc", "scan"], parents=[parent_parser], help="Document & Slide OCR via premier LightOnOCR-3-0.8B")
+    p_read = sub.add_parser("read", aliases=["doc", "scan"], parents=[parent_parser], help="Document, PDF and slide OCR via OXR-1.0 or LightOnOCR")
     p_read.add_argument("file", help="Input document (.pdf) or image (.png/.jpg)")
     p_read.add_argument("--prompt", "-p", default=None, help="Custom extraction prompt (LightOnOCR only)")
     p_read.add_argument("--pages", help="PDF page range selection (e.g. 1-3,5)")
