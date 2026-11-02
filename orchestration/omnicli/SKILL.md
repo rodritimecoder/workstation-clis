@@ -244,6 +244,8 @@ at import time, not at call forty.
 Token arithmetic: a 9-step job becomes **one** model turn. The plan's own
 reads and writes never cross the boundary.
 
+See [references/code-mode-sdk.md](references/code-mode-sdk.md) for the full SDK API reference, and inspect runnable scripts in [examples/](examples/).
+
 ---
 
 ## 🔌 Face B — the MCP server
@@ -352,3 +354,13 @@ it is paid on every turn whether or not a tool gets used.
 deprecated aliases and have been removed from `PATH`. `omnicli` is the name.
 The legacy `search` / `tools` / `inspect` / `run` verbs still work; `search`
 uses the BM25 catalog instead of the old substring scorer.
+
+---
+
+## 🏛️ Architectural References & Provenance
+
+1. **Uber's MCP Gateway**: [Designing an MCP Gateway](https://www.uber.com/au/en/blog/designing-mcp-gateway/)  
+   *Architecture*: AutoCrawler catalog ingestion → SQLite FTS registry → 4 core meta-tools (`discover`, `describe`, `invoke`, `status`) → bounded responses with byte caps and JSON projections. Eliminates catalog bloat and context poisoning across large fleets of tools.
+2. **Cloudflare's Code Mode**: [Code Mode: execute code to invoke tools instead of LLM function calling](https://blog.cloudflare.com/code-mode/)  
+   *Architecture*: Replaces multi-step JSON function calling roundtrips with sandboxed code execution (`omnicli exec`) against typed SDK bindings (`omnicli_tools.py`). Intermediates stay in memory; only synthesized results enter context.
+
