@@ -48,7 +48,7 @@
     },
     "8084": {
       "alias": "local-ocr-crispembed",
-      "vram_mb": 1200,
+      "vram_mb": 6300,
       "pinned": false,
       "name": "CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec)",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/crispembed-ocr.sh",
