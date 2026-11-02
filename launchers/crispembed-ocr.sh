@@ -29,7 +29,8 @@ BACKEND="${BACKEND:-vulkan}"
 ENGINE="${ENGINE:-ppocrv6}"
 MODE="${MODE:-pipeline}"
 
-OXR_MODEL="${OXR_MODEL:-$DRIVE/models/cstr/OXR-1.0-GGUF/oxr-1.0-f16.gguf}"
+OXR_MODEL="${OXR_MODEL:-$DRIVE/models/cstr/OXR-1.0-GGUF/oxr-1.0-q4_k-head.gguf}"
+# Numerically-exact arm: OXR_MODEL=$DRIVE/models/cstr/OXR-1.0-GGUF/oxr-1.0-f16.gguf
 OXR_LAYOUT="${OXR_LAYOUT:-$DRIVE/models/cstr/OXR-1.0-DFINE-layout-GGUF/oxr-1.0-dfine-layout-f32.gguf}"
 OXR_DEVICE="${OXR_DEVICE:-gpu}"
 

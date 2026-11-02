@@ -106,6 +106,7 @@ ocr server stop --engine all
 
 - Launcher: `ENGINE=oxr sh/crispembed-ocr.sh`; `OXR_DEVICE=cpu` for the exact CPU arm.
 - Vulkan must use the native flash-attention kernel (`CRISPEMBED_OXR_GPU_FLASH=1`, set by the launcher). RADV's dense F32 attention decodes garbage.
-- Weights: `models/cstr/OXR-1.0-GGUF/oxr-1.0-f16.gguf` (recognizer) + `models/cstr/OXR-1.0-DFINE-layout-GGUF/oxr-1.0-dfine-layout-f32.gguf` (layout).
+- Weights: default `models/cstr/OXR-1.0-GGUF/oxr-1.0-q4_k-head.gguf` (1.9 GB, ~35% faster and 2 GB less VRAM than F16 at the same measured CER; `OXR_MODEL=…/oxr-1.0-f16.gguf` for the token-exact arm) + `models/cstr/OXR-1.0-DFINE-layout-GGUF/oxr-1.0-dfine-layout-f32.gguf` (layout, always CPU by default).
+- Measured on the repo's CC0 ground truth: OXR recognition is byte-exact on clean print/receipts (CER 0.000 on the receipt, 0.0007 on the 3k-char multi-column page) but loses to LightOnOCR on Fraktur (long-s transliteration) and Japanese. The native **document route** is upstream-experimental: on synthetic receipts it emits `Text` rows nested inside the `Table` region (duplicated content), and on small forms it can reduce the page to one image placeholder — verify structure before trusting it.
 - License: OXR License (Apache-2.0 + terms) — commercial use above USD 2M needs a SoMark license; online services must credit SoMark OXR; no competing hosted OCR API.
 - Route: `POST /oxr/document {"images": [paths], "format": "upstream"}` → `outputs.markdown` / `outputs.json`.
