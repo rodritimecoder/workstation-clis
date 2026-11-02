@@ -36,12 +36,19 @@ The canonical executable is located at `~/.local/bin/ocr` (and `~/.local/bin/ocr
 ocr read page.png --engine oxr -o page.md
 ocr read report.pdf --pages 1-5 --engine oxr -o report.md
 
-# Typed JSON: per-page blocks with type + bbox + content, plus timings
-ocr read page.png --engine oxr --json
+# Textbook/lecture pages: extract figures as PNG crops and link them from the notes
+ocr read page.png --engine oxr --assets notes/assets -o notes/page.md
+# → notes/page.md  (# heading, paragraphs, inline math, *Figure captions*)
+# → notes/assets/fig1.png, fig2.png …   (tight crop of each Picture region)
+
+# Typed JSON: per-page blocks with type + bbox + content, plus timings and asset list
+ocr read page.png --engine oxr --assets notes/assets --json
 
 # The default `--engine auto` uses OXR when the parser is already loaded,
-# otherwise it falls back to LightOnOCR without loading a 4.4 GB model.
+# otherwise it falls back to LightOnOCR without loading a 1.9 GB model.
 ```
+
+The `--assets` pass also cleans two upstream layout artefacts: `Text` blocks that sit inside a detected `Table`/`Picture` (already captured there) are dropped, and a figure box that merely frames a tighter crop of the same drawing is collapsed to the tighter crop.
 
 ### 2. High-Throughput Slide & Screenshot OCR (LightOnOCR-3-0.8B)
 ```bash

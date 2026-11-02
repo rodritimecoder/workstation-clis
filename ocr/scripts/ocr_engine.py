@@ -328,6 +328,7 @@ class OCREngine:
         file_path: Path,
         pages: Optional[str] = None,
         max_new_tokens: int = 4096,
+        assets_dir: Optional[Path] = None,
     ) -> Dict[str, Any]:
         p = Path(file_path).resolve()
         if not p.is_file():
@@ -354,10 +355,17 @@ class OCREngine:
         scratch = Path(tempfile.mkdtemp(prefix="ocr-oxr-"))
         try:
             images, count = self._page_images(p, pages, scratch)
+            options: Dict[str, Any] = {"max_new_tokens": max_new_tokens}
+            crop_root = None
+            if assets_dir is not None:
+                crop_root = scratch / "assets"
+                options["write_images"] = True
+                options["image_output_dir"] = str(crop_root)
+                options["file_name"] = re.sub(r"[^A-Za-z0-9._-]+", "_", p.stem) + p.suffix
             payload = {
                 "images": [str(img) for img in images],
                 "format": "upstream",
-                "options": {"max_new_tokens": max_new_tokens},
+                "options": options,
             }
             req = urllib.request.Request(
                 f"{self.scheme}://{self.host}:{self.crisp_port}/oxr/document",
@@ -377,16 +385,62 @@ class OCREngine:
             latency_ms = round((time.time() - started) * 1000, 1)
 
             outputs = data.get("outputs") or {}
-            markdown = (outputs.get("markdown") or "").strip()
             structure = outputs.get("json") or {}
+            markdown = (outputs.get("markdown") or "").strip()
             meta = (data.get("metadata") or {}).get("crispembed") or {}
+
+            dropped: Dict[int, set] = {}
+            for page_idx, page in enumerate(structure.get("pages", [])):
+                dropped[page_idx] = self._nested_blocks(page.get("blocks", []))
+
+            assets: List[Dict[str, Any]] = []
+            if assets_dir is not None and crop_root is not None:
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                multi = count > 1
+                for page_idx, page in enumerate(structure.get("pages", [])):
+                    fig_no = 0
+                    for block_idx, block in enumerate(page.get("blocks", [])):
+                        if block.get("type") != "Picture" or block_idx in dropped[page_idx]:
+                            continue
+                        match = re.search(r"!\[\]\(([^)]+)\)", str(block.get("content", "")))
+                        if not match:
+                            continue
+                        src = Path(match.group(1))
+                        if not src.is_file():
+                            continue
+                        fig_no += 1
+                        name = f"p{page_idx + 1}_fig{fig_no}.png" if multi else f"fig{fig_no}.png"
+                        dest = assets_dir / name
+                        shutil.copyfile(src, dest)
+                        assets.append({
+                            "page": page_idx + 1,
+                            "file": name,
+                            "path": str(dest.resolve()),
+                            "bbox": block.get("bbox"),
+                        })
+                        new = f"![]({dest.resolve()})"
+                        markdown = markdown.replace(match.group(0), new)
+                        block["content"] = new
+
+            for page_idx, indexes in dropped.items():
+                for block_idx in indexes:
+                    block = structure["pages"][page_idx]["blocks"][block_idx]
+                    content = str(block.get("content", "")).strip()
+                    if not content:
+                        continue
+                    if block.get("type") == "Picture":
+                        markdown = markdown.replace(content, "")
+                    else:
+                        markdown = markdown.replace(content, "")
+            markdown = re.sub(r"\n{3,}", "\n\n", markdown).strip()
+
             page_texts = [
                 {
                     "page": int(page.get("page_num", idx)) + 1,
                     "text": "\n\n".join(
                         str(block.get("content", ""))
-                        for block in page.get("blocks", [])
-                        if block.get("content")
+                        for block_idx, block in enumerate(page.get("blocks", []))
+                        if block.get("content") and block_idx not in dropped.get(idx, set())
                     ),
                 }
                 for idx, page in enumerate(structure.get("pages", []))
@@ -413,12 +467,45 @@ class OCREngine:
                 "text": markdown,
                 "markdown": markdown,
                 "structure": structure,
+                "assets": assets,
                 "layout_source": meta.get("layout_source"),
                 "latency_ms": latency_ms,
                 "source": "oxr_native_document",
             }
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+
+    @staticmethod
+    def _bbox_area(box) -> float:
+        return max(0.0, float(box[2]) - float(box[0])) * max(0.0, float(box[3]) - float(box[1]))
+
+    @classmethod
+    def _inside(cls, inner, outer, ratio: float = 0.95) -> bool:
+        iw = max(0.0, min(float(inner[2]), float(outer[2])) - max(float(inner[0]), float(outer[0])))
+        ih = max(0.0, min(float(inner[3]), float(outer[3])) - max(float(inner[1]), float(outer[1])))
+        area = cls._bbox_area(inner)
+        return area > 0 and (iw * ih) / area >= ratio
+
+    @classmethod
+    def _nested_blocks(cls, blocks: List[Dict[str, Any]]) -> set:
+        """Layout cleanups the native route leaves to the caller: text already
+        captured by a table/figure, and a figure box that is just a frame
+        around a tighter crop of the same drawing."""
+        drop: set = set()
+        for i, outer in enumerate(blocks):
+            if outer.get("type") not in ("Table", "Picture"):
+                continue
+            for j, inner in enumerate(blocks):
+                if i == j or j in drop:
+                    continue
+                if not cls._inside(inner.get("bbox", [0, 0, 0, 0]), outer.get("bbox", [0, 0, 0, 0])):
+                    continue
+                if inner.get("type") == "Text":
+                    drop.add(j)
+                elif inner.get("type") == "Picture" and outer.get("type") == "Picture":
+                    if cls._bbox_area(inner["bbox"]) >= 0.4 * cls._bbox_area(outer["bbox"]):
+                        drop.add(i)
+        return drop
 
     def ocr_document(
         self,
