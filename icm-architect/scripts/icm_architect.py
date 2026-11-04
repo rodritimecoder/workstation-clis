@@ -12,7 +12,8 @@ from pathlib import Path
 # work, whether the step is deterministic, and what artifact proves it ran. Optional
 # by default so existing workspaces keep validating; errors under `validate --kem`.
 CONTRACT_FIELDS = ("**Actor:**", "**Step type:**", "**Proof:**")
-STAGE_SECTIONS = ("## Inputs", "## Process", "## Outputs", "## Human check")
+STAGE_SECTIONS = ("## Inputs", "## Process", "## Outputs")
+CHECK_SECTIONS = ("## Check", "## Human check")
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "assets" / "templates"
 
@@ -234,7 +235,7 @@ def scaffold_agentic_factory(ws_path: Path, name: str, with_memory: bool, as_jso
 
     for item in sorted(template_dir.rglob("*")):
         rel = item.relative_to(template_dir)
-        dest = ws_path / rel
+        dest = ws_path / ("AGENTS.md" if rel.as_posix() == "entry.md" else rel)
         if item.is_dir():
             dest.mkdir(parents=True, exist_ok=True)
             continue
@@ -324,7 +325,7 @@ def cmd_init(
         "|---|---|---|",
         "| **L0** | `AGENTS.md` | Root workspace routing & identity |",
         "| **L1** | `CONTEXT.md` | Stage pipeline index & execution order |",
-        "| **L2** | `NN_*/CONTEXT.md` | Stage contracts (Actor, Step type, Proof, Inputs, Process, Outputs, Human Check) |",
+        "| **L2** | `NN_*/CONTEXT.md` | Stage contracts (Actor, Step type, Proof, Inputs, Process, Outputs, Check) |",
         "| **L3** | `_shared/`, `references/` | Immutable guidelines, constraints, schemas, and the Kem contract |",
         "| **L4** | `NN_*/output/` | Per-run editable product artifacts |",
     ]
@@ -391,8 +392,8 @@ One job: Execute {slug} according to workspace constraints.
 ## Outputs
 - `output/result.md`: Primary deliverable for stage {idx}
 
-## Human check
-Inspect `output/result.md` before advancing to the next stage. Edit in place; downstream stages consume this directory.
+## Check
+Inspect `output/result.md` before advancing to the next stage. Edit in place; downstream stages consume this directory. A check that is not a person writes `check.md` beside the output, first line `pass` or `fail: <why>`.
 """
         (s_dir / "CONTEXT.md").write_text(s_contract, encoding="utf-8")
 
@@ -470,6 +471,10 @@ def cmd_validate(target_dir: Path, as_json: bool = False, kem: bool = False) -> 
                 errors.append(f"Stage '{s.name}/CONTEXT.md' missing required section: '{sec}'")
             else:
                 checks_passed += 1
+        if any(sec in content for sec in CHECK_SECTIONS):
+            checks_passed += 1
+        else:
+            errors.append(f"Stage '{s.name}/CONTEXT.md' missing required section: '## Check'")
 
         for field in CONTRACT_FIELDS:
             if field in content:
