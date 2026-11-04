@@ -261,6 +261,66 @@ def update_vault_index(vault_dir: Path) -> None:
     index_file.write_text(header + table_header + "\n".join(rows) + "\n", encoding="utf-8")
 
 
+
+def dhash(img: Any, hash_size: int = 8) -> List[bool]:
+    img = img.convert("L").resize((hash_size + 1, hash_size), getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1))
+    diff = []
+    for row in range(hash_size):
+        for col in range(hash_size):
+            diff.append(img.getpixel((col, row)) > img.getpixel((col + 1, row)))
+    return diff
+
+
+def hamming_distance(h1: List[bool], h2: List[bool]) -> int:
+    return sum(b1 != b2 for b1, b2 in zip(h1, h2))
+
+
+def update_reels_ledger(vault_dir: Path, reel_id: str, upload_date: str, topic: str, folder_name: str) -> bool:
+    ledger_path = vault_dir / "kem_glitch" / "REELS_LEDGER.md"
+    if not ledger_path.is_file() or not reel_id:
+        return False
+    try:
+        content = ledger_path.read_text(encoding="utf-8")
+        if f"`{reel_id}`" in content:
+            return False
+
+        m = re.search(r"\*\*(\d+)\s+verified in the vault\*\*", content)
+        if m:
+            old_count = int(m.group(1))
+            content = content.replace(f"**{old_count} verified in the vault**", f"**{old_count + 1} verified in the vault**")
+
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        content = re.sub(r"-\s+\*\*Last crawled:\*\*.*", f"- **Last crawled:** {today_str}", content)
+
+        new_entry_header = f"## ✅ Newly mined (1) — {today_str}\n\n| Reel ID | Date | Topic | Vault entry |\n| :--- | :--- | :--- | :--- |\n"
+        new_entry_row = f"| `{reel_id}` | {upload_date} | {topic} | ✅ {folder_name} |\n"
+
+        missing_idx = content.find("## ❌ Missing")
+        if missing_idx != -1:
+            content = content[:missing_idx] + new_entry_header + new_entry_row + "\n" + content[missing_idx:]
+        else:
+            content += "\n" + new_entry_header + new_entry_row
+
+        ledger_path.write_text(content, encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"⚠️ Could not update REELS_LEDGER.md: {e}")
+        return False
+
+
+def update_notes_index(vault_dir: Path) -> None:
+    notes_index_bin = shutil.which("notes-index")
+    if notes_index_bin:
+        try:
+            print("🔍 Updating notes-index FTS5 database (fast --no-summaries)...")
+            res = subprocess.run([notes_index_bin, "--folder", str(vault_dir), "update", "--no-summaries"],
+                                 capture_output=True, text=True, timeout=15)
+            if res.returncode == 0:
+                print("✅ Notes index updated.")
+        except Exception:
+            pass
+
+
 def fast_mine_video(
     url_or_path: str,
     creator: Optional[str] = None,
@@ -276,10 +336,16 @@ def fast_mine_video(
     tmp_scratch.mkdir(parents=True, exist_ok=True)
 
     try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+
+    try:
         source_mp4 = tmp_scratch / "source.mp4"
         info_json = tmp_scratch / "source.info.json"
         creator_name = creator
         title_name = title
+        meta: Dict[str, Any] = {}
 
         # 1. Acquire video (Single-pass download with info json)
         print(f"📥 [1/4] Acquiring video: {url_or_path}...")
@@ -290,7 +356,6 @@ def fast_mine_video(
             if not creator_name:
                 creator_name = "local"
         else:
-            # yt-dlp single-pass download + metadata capture + subtitles
             dl_cmd = [
                 "yt-dlp",
                 "--no-playlist",
@@ -307,7 +372,6 @@ def fast_mine_video(
             if res.returncode != 0:
                 sys.exit(f"❌ Failed to download video: {res.stderr.strip()[:300]}")
 
-            # Locate downloaded video
             potential_videos = list(tmp_scratch.glob("source.*"))
             source_candidates = [p for p in potential_videos if p.suffix.lower() in [".mp4", ".mkv", ".webm", ".mov"]]
             if source_candidates:
@@ -315,25 +379,33 @@ def fast_mine_video(
             else:
                 sys.exit(f"❌ Could not find downloaded video in {tmp_scratch}")
 
-            # Look for written info.json
             for p in tmp_scratch.glob("*.info.json"):
                 try:
                     meta = json.loads(p.read_text(encoding="utf-8"))
                     if not creator_name:
                         creator_name = meta.get("uploader") or meta.get("channel") or meta.get("uploader_id") or "creator"
-                    if not title_name:
-                        title_name = meta.get("fulltitle") or meta.get("title") or "video"
+                    raw_title = meta.get("fulltitle") or meta.get("title") or ""
+                    desc = meta.get("description") or ""
+                    desc_lines = [l.strip() for l in desc.splitlines() if l.strip() and not l.strip().startswith(("#", "@"))]
+                    if desc_lines and (not raw_title or raw_title.lower().startswith(("video by", "reel by", "post by")) or raw_title.lower() == "video"):
+                        title_name = desc_lines[0]
+                    else:
+                        title_name = raw_title or (desc_lines[0] if desc_lines else "video")
                     break
                 except Exception:
                     pass
 
         creator_name = creator_name or "creator"
-        if "glitch" in creator_name.lower() or "kem" in creator_name.lower():
+        if "glitch" in creator_name.lower() or "kem" in creator_name.lower() or "kem_glitch" in url_or_path:
             creator_name = "kem_glitch"
         title_name = title_name or "video"
 
-        # Resolve destination path
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        raw_upload_date = meta.get("upload_date")
+        if raw_upload_date and len(str(raw_upload_date)) == 8:
+            date_str = f"{raw_upload_date[:4]}-{raw_upload_date[4:6]}-{raw_upload_date[6:]}"
+        else:
+            date_str = datetime.date.today().strftime("%Y-%m-%d")
+
         creator_slug = slugify(creator_name)
         title_slug = slugify(title_name)
         target_dir = vault_dir / creator_slug / f"{date_str}_{title_slug}"
@@ -341,27 +413,23 @@ def fast_mine_video(
         target_dir.mkdir(parents=True, exist_ok=True)
         visuals_dir.mkdir(parents=True, exist_ok=True)
 
-        # Move source video to vault
         dest_video = target_dir / "source.mp4"
         shutil.copy2(str(source_mp4), str(dest_video))
         source_mp4.unlink(missing_ok=True)
 
         # 2. Extract Transcript (Subtitles first, fallback to audiocpp ASR)
-        # YouTube's rolling auto-captions repeat each line three times with a
-        # sliding overlap, so prefer_asr=True forces the local ASR path even
-        # when a subtitle track exists.
         vtt_candidates = list(tmp_scratch.glob("*.vtt")) + list(tmp_scratch.glob("*.srt"))
-        transcript_text = ""
+        transcript_body = ""
         if vtt_candidates and not prefer_asr:
             print(f"📄 Found downloaded subtitles ({vtt_candidates[0].name}), parsing directly...")
             vtt_parsed = parse_vtt_to_transcript(vtt_candidates[0])
             if vtt_parsed:
-                transcript_text = f"# Audio Transcript: {title_name}\n\n" + vtt_parsed
+                transcript_body = vtt_parsed
         elif vtt_candidates:
             print(f"📄 Ignoring downloaded subtitles ({vtt_candidates[0].name}) - prefer_asr is set")
 
-        if not transcript_text:
-            print(f"🎙️ [2/4] Extracting audio and transcribing with {asr_model}...")
+        if not transcript_body:
+            print(f"🎙️ [2/4] Extracting audio and transcribing with {asr_model} via audiocpp...")
             audio_wav = tmp_scratch / "audio.wav"
             ffmpeg_audio = [
                 "ffmpeg", "-y", "-i", str(dest_video),
@@ -393,30 +461,78 @@ def fast_mine_video(
                 "--metrics"
             ])
 
-            asr_res = subprocess.run(cmd_asr, capture_output=True, text=True)
+            subprocess.run(cmd_asr, capture_output=True, text=True)
             if words_json.is_file():
                 formatted = format_words_to_transcript(words_json)
                 if formatted:
-                    transcript_text = f"# Audio Transcript: {title_name}\n\n" + formatted
-            if not transcript_text and transcript_raw.is_file():
-                transcript_text = f"# Audio Transcript: {title_name}\n\n" + transcript_raw.read_text(encoding="utf-8")
+                    transcript_body = formatted
+            if not transcript_body and transcript_raw.is_file():
+                transcript_body = transcript_raw.read_text(encoding="utf-8")
 
-        (target_dir / "transcript.md").write_text(transcript_text, encoding="utf-8")
+        duration_sec = meta.get("duration") or 0
+        dur_m, dur_s = divmod(int(duration_sec), 60)
+        dur_str = f"{dur_m:02d}:{dur_s:02d}" if duration_sec else "N/A"
+        web_url = meta.get("webpage_url") or url_or_path
 
-        # 3. Fast Keyframe Sampling (Scene Cut + Periodic Interval)
-        print("🖼️ [3/4] Extracting visual keyframes...")
+        full_transcript = (
+            f"# Transcript — {title_name}\n\n"
+            f"- **Reel:** `{web_url}`\n"
+            f"- **Creator:** `{creator_name}`\n"
+            f"- **Duration:** {dur_str}\n"
+            f"- **Upload Date:** {date_str}\n"
+            f"- **Method:** audio extracted with `yt-dlp`, transcribed by `{asr_model}` through `audiocpp`.\n\n"
+            f"---\n\n"
+            + (transcript_body if transcript_body else "_No audio transcript captured._")
+            + "\n"
+        )
+        (target_dir / "transcript.md").write_text(full_transcript, encoding="utf-8")
+
+        # 3. Fast Keyframe Sampling (0.5 fps + In-Memory dHash Hamming Dedup)
+        print("🖼️ [3/4] Extracting and deduplicating visual frames (dHash)...")
+        sample_tmp = tmp_scratch / "raw_frames"
+        sample_tmp.mkdir(parents=True, exist_ok=True)
         ffmpeg_frames = [
             "ffmpeg", "-y", "-i", str(dest_video),
-            "-vf", r"select='gt(scene,0.22)+not(mod(n\,90))',scale='min(1080,iw)':-1",
-            "-vsync", "vfr",
+            "-vf", "fps=1/2",
+            "-fps_mode", "vfr",
+            "-pix_fmt", "yuvj420p",
             "-q:v", "2",
-            str(visuals_dir / "frame_%06d.jpg")
+            str(sample_tmp / "frame_%04d.jpg")
         ]
         subprocess.run(ffmpeg_frames, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        captured_frames = sorted(list(visuals_dir.glob("frame_*.jpg")))
+        raw_frames = sorted(list(sample_tmp.glob("frame_*.jpg")))
+        captured_frames: List[Path] = []
 
-        # 4. Smart OCR & Notes Generation
+        if raw_frames and Image is not None:
+            try:
+                last_h = dhash(Image.open(raw_frames[0]))
+                dst_first = visuals_dir / "t000.jpg"
+                shutil.copy2(str(raw_frames[0]), str(dst_first))
+                captured_frames.append(dst_first)
+
+                for rf in raw_frames[1:]:
+                    num = int(rf.stem.replace("frame_", ""))
+                    sec = (num - 1) * 2
+                    cur_img = Image.open(rf)
+                    cur_h = dhash(cur_img)
+                    if hamming_distance(last_h, cur_h) >= 10:
+                        dst = visuals_dir / f"t{sec:03d}.jpg"
+                        shutil.copy2(str(rf), str(dst))
+                        captured_frames.append(dst)
+                        last_h = cur_h
+            except Exception as e:
+                print(f"⚠️ dHash filtering encountered: {e}, falling back to direct copy")
+                captured_frames = []
+
+        if not captured_frames and raw_frames:
+            for idx, rf in enumerate(raw_frames):
+                dst = visuals_dir / f"frame_{idx:06d}.jpg"
+                shutil.copy2(str(rf), str(dst))
+                captured_frames.append(dst)
+
+        # 4. Smart Notes Generation
         print("📝 [4/4] Generating structured vault notes...")
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
         should_ocr = False
         allow_cli = False
         if run_ocr == "always":
@@ -425,21 +541,65 @@ def fast_mine_video(
         elif run_ocr == "auto":
             should_ocr = is_ocr_server_online()
 
-        notes_lines = [
-            f"# {title_name}",
-            "",
-            f"- **Creator:** `{creator_name}`",
-            f"- **Mined Date:** {date_str}",
-            f"- **Source:** [source.mp4](source.mp4)",
-            f"- **Transcript:** [transcript.md](transcript.md)",
-            f"- **Captured Visuals:** {len(captured_frames)} frames in [visuals/](visuals/)",
-            "",
-            "## Key Visuals & Diagrams",
-            "",
-        ]
+        caption = (meta.get("description") or "").replace("\n", " ").strip()
+        likes = meta.get("like_count") or 0
+        comments = meta.get("comment_count") or 0
+        reel_id = meta.get("id") or ""
 
-        if captured_frames:
-            # Highlight up to 4 key visual frames
+        if creator_slug == "kem_glitch":
+            notes_lines = [
+                f"# {title_name}",
+                "",
+                f"- **Creator:** `kem_glitch` (Glitch Cat Club)",
+                f"- **Upload Date:** {date_str}",
+                f"- **Mined Date:** {today_str}",
+                f"- **Source:** [source.mp4](source.mp4)",
+                f"- **Transcript:** [transcript.md](transcript.md)",
+                f"- **Captured Visuals:** {len(captured_frames)} frames in [visuals/](visuals/)",
+                f"- **Instagram Reel:** `{web_url}`",
+                f"- **Duration:** {dur_str}",
+                f"- **Caption:** *\"{caption}\"*",
+                f"- **Engagement at capture:** {likes} likes · {comments} comments",
+                f"- **Feeds:** `kem-thought`",
+                "",
+                "---",
+                "",
+                "## Provenance",
+                "",
+                "**Shown in the reel** — verbatim from [transcript.md](transcript.md); ellipses mark omitted words.",
+                "",
+                "| Claim | Quote | Time |",
+                "| :--- | :--- | :---: |",
+                "| Core Thesis | \"...\" | 00:00 |",
+                "",
+                "**Modeled in this note** — our synthesis, not his literal words.",
+                "",
+                "| Choice | Why it is not in the reel |",
+                "| :--- | :--- |",
+                "| Architectural Framing | Structured for cognitive retrieval and agent skill synthesis |",
+                "",
+                "---",
+                "",
+                "## 🎯 Executive Architectural Synthesis",
+                "",
+                "*(Synthesize key architectural patterns, principles, and trade-offs from the transcript here)*",
+                "",
+            ]
+        else:
+            notes_lines = [
+                f"# {title_name}",
+                "",
+                f"- **Creator:** `{creator_name}`",
+                f"- **Mined Date:** {today_str}",
+                f"- **Source:** [source.mp4](source.mp4)",
+                f"- **Transcript:** [transcript.md](transcript.md)",
+                f"- **Captured Visuals:** {len(captured_frames)} frames in [visuals/](visuals/)",
+                "",
+                "## Key Visuals & Diagrams",
+                "",
+            ]
+
+        if captured_frames and creator_slug != "kem_glitch":
             step = max(1, len(captured_frames) // 4)
             sample_frames = captured_frames[::step][:4]
             for cf in sample_frames:
@@ -452,18 +612,29 @@ def fast_mine_video(
                         notes_lines.append(ocr_res)
                         notes_lines.append("```\n")
 
-        notes_lines.extend([
-            "## Full Audio Transcript",
-            "",
-            transcript_text if transcript_text else "_No audio transcript captured._",
-            "",
-        ])
+            notes_lines.extend([
+                "## Full Audio Transcript",
+                "",
+                transcript_body if transcript_body else "_No audio transcript captured._",
+                "",
+            ])
 
         (target_dir / "notes.md").write_text("\n".join(notes_lines), encoding="utf-8")
+
+        # 5. Ledger & Index Updates
+        if creator_slug == "kem_glitch":
+            ledger_updated = update_reels_ledger(vault_dir, reel_id, date_str, title_name, target_dir.name)
+            if ledger_updated:
+                print(f"📖 Appended `{reel_id}` to REELS_LEDGER.md")
+
         update_vault_index(vault_dir)
+        update_notes_index(vault_dir)
 
         elapsed = time.perf_counter() - t_start
-        print(f"⚡ Done in {elapsed:.1f}s! Vaulted to: {target_dir}")
+        print(f"\n⚡ Done in {elapsed:.1f}s! Vaulted to: {target_dir}")
+        print(f"   📁 Target: {target_dir}")
+        print(f"   🎙️ Transcript: {target_dir / "transcript.md"}")
+        print(f"   🖼️ Visuals: {len(captured_frames)} frames in {visuals_dir}")
         return target_dir
 
     finally:
@@ -624,6 +795,11 @@ def main() -> int:
     # 4. reindex
     p_reindex = sub.add_parser("reindex", help="Rebuild vault INDEX.md")
     p_reindex.add_argument("--vault-dir", default=str(DEFAULT_VAULT_DIR), help="Path to vault root")
+
+    # 5. kem
+    p_kem = sub.add_parser("kem", help="Mine a Kem Glitch reel directly into the vault (automatic metadata, dHash dedup, ledger, FTS)")
+    p_kem.add_argument("url", help="Instagram or YouTube URL of the reel")
+    p_kem.add_argument("--vault-dir", default=str(DEFAULT_VAULT_DIR), help="Path to vault root")
 
     args = parser.parse_args()
     v_dir = Path(args.vault_dir)

@@ -17,6 +17,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 declare -A LAUNCHERS=(
   [h2o]="h2o.sh"
+  [gliclass]="gliclass-edge.sh"
   [startlux]="startlux-decision.sh"
   [pplx]="pplx-decider-flash.sh"
   [vllm-d3-mini]="vllm-d3-mini.sh"

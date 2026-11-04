@@ -128,6 +128,7 @@ SERVICES=(
   "8087:embed — bge-small-en-v1.5"
   "8088:grounding — WeVisOne-VL-4B"
   "8090:ocr-jev — MiniCPM-OCR-Jev"
+  "8091:llm-rp — LFM3-1.7B-Uncensored-AD"
   "8000:llama-swap — llama-swap"
   "3010:kasmvnc — KasmVNC (podman)"
   "9222:cdp — Chromium DevTools"

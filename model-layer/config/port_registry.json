@@ -3,7 +3,7 @@
   "pinned_port": "8080",
   "port_range": [
     8080,
-    8090
+    8091
   ],
   "models": {
     "8080": {
@@ -93,6 +93,14 @@
       "name": "MiniCPM-OCR-Jev",
       "cmd": "sh $HOME/src/my-agent-skills/launchers/minicpm-ocr-jev.sh",
       "role": "OCR consistency gate \u2014 scores a candidate transcription against the source image in one forward pass"
+    },
+    "8091": {
+      "alias": "local-rp-lfm3",
+      "vram_mb": 2200,
+      "pinned": false,
+      "name": "LFM3-1.7B-Uncensored-AD",
+      "cmd": "sh $HOME/src/my-agent-skills/launchers/lfm3-1.7b-uncensored.sh",
+      "role": "Secondary generative LLM \u2014 uncensored roleplay and short-form creative, runs beside the primary :8080 slot instead of swapping it out"
     }
   }
 }

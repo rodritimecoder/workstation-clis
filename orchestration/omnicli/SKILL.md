@@ -277,6 +277,31 @@ Register it with a client:
 
 ---
 
+## 🌐 First-party harness adapters
+
+`omnicli` ships first-party adapter specifications and verification gates for every
+workstation harness in the `harnesses/` directory:
+
+| Harness | Guide | Primary Face | Key Primitives |
+|---|---|---|---|
+| **T3 Code** | [`harnesses/t3-code.md`](harnesses/t3-code.md) | MCP Server (`stdio`) + CLI | `omni_*` meta-tools, `html_preview` visuals, reactive wakeups |
+| **Antigravity CLI (`agy`)** | [`harnesses/agy.md`](harnesses/agy.md) | Python Bindings + CLI | `run_workflow` integration, dynamic subagents, surgical diffs |
+| **OpenCode** | [`harnesses/opencode.md`](harnesses/opencode.md) | MCP Server + CLI | `opencode.json` config, local daemons (:8080-:8085), compound bash |
+| **Pi Agent** | [`harnesses/pi.md`](harnesses/pi.md) | Direct CLI | Fast sub-10ms terminal tool calls, strict 8KB token budget cap |
+| **Boxxy Claw** | [`harnesses/boxxy.md`](harnesses/boxxy.md) | Direct CLI + Sandbox | Bubblewrap sandboxing (`--sandbox strict`), hot-reloading, WAL safety |
+
+### Harness operations
+
+```bash
+omnicli harness list       # overview of harnesses, detection status, and config paths
+omnicli harness detect     # inspect active environment variables and process trees
+omnicli harness info <id>  # display guide, protocol details, and config snippet
+omnicli harness config <id># emit raw ready-to-paste configuration snippet
+omnicli harness verify     # run automated verification across all 5 harnesses
+```
+
+---
+
 ## 🧠 Native local inference
 
 Available both as subcommands and as tools in the catalog:

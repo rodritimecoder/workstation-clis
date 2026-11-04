@@ -80,6 +80,7 @@ deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
 | `embed` | `:8087` | `local-embed-bge` | `bge-small.sh` | bge-small-en-v1.5 (f16) | `models/unsloth/bge-small-en-v1.5-GGUF/bge-small-en-v1.5-f16.gguf` | graph-memory, semantic-cache |
 | `grounding` | `:8088` | `local-grounding-wevisone` | `wevisone-vl.sh` | WeVisOne-VL-4B (Q4_K_M + mmproj Q8_0) **(retired)** | `models/mradermacher/WeVisOne-VL-4B-GGUF/WeVisOne-VL-4B.Q4_K_M.gguf`<br>`models/mradermacher/WeVisOne-VL-4B-GGUF/WeVisOne-VL-4B.mmproj-Q8_0.gguf` | — |
 | `ocr-jev` | `:8090` | `local-ocr-jev` | `minicpm-ocr-jev.sh` | MiniCPM-OCR-Jev (Q6_K + mmproj f16) | `models/openbmb/MiniCPM-OCR-Jev-gguf/MiniCPM-OCR-Jev-Q6_K.gguf`<br>`models/openbmb/MiniCPM-OCR-Jev-gguf/mmproj-model-f16.gguf` | kem-ocr |
+| `llm-rp` | `:8091` | `local-rp-lfm3` | `lfm3-1.7b-uncensored.sh` | LFM3-1.7B-Uncensored-AD (Q4_K_M) | `models/AtomicChat/LFM3-1.7B-Uncensored-GGUF/LFM3-1.7B-Uncensored-AD-Q4_K_M.gguf` | — |
 
 ### `:8080` llm — `local-coder-genesis`
 
@@ -91,7 +92,7 @@ deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
 - **Owner:** `local-llm` · **Used by:** local-llm, omnicli
 - **Weights:** `models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-Final-Q4_K_M.gguf`
 - **Quirks:** WEIGHTS DELETED by owner 2026-11-01 — deliberate, not coming back; only the Q8_K_P build remains on the volume.
-- **Candidates:** `Qwen3.8-27B-GSQ-RCO + DFlash2 draft` (IQ3_XXS target, Q4_K_M draft, candidate) · `Swift-1.5-Qwen3.8-27B-heretic` (IQ3_XXS + MTP draft, candidate) · `Qwen3.6-35B-A3B-Uncensored-Genesis-Final` (Q4_K_M, retired) · `Qwen3.6-35B-A3B-Uncensored-Genesis-Final` (Q4_K_M + mmproj F16, retired) · `Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-TTQ` (4.51bpw IQ4_NL, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Qwen3.6-35B-A3B-Uncensored-Genesis-Final` (Q4_K_M, candidate) · `Qwen3.6-35B-A3B-MTP` (UD-Q3_K_M, candidate) · `ThinkingCap-Qwen3.6-27B` (Q4_K_M + f16 mmproj, candidate)
+- **Candidates:** `Qwen3.8-27B-GSQ-RCO + DFlash2 draft` (IQ3_XXS target, Q4_K_M draft, candidate) · `Swift-1.5-Qwen3.8-27B-heretic` (IQ3_XXS + MTP draft, candidate) · `Qwen3.8-27B-Uncensored-HauhauCS-Aggressive` (Q4_K_P, candidate) · `Qwen3.6-35B-A3B-Uncensored-Genesis-Final` (Q4_K_M, retired) · `Qwen3.6-35B-A3B-Uncensored-Genesis-Final` (Q4_K_M + mmproj F16, retired) · `Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-TTQ` (4.51bpw IQ4_NL, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced` (Q4_K_M, legacy) · `Qwen3.6-35B-A3B-Uncensored-Genesis-Final` (Q4_K_M, candidate) · `Qwen3.6-35B-A3B-MTP` (UD-Q3_K_M, candidate) · `ThinkingCap-Qwen3.6-27B` (Q4_K_M + f16 mmproj, candidate)
 
 ### `:8081` audio — `local-audio-audiocpp`
 
@@ -113,7 +114,7 @@ deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
 - **API:** `/v1/systemone (native, calibrated); vision via mmproj`
 - **Owner:** `jev-decision` · **Used by:** jev-decision, decision-model, clip-box, frontend-uat, eval-router
 - **Quirks:** Native /v1/systemone (Q4_K_M) + visual box locator via h2o-serve shim (:8761). vision projector attached
-- **Candidates:** `h2o-lightning-4b` (Q4_K_M + mmproj F16, current) · `pplx-decider-flash-v1.2` (Q4_K_M + mmproj F16, retired) · `vllm-d3-mini` (Q4_K_M + mmproj Q8_0, candidate) · `vllm-d3-nano` (Q4_K_M (local) + mmproj Q8_0, legacy) · `StartLux-Decision-v1.1-4B-Instant` (Q4_K_M (text decoder) + mmproj F16, candidate)
+- **Candidates:** `h2o-lightning-4b` (Q4_K_M + mmproj F16, current) · `gliclass-v4-edge` (Q8_ONNX (617 MB) / FP32_ONNX (1.68 GB), candidate) · `pplx-decider-flash-v1.2` (Q4_K_M + mmproj F16, retired) · `vllm-d3-mini` (Q4_K_M + mmproj Q8_0, candidate) · `vllm-d3-nano` (Q4_K_M (local) + mmproj Q8_0, legacy) · `StartLux-Decision-v1.1-4B-Instant` (Q4_K_M (text decoder) + mmproj F16, candidate)
 
 ### `:8082` decision-engine — `local-decide-engine`
 
@@ -202,4 +203,15 @@ deleted Genesis Q4_K_M — calls to the default model 500 until it is repointed
 - **Owner:** `unowned` · **Used by:** kem-ocr
 - **Weights:** `models/openbmb/MiniCPM-OCR-Jev-gguf/MiniCPM-OCR-Jev-Q6_K.gguf` · `models/openbmb/MiniCPM-OCR-Jev-gguf/mmproj-model-f16.gguf`
 - **Quirks:** Reuses :8090, freed when JPT-4B was archived. Not a general decision engine: the question is baked into the model, so this slot cannot answer the jev-decision query types - :8083 remains the decision API. No skill drives this slot yet - call it directly or add it to a consumer. 2B Qwen3.5-VL trunk with a 2-class value head read at the pooled last token; no LM head, text generation is rejected. vision projector attached
+
+### `:8091` llm-rp — `local-rp-lfm3`
+
+- **Role:** Secondary generative LLM — uncensored roleplay and short-form creative, runs beside the primary :8080 slot instead of swapping it out
+- **Service:** llama-server (Vulkan)
+- **Start:** `lfm3-1.7b-uncensored.sh` (volume `sh/`; in-repo copy `launchers/lfm3-1.7b-uncensored.sh`)
+- **Health:** `curl -s http://127.0.0.1:8091/health`
+- **API:** `/v1/chat/completions`
+- **Owner:** `unowned` · **Used by:** —
+- **Weights:** `models/AtomicChat/LFM3-1.7B-Uncensored-GGUF/LFM3-1.7B-Uncensored-AD-Q4_K_M.gguf`
+- **Quirks:** No skill drives this slot; call it directly. The launcher honours PORT=, but any other port needs a manifest slot first or ports.py check fails. LiquidAI LFM3 1.7B, uncensored AD tune, RP workload.
 <!-- ports:end -->

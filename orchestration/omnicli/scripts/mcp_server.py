@@ -230,7 +230,7 @@ def _describe_doc(con, name: str, query: str, max_bytes: int) -> dict[str, Any]:
     """Read one document the skill declared as part of its searchable body."""
     q = (query or "").strip().lower()
     rows = con.execute(
-        "SELECT title, path, body FROM docs WHERE skill = ? AND kind = 'doc'", (name,)
+        "SELECT title, path, body FROM docs WHERE skill = ? AND kind IN ('doc', 'reference')", (name,)
     ).fetchall()
     if not rows:
         return _text_result(

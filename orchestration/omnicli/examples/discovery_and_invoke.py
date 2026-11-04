@@ -16,4 +16,8 @@ def main():
         print(f"Summary: {s.get('summary')}")
 
 if __name__ == "__main__":
+    import sys
+    if "-h" in sys.argv or "--help" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
     main()

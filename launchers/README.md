@@ -14,9 +14,9 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 <!-- ports:begin -->
 | Port | Slot | Cardinality | Default model | Launcher | Role |
 |---|---|---|---|---|---|
-| `:8080` | `llm` | many (12) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
+| `:8080` | `llm` | many (13) | Qwen3.6-35B-A3B-Uncensored-Genesis-Final | `luffy_nothink.sh` | Primary generative LLM — chat, code, long-form writing, prose projection |
 | `:8081` | `audio` | many (3) | nemotron-asr | `run-audiocpp.sh` | Speech-to-text, text-to-speech, forced alignment, voice cloning |
-| `:8083` | `decision` | one-of-many (5) | h2o-lightning-4b | `h2o.sh` | The decision engine slot - bool / choice / score primitives |
+| `:8083` | `decision` | one-of-many (6) | h2o-lightning-4b | `h2o.sh` | The decision engine slot - bool / choice / score primitives |
 | `:8082` | `decision-engine` | single (1) | StartLux-Decision-v1.1-4B-Instant | `startlux-decision.sh` | Experimental StartLux backend; not the h2o-lightning-4b JEV endpoint |
 | `:8089` | `decision-fallback` | single (1) | Imajev-4B | `imajev-decider.sh` | Secondary decision engine — Imajev-4B chat path, or letter/readout with READOUT=1 |
 | `:8084` | `ocr-crispembed` | single (1) | CrispEmbed (PP-OCRv6 small: DB++ det + CTC rec) | `crispembed-ocr.sh` | Documents & scene text — OXR-1.0 layout-aware Markdown, PP-OCRv6 bounding boxes |
@@ -25,6 +25,7 @@ copies. `python3 skills/ports.py drift` reports any divergence.
 | `:8087` | `embed` | one-of-many (2) | bge-small-en-v1.5 | `bge-small.sh` | Vector embeddings for RAG and semantic caching |
 | `:8088` | `grounding` | single (1) | WeVisOne-VL-4B | `wevisone-vl.sh` | Word-level OCR boxes, open-vocab detection, referring localization, pointing, counting |
 | `:8090` | `ocr-jev` | single (1) | MiniCPM-OCR-Jev | `minicpm-ocr-jev.sh` | OCR consistency gate — scores a candidate transcription against the source image in one forward pass |
+| `:8091` | `llm-rp` | single (1) | LFM3-1.7B-Uncensored-AD | `lfm3-1.7b-uncensored.sh` | Secondary generative LLM — uncensored roleplay and short-form creative, runs beside the primary :8080 slot instead of swapping it out |
 
 | Port | Infra | Service | Role |
 |---|---|---|---|

@@ -20,4 +20,8 @@ def main():
         print(f"  - {t['id']}: {t.get('summary', '')[:80]}")
 
 if __name__ == "__main__":
+    import sys
+    if "-h" in sys.argv or "--help" in sys.argv:
+        print(__doc__)
+        sys.exit(0)
     main()

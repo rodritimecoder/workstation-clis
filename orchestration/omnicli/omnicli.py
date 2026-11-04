@@ -46,9 +46,10 @@ try:
     from catalog import argspec as argspec_mod
     from catalog import bindings as bindings_mod
     from catalog import bridge as bridge_mod
+    from catalog import harness as harness_mod
     from catalog import builder, health, invoke, policy, registry, search, vectors  # noqa: E402
 except ImportError:  # pragma: no cover - degraded install
-    aliases_mod = bindings_mod = bridge_mod = argspec_mod = None
+    aliases_mod = bindings_mod = bridge_mod = argspec_mod = harness_mod = None
     builder = registry = search = health = invoke = policy = None  # type: ignore
 
 # The response cap. An agent must never be able to pull an unbounded payload
@@ -225,6 +226,115 @@ def cmd_status(as_json: bool = False):
 
 
 # --------------------------------------------------------------------------
+# harness — first-party harness support
+# --------------------------------------------------------------------------
+
+def cmd_harness(subaction: str = "list", target: str | None = None, as_json: bool = False):
+    if harness_mod is None:
+        sys.exit("❌ Error: omnicli catalog.harness package not importable.")
+
+    subaction = (subaction or "list").lower()
+    if subaction == "list":
+        items = harness_mod.list_harnesses()
+        if as_json:
+            print(json.dumps(items, indent=2))
+            return
+        active_list = [h["name"] for h in items if h["active"]]
+        active_str = ", ".join(active_list) if active_list else "None detected"
+        print(f"\n🌐 [omnicli — First-Party Harness Adapters]")
+        print(f"   Active runtime: {active_str}\n")
+        print(f"   {'HARNESS':<12} │ {'STATUS':<12} │ {'PROTOCOLS':<32} │ CONFIG PATH")
+        print("   " + "─" * 13 + "┼" + "─" * 14 + "┼" + "─" * 34 + "┼" + "─" * 28)
+        for h in items:
+            if h["active"]:
+                status = "🟢 ACTIVE"
+            elif h["installed"]:
+                status = "⚪ INSTALLED"
+            else:
+                status = "⚫ NOT FOUND"
+            proto = ", ".join(h["protocols"])[:30]
+            first_path = h["config_paths"][0]
+            print(f"   {h['id']:<12} │ {status:<12} │ {proto:<32} │ {first_path}")
+        print("\n   Guides: omnicli harness info <name>  ·  Verify: omnicli harness verify\n")
+
+    elif subaction == "detect":
+        detected = harness_mod.detect_active_harnesses()
+        if as_json:
+            print(json.dumps(detected, indent=2))
+            return
+        print("\n🔍 [omnicli — Harness Detection]")
+        if not detected:
+            print("   No specific agent harness detected from current environment variables.")
+        else:
+            for d in detected:
+                print(f"   🟢 {d['name']} ({d['id']})")
+                for ind in d["matched_indicators"]:
+                    print(f"      • {ind}")
+        print()
+
+    elif subaction in ("info", "show"):
+        if not target:
+            sys.exit("❌ Error: specify harness name (e.g. `omnicli harness info t3-code`).")
+        h = harness_mod.get_harness(target)
+        if not h:
+            sys.exit(f"❌ Error: unknown harness {target!r}. Available: {', '.join(harness_mod.HARNESS_SPECS.keys())}")
+        doc = harness_mod.get_doc(target)
+        if as_json:
+            print(json.dumps({**h, "doc": doc}, indent=2))
+            return
+        print(f"\n📖 [omnicli harness — {h['name']}]")
+        print(f"   Summary  : {h['summary']}")
+        print(f"   Protocols: {', '.join(h['protocols'])}")
+        print(f"   Configs  : {', '.join(h['config_paths'])}")
+        print(f"   Guide    : {h['doc_file']}\n")
+        print("--- Configuration Snippet ---")
+        print(h.get("config_snippet", "").strip())
+        print("\n-----------------------------\n")
+        print(f"   Verify: omnicli harness verify {h['id']}\n")
+
+    elif subaction == "config":
+        if not target:
+            sys.exit("❌ Error: specify harness name (e.g. `omnicli harness config opencode`).")
+        snippet = harness_mod.get_config(target)
+        if snippet is None:
+            sys.exit(f"❌ Error: unknown harness {target!r}.")
+        print(snippet.strip())
+
+    elif subaction == "verify":
+        if target:
+            report = harness_mod.verify_harness(target)
+            if as_json:
+                print(json.dumps(report, indent=2))
+                sys.exit(0 if report["status"] == "PASS" else 1)
+            icon = "✅" if report["status"] == "PASS" else "❌"
+            print(f"\n🧪 [omnicli — Harness Verification: {report['name']}]")
+            print(f"   Result: {icon} {report['status']} ({report['passed']}/{report['total']} checks passed)\n")
+            for c in report["checks"]:
+                c_icon = "✓" if c["passed"] else "✗"
+                print(f"   {c_icon} {c['check']:<28} : {c['detail']}")
+            print()
+            sys.exit(0 if report["status"] == "PASS" else 1)
+        else:
+            report = harness_mod.verify_all()
+            if as_json:
+                print(json.dumps(report, indent=2))
+                sys.exit(0 if report["status"] == "PASS" else 1)
+            icon = "✅" if report["status"] == "PASS" else "❌"
+            print(f"\n🧪 [omnicli — Workstation Harness Verification Matrix]")
+            print(f"   Overall Status: {icon} {report['status']}\n")
+            for h_id, res in report["harnesses"].items():
+                h_icon = "✅" if res["status"] == "PASS" else "❌"
+                print(f"   {h_icon} {res['name']:<24} [{res['passed']}/{res['total']} checks]")
+                for c in res["checks"]:
+                    c_icon = "✓" if c["passed"] else "✗"
+                    print(f"      {c_icon} {c['check']:<26}: {c['detail']}")
+                print()
+            sys.exit(0 if report["status"] == "PASS" else 1)
+    else:
+        sys.exit(f"❌ Error: unknown harness action {subaction!r}. Use: list, detect, info, config, verify.")
+
+
+# --------------------------------------------------------------------------
 # search
 # --------------------------------------------------------------------------
 
@@ -343,7 +453,7 @@ def _describe_doc(con, name: str, query: str, as_json: bool = False):
     """
     q = query.strip().lower()
     rows = con.execute(
-        "SELECT title, path, body, kind FROM docs WHERE skill = ? AND kind = 'doc'",
+        "SELECT title, path, body, kind FROM docs WHERE skill = ? AND kind IN ('doc', 'reference')",
         (name,),
     ).fetchall()
     if not rows:
@@ -1321,10 +1431,14 @@ def main():
 
     sub.add_parser("mcp", help="Run the MCP stdio server (4 meta-tools)")
 
-    p = sub.add_parser("status", help="Health of every local service, the catalog, and the retrieval tier")
+    p = sub.add_parser("status", aliases=["health"],
+                       help="Health of every local service, the catalog, and the retrieval tier")
     p.add_argument("--json", action="store_true")
 
-    sub.add_parser("health", help="Alias for status")
+    p = sub.add_parser("harness", help="First-party harness support (t3-code, agy, opencode, pi, boxxy)")
+    p.add_argument("subaction", nargs="?", choices=["list", "detect", "info", "show", "config", "verify"], default="list")
+    p.add_argument("target", nargs="?", default=None, help="Harness name (t3-code, agy, opencode, pi, boxxy)")
+    p.add_argument("--json", action="store_true")
 
     # --- compat ------------------------------------------------------
     p = sub.add_parser("inspect", help="(legacy) Print a skill's SKILL.md body")
@@ -1391,6 +1505,8 @@ def main():
         cmd_mcp()
     elif args.action in ("status", "health"):
         cmd_status(as_json=args.json)
+    elif args.action == "harness":
+        cmd_harness(subaction=args.subaction, target=args.target, as_json=args.json)
     elif args.action == "inspect":
         cmd_inspect(args.skill)
     elif args.action == "run":

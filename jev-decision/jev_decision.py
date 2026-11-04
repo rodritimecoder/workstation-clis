@@ -7,6 +7,7 @@ caller pays a handful of tokens instead of a full payload.
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -79,8 +80,9 @@ def _check_source(args, res: dict) -> None:
 
 def main():
     parent_parser = argparse.ArgumentParser(add_help=False)
+    default_port = int(os.environ.get("JEV_PORT", os.environ.get("DECISION_PORT", "8083")))
     parent_parser.add_argument("--host", default=None, help="Decision host (default: $JEV_HOST or 127.0.0.1, supports Tailscale *.ts.net)")
-    parent_parser.add_argument("--port", type=int, default=8083, help="Decision service port (default: 8083 = h2o-lightning-4b)")
+    parent_parser.add_argument("--port", type=int, default=default_port, help=f"Decision service port (default: {default_port} = h2o-lightning-4b / gliclass-edge)")
     parent_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     parent_parser.add_argument("--out", default=None, help="Write the JSON result here and print a one-line pointer")
     parent_parser.add_argument("--require-server", action="store_true",
