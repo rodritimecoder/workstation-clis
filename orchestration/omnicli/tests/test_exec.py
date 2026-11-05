@@ -83,6 +83,7 @@ class TestExec(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout)
 
+    @unittest.skipUnless(shutil.which("bwrap"), "bubblewrap not installed")
     def test_one_plan_runs_several_tool_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             plan = Path(tmp) / "plan.py"
