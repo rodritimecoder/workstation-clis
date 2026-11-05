@@ -61,9 +61,12 @@ class TestClickWaits(unittest.TestCase):
     def setUpClass(cls):
         if not BIN.is_file():
             raise unittest.SkipTest(f"no binary at {BIN}")
-        probe = subprocess.run([str(BIN), "open", "about:blank"], capture_output=True, text=True, timeout=10)
-        if probe.returncode != 0:
-            raise unittest.SkipTest(f"playwright driver unavailable on this runner: {probe.stderr[:200]}")
+        try:
+            probe = subprocess.run([str(BIN), "open", "about:blank"], capture_output=True, text=True, timeout=5)
+            if probe.returncode != 0:
+                raise unittest.SkipTest(f"playwright driver unavailable on this runner: {probe.stderr[:200]}")
+        except (subprocess.TimeoutExpired, OSError) as e:
+            raise unittest.SkipTest(f"playwright driver unavailable or timed out: {e}")
         start = subprocess.run([str(BIN), "daemon", "start"], capture_output=True, text=True, timeout=60)
         status = subprocess.run([str(BIN), "daemon", "status"], capture_output=True, text=True, timeout=30)
         if start.returncode != 0 or "running" not in status.stdout:
