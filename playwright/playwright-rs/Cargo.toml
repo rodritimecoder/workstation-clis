@@ -1,23 +1,17 @@
 [package]
 name = "playwright-agent-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [[bin]]
 name = "playwright-rs"
-path = "src/agent.rs"
-
-[[bin]]
-name = "legacy-fast-cdp"
 path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
 ureq = { version = "2.10", default-features = false, features = ["json"] }
-base64 = "0.22"
 playwright_upstream = {
     package = "playwright-rs",
     version = "=0.20.1",

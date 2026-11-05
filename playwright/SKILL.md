@@ -18,7 +18,7 @@ allowed-tools: "Bash(playwright-rs:*) Bash(fast-cdp:*) Bash(python3:*) Bash(npx:
 
 The CLI is built on [`playwright-rs`](https://github.com/padamson/playwright-rust) 0.20.1. It attaches to Chromium over CDP and uses Playwright's locator actionability, AI-mode ARIA snapshots, and `get_by_ref` support. The crate launches its bundled Playwright driver; this is not the old raw-WebSocket CDP implementation.
 
-The CLI keeps the agent-facing commands and the `fast-cdp` alias. The legacy raw-CDP executable is retained as `legacy-fast-cdp` for daemon lifecycle and rollback while the new backend is in use.
+The CLI keeps all agent-facing commands with `fast-cdp` as a direct symlink alias. Daemon lifecycle is self-contained directly within the native binary, and the legacy raw-CDP codebase has been retired.
 
 ---
 

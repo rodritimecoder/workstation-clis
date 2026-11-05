@@ -1,28 +1,32 @@
-use base64::Engine;
 use clap::{Args, Parser, Subcommand};
+mod candidates;
+use candidates::{extract_candidates, Candidate};
+use playwright_upstream::protocol::{
+    AriaSnapshotMode, AriaSnapshotOptions, ClickOptions, FillOptions, GotoOptions,
+    KeyboardOptions, WaitForFunctionOptions,
+};
+use playwright_upstream::{Browser, ConnectOverCdpOptions, Page, Playwright};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Message, WebSocket};
 
-const CDP_PORT: u16 = 9222;
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
+const DEFAULT_PORT: u16 = 9222;
 const PID_FILE: &str = "/tmp/fast_cdp_daemon.pid";
 
 #[derive(Parser)]
-#[command(name = "fast-cdp", about = "Ultra-fast native CDP client and Playwright verification engine")]
+#[command(name = "playwright-rs", about = "Playwright browser automation for agents")]
 struct Cli {
     #[arg(short = 's', long, global = true, default_value = "default")]
     session: String,
-
-    #[arg(long, global = true, default_value_t = 9222)]
+    #[arg(long, global = true, default_value_t = DEFAULT_PORT)]
     port: u16,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -33,26 +37,31 @@ enum Commands {
     Verify(VerifyArgs),
     Uat(UatArgs),
     Candidates(CandidatesArgs),
-    Snap(SnapArgs),
+    Snap(UrlArgs),
     Nav(NavArgs),
-
     Open(OpenArgs),
     Attach(AttachArgs),
     Goto(GotoArgs),
-    Snapshot(SnapshotArgs),
+    Snapshot(JsonArgs),
     Click(ClickArgs),
     Fill(FillArgs),
-    Type(TypeArgs),
+    Type(FillArgs),
     Press(PressArgs),
     Eval(EvalArgs),
     Screenshot(ScreenshotArgs),
-    Close(CloseArgs),
+    Close(JsonArgs),
 }
 
 #[derive(Args)]
 struct DaemonArgs {
     #[arg(value_parser = ["start", "stop", "status"])]
     action: String,
+}
+
+#[derive(Args)]
+struct JsonArgs {
+    #[arg(long, default_value_t = false)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -91,10 +100,21 @@ struct UatArgs {
     expect_text: Option<String>,
     #[arg(long)]
     expect_url: Option<String>,
-    #[arg(long, default_value = "jpt", value_parser = ["jpt", "imajev"])]
-    model: String,
     #[arg(long = "screenshot")]
     screenshot_path: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    no_block_media: bool,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    #[arg(long, default_value = "imajev")]
+    model: String,
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct CandidatesArgs {
+    url: String,
     #[arg(long, default_value_t = false)]
     no_block_media: bool,
     #[arg(long, default_value_t = 5000)]
@@ -104,7 +124,7 @@ struct UatArgs {
 }
 
 #[derive(Args)]
-struct SnapArgs {
+struct UrlArgs {
     url: String,
     #[arg(long, default_value_t = 5000)]
     timeout: u64,
@@ -115,10 +135,10 @@ struct SnapArgs {
 #[derive(Args)]
 struct NavArgs {
     url: String,
-    #[arg(long, default_value_t = 5000)]
-    timeout: u64,
     #[arg(long = "screenshot")]
     screenshot_path: Option<PathBuf>,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -126,10 +146,10 @@ struct NavArgs {
 #[derive(Args)]
 struct OpenArgs {
     url: Option<String>,
-    #[arg(long, default_value_t = 5000)]
-    timeout: u64,
     #[arg(long, default_value_t = false)]
     no_block_media: bool,
+    #[arg(long, default_value_t = 10000)]
+    timeout: u64,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -145,25 +165,8 @@ struct AttachArgs {
 #[derive(Args)]
 struct GotoArgs {
     url: String,
-    #[arg(long, default_value_t = 5000)]
+    #[arg(long, default_value_t = 10000)]
     timeout: u64,
-    #[arg(long, default_value_t = false)]
-    json: bool,
-}
-
-#[derive(Args)]
-struct CandidatesArgs {
-    url: String,
-    #[arg(long, default_value_t = 5000)]
-    timeout: u64,
-    #[arg(long, default_value_t = false)]
-    no_block_media: bool,
-    #[arg(long, default_value_t = false)]
-    json: bool,
-}
-
-#[derive(Args)]
-struct SnapshotArgs {
     #[arg(long, default_value_t = false)]
     json: bool,
 }
@@ -171,28 +174,18 @@ struct SnapshotArgs {
 #[derive(Args)]
 struct ClickArgs {
     target: String,
-    #[arg(long, default_value_t = 5000)]
-    timeout: u64,
     #[arg(long)]
     expect_text: Option<String>,
     #[arg(long)]
     expect_url: Option<String>,
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
     #[arg(long, default_value_t = false)]
     json: bool,
 }
 
 #[derive(Args)]
 struct FillArgs {
-    target: String,
-    text: String,
-    #[arg(long, default_value_t = 5000)]
-    timeout: u64,
-    #[arg(long, default_value_t = false)]
-    json: bool,
-}
-
-#[derive(Args)]
-struct TypeArgs {
     target: String,
     text: String,
     #[arg(long, default_value_t = 5000)]
@@ -222,23 +215,6 @@ struct ScreenshotArgs {
     json: bool,
 }
 
-#[derive(Args)]
-struct CloseArgs {
-    #[arg(long, default_value_t = false)]
-    json: bool,
-}
-
-#[derive(Serialize)]
-struct VerifyResult {
-    ok: bool,
-    url: String,
-    title: String,
-    duration_ms: f64,
-    passed_checks: Vec<String>,
-    errors: Vec<String>,
-    eval_result: Option<Value>,
-}
-
 #[derive(Serialize)]
 struct UatAction {
     action: String,
@@ -260,333 +236,145 @@ struct UatResult {
     errors: Vec<String>,
 }
 
-#[derive(Deserialize)]
-struct TargetInfo {
-    id: String,
-    #[serde(rename = "webSocketDebuggerUrl")]
-    websocket_debugger_url: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct ActiveSession {
-    target_id: String,
-    ws_url: String,
+#[derive(Serialize, Deserialize, Default)]
+struct Session {
+    #[serde(default)]
+    cdp_url: String,
+    #[serde(default)]
     cdp_port: u16,
+    #[serde(default)]
     url: String,
+    #[serde(default)]
+    page_index: Option<usize>,
 }
 
-fn session_path(name: &str) -> PathBuf {
-    PathBuf::from(format!("/tmp/fast_cdp_session_{name}.json"))
+struct Client {
+    playwright: Playwright,
+    browser: Browser,
+    page: Page,
+    page_index: usize,
+    ephemeral: bool,
 }
 
-fn save_session(name: &str, session: &ActiveSession) -> Result<(), String> {
-    let path = session_path(name);
-    let json_str = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
-    fs::write(&path, json_str).map_err(|e| format!("Failed to write session file {}: {e}", path.display()))
-}
-
-fn load_session(name: &str) -> Result<ActiveSession, String> {
-    let path = session_path(name);
-    if !path.exists() {
-        return Err(format!("No active session '{name}'. Run 'open <url>' or 'attach' first."));
-    }
-    let data = fs::read_to_string(&path).map_err(|e| format!("Failed to read session {}: {e}", path.display()))?;
-    serde_json::from_str(&data).map_err(|e| format!("Corrupted session {}: {e}", path.display()))
-}
-
-fn remove_session(name: &str) {
-    let _ = fs::remove_file(session_path(name));
-}
-
-fn resolve_target_selector(target: &str) -> String {
-    let t = target.trim();
-    if t.starts_with('e') && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_digit()) {
-        format!("[data-fast-ref=\"{t}\"]")
-    } else if let Some(stripped) = t.strip_prefix("ref=") {
-        format!("[data-fast-ref=\"{stripped}\"]")
-    } else {
-        t.to_string()
-    }
-}
-
-struct CdpClient {
-    target_id: String,
-    ws: WebSocket<MaybeTlsStream<TcpStream>>,
-    msg_id: u64,
-    cdp_port: u16,
-    auto_close_on_drop: bool,
-}
-
-impl CdpClient {
-    fn connect_ws(
-        ws_url: &str,
-        target_id: String,
-        cdp_port: u16,
-        auto_close: bool,
+impl Client {
+    async fn connect(
+        endpoint: &str,
+        preferred_url: Option<&str>,
+        preferred_index: Option<usize>,
+        create_page: bool,
         timeout_ms: u64,
-    ) -> Result<Self, String> {
-        let (mut ws, _) = tungstenite::connect(ws_url)
-            .map_err(|e| format!("WebSocket handshake to {ws_url} failed: {e}"))?;
-
-        let stream = match ws.get_mut() {
-            MaybeTlsStream::Plain(s) => s,
-            _ => return Err("Expected plain TCP stream for localhost".into()),
-        };
-        stream
-            .set_read_timeout(Some(Duration::from_millis(timeout_ms)))
-            .map_err(|e| format!("Failed to set socket read timeout: {e}"))?;
-        stream
-            .set_write_timeout(Some(Duration::from_millis(timeout_ms)))
-            .map_err(|e| format!("Failed to set socket write timeout: {e}"))?;
-
-        let mut client = Self {
-            target_id,
-            ws,
-            msg_id: 0,
-            cdp_port,
-            auto_close_on_drop: auto_close,
-        };
-
-        client.call("Page.enable", json!({}))?;
-        client.call("Runtime.enable", json!({}))?;
-        client.call("DOM.enable", json!({}))?;
-
-        Ok(client)
-    }
-
-    fn new(block_media: bool, timeout_ms: u64) -> Result<Self, String> {
-        let resp = ureq::put(&format!("http://127.0.0.1:{CDP_PORT}/json/new?about:blank"))
-            .timeout(Duration::from_millis(timeout_ms))
-            .call()
-            .map_err(|e| format!("Failed to create CDP target: {e}"))?;
-
-        let info: TargetInfo = resp
-            .into_json()
-            .map_err(|e| format!("Invalid target response JSON: {e}"))?;
-
-        let ws_url = info
-            .websocket_debugger_url
-            .ok_or_else(|| "Target did not expose webSocketDebuggerUrl".to_string())?;
-
-        let mut client = Self::connect_ws(&ws_url, info.id, CDP_PORT, true, timeout_ms)?;
-
-        if block_media {
-            let _ = client.call("Network.enable", json!({}));
-            let _ = client.call(
-                "Network.setBlockedURLs",
-                json!({
-                    "urls": [
-                        "*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.svg",
-                        "*.woff*", "*.woff2", "*.ttf", "*analytics*", "*googletagmanager*"
-                    ]
-                }),
-            );
-        }
-
-        Ok(client)
-    }
-
-    fn from_session(session: &ActiveSession, timeout_ms: u64) -> Result<Self, String> {
-        let ws_url = if let Ok(resp) = ureq::get(&format!("http://127.0.0.1:{}/json/list", session.cdp_port))
-            .timeout(Duration::from_millis(1000))
-            .call()
+    ) -> Result<Self> {
+        let playwright = Playwright::launch().await?;
+        let options = ConnectOverCdpOptions::new().timeout(timeout_ms as f64);
+        let browser = playwright
+            .chromium()
+            .connect_over_cdp(endpoint, Some(options))
+            .await?;
+        let contexts = browser.contexts();
+        let mut pages = contexts.iter().flat_map(|context| context.pages()).collect::<Vec<_>>();
+        let (page, page_index) = if create_page {
+            let index = pages.len();
+            let page = match contexts.first() {
+                Some(context) => context.new_page().await?,
+                None => browser.new_page().await?,
+            };
+            (page, index)
+        } else if let Some(index) = preferred_url
+            .and_then(|url| pages.iter().position(|page| page.url() == url))
         {
-            if let Ok(targets) = resp.into_json::<Vec<Value>>() {
-                targets
-                    .into_iter()
-                    .find(|t| t.get("id").and_then(Value::as_str) == Some(&session.target_id))
-                    .and_then(|t| {
-                        t.get("webSocketDebuggerUrl")
-                            .and_then(Value::as_str)
-                            .map(|s| s.to_string())
-                    })
-                    .unwrap_or_else(|| session.ws_url.clone())
-            } else {
-                session.ws_url.clone()
-            }
+            (pages.swap_remove(index), index)
+        } else if let Some(index) = preferred_index.filter(|index| *index < pages.len()) {
+            (pages.swap_remove(index), index)
         } else {
-            session.ws_url.clone()
+            pages
+                .drain(..)
+                .next()
+                .map(|page| (page, 0))
+                .ok_or("No page target found on the CDP endpoint")?
         };
-
-        Self::connect_ws(&ws_url, session.target_id.clone(), session.cdp_port, false, timeout_ms)
-    }
-
-    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        self.msg_id += 1;
-        let id = self.msg_id;
-        let payload = json!({
-            "id": id,
-            "method": method,
-            "params": params
-        });
-
-        self.ws
-            .send(Message::Text(payload.to_string().into()))
-            .map_err(|e| format!("Failed to send CDP command {method}: {e}"))?;
-
-        loop {
-            let msg = self
-                .ws
-                .read()
-                .map_err(|e| format!("Error reading CDP response for {method}: {e}"))?;
-
-            if let Message::Text(txt) = msg {
-                let parsed: Value = match serde_json::from_str(&txt) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-
-                if parsed.get("id").and_then(Value::as_u64) == Some(id) {
-                    if let Some(err) = parsed.get("error") {
-                        return Err(err
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Unknown CDP error")
-                            .to_string());
-                    }
-                    return Ok(parsed.get("result").cloned().unwrap_or(Value::Null));
-                }
-            }
-        }
-    }
-
-    fn evaluate(&mut self, expr: &str) -> Result<Value, String> {
-        let res = self.call(
-            "Runtime.evaluate",
-            json!({
-                "expression": expr,
-                "returnByValue": true,
-                "awaitPromise": true
-            }),
-        )?;
-
-        if let Some(exception) = res.get("exceptionDetails") {
-            let desc = exception
-                .get("text")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    exception
-                        .get("exception")
-                        .and_then(|e| e.get("description"))
-                        .and_then(Value::as_str)
-                })
-                .unwrap_or("Runtime evaluation exception");
-            return Err(desc.to_string());
-        }
-
-        Ok(res.get("result").cloned().unwrap_or(Value::Null))
-    }
-
-
-    /// Poll a JS expression until it returns true, then return the last value.
-    fn poll_js(&mut self, expr: &str, timeout_ms: u64) -> Result<Value, String> {
-        let start = Instant::now();
-        let deadline = Duration::from_millis(timeout_ms);
-        loop {
-            let value = self
-                .evaluate(expr)?
-                .get("value")
-                .cloned()
-                .unwrap_or(Value::Null);
-            if value.as_bool() == Some(true) || start.elapsed() >= deadline {
-                return Ok(value);
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    /// Wait until the element is attached, visible, enabled and actually the
-    /// thing a pointer would hit. Returns the last observed state.
-    fn wait_ready(&mut self, selector: &str, timeout_ms: u64) -> Result<Value, String> {
-        let script = format!(
-            r#"(() => {{
-                const el = document.querySelector({sel});
-                if (!el) return {{ ready: false, state: "missing" }};
-                const r = el.getBoundingClientRect();
-                const s = window.getComputedStyle(el);
-                if (!(r.width > 0 && r.height > 0) || s.visibility === "hidden" || s.display === "none" || Number(s.opacity) === 0) {{
-                    return {{ ready: false, state: "hidden" }};
-                }}
-                if (el.disabled === true || el.getAttribute("aria-disabled") === "true") {{
-                    return {{ ready: false, state: "disabled" }};
-                }}
-                const cx = r.left + r.width / 2;
-                const cy = r.top + r.height / 2;
-                const hit = document.elementFromPoint(cx, cy);
-                if (!hit || !(hit === el || el.contains(hit))) {{
-                    return {{ ready: false, state: "covered", by: hit ? hit.tagName.toLowerCase() : "nothing" }};
-                }}
-                return {{ ready: true, state: "ready" }};
-            }})()"#,
-            sel = json!(selector)
-        );
-        let start = Instant::now();
-        let deadline = Duration::from_millis(timeout_ms);
-        loop {
-            let value = self
-                .evaluate(&script)?
-                .get("value")
-                .cloned()
-                .unwrap_or(Value::Null);
-            if value.get("ready").and_then(Value::as_bool) == Some(true) {
-                return Ok(value);
-            }
-            if start.elapsed() >= deadline {
-                return Ok(value);
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    fn navigate(&mut self, url: &str, timeout_ms: u64) -> Result<(), String> {
-        let _ = self.call("Page.navigate", json!({ "url": url }))?;
-        let start = Instant::now();
-        let timeout = Duration::from_millis(timeout_ms);
-
-        while start.elapsed() < timeout {
-            if let Ok(state_val) = self.evaluate("document.readyState") {
-                if let Some(s) = state_val.get("value").and_then(Value::as_str) {
-                    if s == "interactive" || s == "complete" {
-                        return Ok(());
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_millis(15));
-        }
-
-        Err(format!("Navigation to {url} timed out after {timeout_ms}ms"))
-    }
-
-    fn capture_screenshot(&mut self, path: &Path) -> Result<(), String> {
-        let res = self.call("Page.captureScreenshot", json!({ "format": "png" }))?;
-        let data_b64 = res
-            .get("data")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Missing data in captureScreenshot response".to_string())?;
-
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(data_b64)
-            .map_err(|e| format!("Base64 decode error on screenshot: {e}"))?;
-
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-
-        fs::write(path, bytes).map_err(|e| format!("Failed to write screenshot file: {e}"))?;
-        Ok(())
+        page.set_default_timeout(timeout_ms as f64).await;
+        Ok(Self {
+            playwright,
+            browser,
+            page,
+            page_index,
+            ephemeral: false,
+        })
     }
 }
 
-impl Drop for CdpClient {
-    fn drop(&mut self) {
-        let _ = self.ws.close(None);
-        if self.auto_close_on_drop {
-            let _ = ureq::get(&format!(
-                "http://127.0.0.1:{}/json/close/{}",
-                self.cdp_port, self.target_id
-            ))
-            .timeout(Duration::from_millis(500))
-            .call();
+fn session_path(name: &str) -> Result<PathBuf> {
+    if name.is_empty() || !name.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_".contains(ch)) {
+        return Err("session names may contain only letters, numbers, hyphens, and underscores".into());
+    }
+    Ok(std::env::temp_dir().join(format!("fast_cdp_session_{name}.json")))
+}
+
+fn load_session(name: &str, port: u16) -> Result<Session> {
+    let path = session_path(name)?;
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            let mut session: Session = serde_json::from_str(&contents)?;
+            if session.cdp_url.is_empty() {
+                let stored_port = if session.cdp_port == 0 { port } else { session.cdp_port };
+                session.cdp_url = endpoint(stored_port);
+            }
+            Ok(session)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Session {
+            cdp_url: endpoint(port),
+            cdp_port: port,
+            ..Session::default()
+        }),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn save_session(name: &str, session: &Session) -> Result<()> {
+    fs::write(session_path(name)?, serde_json::to_vec_pretty(session)?)?;
+    Ok(())
+}
+
+fn endpoint(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+fn normalize_url(url: &str) -> String {
+    if url == "about:blank"
+        || url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("file:")
+        || url.starts_with("data:")
+    {
+        url.to_string()
+    } else {
+        format!("https://{url}")
+    }
+}
+
+fn save_client_session(name: &str, client: &Client, endpoint: &str, port: u16) -> Result<()> {
+    save_session(
+        name,
+        &Session {
+            cdp_url: endpoint.to_string(),
+            cdp_port: port,
+            url: client.page.url(),
+            page_index: Some(client.page_index),
+        },
+    )
+}
+
+async fn finish<T>(client: Client, result: Result<T>) -> Result<T> {
+    if client.ephemeral {
+        let _ = client.page.close().await;
+    }
+    let _connected = client.browser.is_connected();
+    let shutdown = client.playwright.shutdown().await;
+    match result {
+        Err(error) => Err(error),
+        Ok(value) => {
+            shutdown?;
+            Ok(value)
         }
     }
 }
@@ -597,6 +385,22 @@ fn is_cdp_port_running(port: u16) -> bool {
         .call()
         .map(|r| r.status() == 200)
         .unwrap_or(false)
+}
+
+fn glob_binary(dir: &Path, name: &str) -> std::io::Result<Vec<PathBuf>> {
+    let mut results = Vec::new();
+    if dir.is_dir() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                results.extend(glob_binary(&path, name)?);
+            } else if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some(name) {
+                results.push(path);
+            }
+        }
+    }
+    Ok(results)
 }
 
 fn find_chromium_binary() -> Option<PathBuf> {
@@ -646,23 +450,7 @@ fn find_chromium_binary() -> Option<PathBuf> {
     None
 }
 
-fn glob_binary(dir: &Path, name: &str) -> std::io::Result<Vec<PathBuf>> {
-    let mut results = Vec::new();
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                results.extend(glob_binary(&path, name)?);
-            } else if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some(name) {
-                results.push(path);
-            }
-        }
-    }
-    Ok(results)
-}
-
-fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
+fn ensure_cdp_daemon_on_port(port: u16) -> Result<()> {
     if is_cdp_port_running(port) {
         return Ok(());
     }
@@ -675,7 +463,6 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
     let child = Command::new("setsid")
         .arg(&binary)
         .arg(format!("--remote-debugging-port={port}"))
-        // A CI runner has no display; without this Chrome exits immediately.
         .arg("--headless=new")
         .arg("--no-sandbox")
         .arg("--disable-dev-shm-usage")
@@ -695,8 +482,6 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
     let pid = child.id();
     let _ = fs::write(PID_FILE, pid.to_string());
 
-    // A cold runner can take several seconds to open the CDP port. 1.6s was
-    // enough on a warm workstation and not enough in CI.
     for _ in 0..150 {
         std::thread::sleep(Duration::from_millis(100));
         if is_cdp_port_running(port) {
@@ -709,10 +494,11 @@ fn ensure_cdp_daemon_on_port(port: u16) -> Result<(), String> {
         port,
         binary.display(),
         chrome_log.display()
-    ))
+    )
+    .into())
 }
 
-fn stop_cdp_daemon() -> bool {
+fn stop_cdp_daemon(port: u16) -> bool {
     let mut killed = false;
     if let Ok(content) = fs::read_to_string(PID_FILE) {
         if let Ok(pid) = content.trim().parse::<i32>() {
@@ -723,1208 +509,617 @@ fn stop_cdp_daemon() -> bool {
     }
     let _ = Command::new("pkill")
         .arg("-f")
-        .arg("chrome-headless-shell.*--remote-debugging-port")
+        .arg(format!("chrome.*--remote-debugging-port={port}"))
         .status();
-    killed || !is_cdp_port_running(CDP_PORT)
+    killed || !is_cdp_port_running(port)
 }
 
-fn run_open(
-    session_name: &str,
-    port: u16,
-    args: OpenArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    ensure_cdp_daemon_on_port(port).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = args.url.as_deref().unwrap_or("about:blank");
-    let full_url = if target_url != "about:blank"
-        && !target_url.starts_with("http://")
-        && !target_url.starts_with("https://")
-        && !target_url.starts_with("file:")
-        && !target_url.starts_with("data:")
-    {
-        format!("https://{target_url}")
-    } else {
-        target_url.to_string()
-    };
-
-    let create_endpoint = format!("http://127.0.0.1:{port}/json/new?about:blank");
-    let resp = ureq::put(&create_endpoint)
-        .timeout(Duration::from_millis(args.timeout))
-        .call()
-        .map_err(|e| format!("Failed to create CDP target at port {port}: {e}"))?;
-
-    let info: TargetInfo = resp
-        .into_json()
-        .map_err(|e| format!("Invalid target response JSON: {e}"))?;
-
-    let ws_url = info
-        .websocket_debugger_url
-        .ok_or_else(|| "Target did not expose webSocketDebuggerUrl".to_string())?;
-
-    let mut client = CdpClient::connect_ws(&ws_url, info.id.clone(), port, false, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    if !args.no_block_media {
-        let _ = client.call("Network.enable", json!({}));
-        let _ = client.call(
-            "Network.setBlockedURLs",
-            json!({
-                "urls": [
-                    "*.woff*", "*.woff2", "*.ttf", "*analytics*", "*googletagmanager*"
-                ]
-            }),
-        );
-    }
-
-    if full_url != "about:blank" {
-        let _ = client.navigate(&full_url, args.timeout);
-    }
-
-    let title = client
-        .evaluate("document.title")
-        .ok()
-        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
-        .unwrap_or_default();
-
-    let cur_url = client
-        .evaluate("window.location.href")
-        .ok()
-        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
-        .unwrap_or_else(|| full_url.clone());
-
-    let session = ActiveSession {
-        target_id: info.id.clone(),
-        ws_url,
-        cdp_port: port,
-        url: cur_url.clone(),
-    };
-
-    save_session(session_name, &session)?;
-
-    if args.json {
-        let res = json!({
-            "status": "opened",
-            "session": session_name,
-            "target_id": info.id,
-            "url": cur_url,
-            "title": title,
-        });
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else {
-        println!("Opened browser session [{session_name}]: {cur_url} - {title}");
-        println!("Ready for: snapshot, click, fill, type, press, eval, screenshot, close");
-    }
-    Ok(())
-}
-
-fn run_attach(
-    session_name: &str,
-    port: u16,
-    args: AttachArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let cdp_base = args
-        .cdp
-        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
-    let list_endpoint = format!("{cdp_base}/json/list");
-
-    let resp = ureq::get(&list_endpoint)
-        .timeout(Duration::from_millis(2000))
-        .call()
-        .map_err(|e| format!("Failed to reach CDP list at {list_endpoint}: {e}"))?;
-
-    let targets: Vec<Value> = resp
-        .into_json()
-        .map_err(|e| format!("Invalid target list JSON: {e}"))?;
-
-    let page_target = targets
-        .into_iter()
-        .find(|t| t.get("type").and_then(Value::as_str) == Some("page"))
-        .ok_or_else(|| "No page target found on CDP endpoint".to_string())?;
-
-    let target_id = page_target
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Target missing ID".to_string())?
-        .to_string();
-
-    let ws_url = page_target
-        .get("webSocketDebuggerUrl")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Target missing webSocketDebuggerUrl".to_string())?
-        .to_string();
-
-    let cur_url = page_target
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-
-    let session = ActiveSession {
-        target_id: target_id.clone(),
-        ws_url,
-        cdp_port: port,
-        url: cur_url.clone(),
-    };
-
-    save_session(session_name, &session)?;
-
-    if args.json {
-        let res = json!({
-            "status": "attached",
-            "session": session_name,
-            "target_id": target_id,
-            "url": cur_url
-        });
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else {
-        println!("Attached to session [{session_name}]: {cur_url} (target: {target_id})");
-    }
-    Ok(())
-}
-
-fn run_goto(session_name: &str, args: GotoArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("file:")
-        && !args.url.starts_with("data:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    client
-        .navigate(&target_url, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let title = client
-        .evaluate("document.title")
-        .ok()
-        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
-        .unwrap_or_default();
-
-    let cur_url = client
-        .evaluate("window.location.href")
-        .ok()
-        .and_then(|v| v.get("value").and_then(Value::as_str).map(|s| s.to_string()))
-        .unwrap_or_else(|| target_url.clone());
-
-    let mut updated_session = session;
-    updated_session.url = cur_url.clone();
-    save_session(session_name, &updated_session)?;
-
-    if args.json {
-        let res = json!({
-            "status": "navigated",
-            "session": session_name,
-            "url": cur_url,
-            "title": title
-        });
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else {
-        println!("Navigated [{session_name}]: {cur_url} - {title}");
-    }
-    Ok(())
-}
-
-fn run_snapshot(
-    session_name: &str,
-    args: SnapshotArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, 5000)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let snap_script = r#"
-    (() => {
-        document.querySelectorAll('[data-fast-ref]').forEach(el => el.removeAttribute('data-fast-ref'));
-        let counter = 0;
-        const elements = [];
-        const lines = [];
-
-        const isVisible = (el) => {
-            if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
-            if (el.tagName === 'BODY' || el.tagName === 'HTML') return true;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-            if (el.offsetWidth === 0 && el.offsetHeight === 0 && style.position !== 'fixed' && style.position !== 'absolute') return false;
-            return true;
-        };
-
-        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-
-        const query = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="tab"], [role="menuitem"], [tabindex="0"], h1, h2, h3, h4, h5, h6';
-        const all = document.querySelectorAll(query);
-
-        for (const el of all) {
-            if (!isVisible(el)) continue;
-            const tag = el.tagName.toLowerCase();
-            let role = el.getAttribute('role') || tag;
-            let text = clean(el.innerText);
-            const ariaLabel = clean(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || '');
-
-            if (tag.startsWith('h') && tag.length === 2 && !isNaN(tag[1])) {
-                lines.push(`- heading "${text || ariaLabel}" [level=${tag[1]}]`);
-                continue;
-            }
-
-            counter += 1;
-            const refId = 'e' + counter;
-            el.setAttribute('data-fast-ref', refId);
-
-            let desc = ariaLabel || text;
-            if (tag === 'input') {
-                const inputType = el.getAttribute('type') || 'text';
-                if (inputType === 'checkbox' || inputType === 'radio') {
-                    role = inputType;
-                    desc = `${desc || el.name || ''} ${el.checked ? '[checked]' : '[unchecked]'}`.trim();
-                } else if (inputType === 'submit' || inputType === 'button') {
-                    role = 'button';
-                    desc = el.value || desc || 'Submit';
-                } else {
-                    role = 'textbox';
-                    const val = el.value ? ` (value: "${clean(el.value)}")` : '';
-                    desc = `${desc || el.name || 'text'}${val}`;
-                }
-            } else if (tag === 'select') {
-                role = 'combobox';
-                const selected = el.selectedOptions[0] ? clean(el.selectedOptions[0].text) : '';
-                desc = `${desc} (selected: "${selected}")`.trim();
-            } else if (tag === 'a') {
-                role = 'link';
-                if (!desc) desc = el.getAttribute('href') || 'link';
-            }
-
-            elements.push({
-                ref: refId,
-                role: role,
-                text: desc,
-                tag: tag,
-                selector: `[data-fast-ref="${refId}"]`
-            });
-
-            lines.push(`- ${role} "${desc}" [ref=${refId}]`);
+fn run_daemon(action: &str, port: u16) -> Result<()> {
+    match action {
+        "start" => {
+            ensure_cdp_daemon_on_port(port)?;
+            println!(
+                "{}",
+                json!({"status": "running", "cdp_url": format!("http://127.0.0.1:{port}")})
+            );
         }
-
-        return {
-            url: window.location.href,
-            title: document.title,
-            text: lines.join('\n'),
-            elements: elements
-        };
-    })()
-    "#;
-
-    let res_val = client.evaluate(snap_script)?;
-    let res_obj = res_val
-        .get("value")
-        .ok_or_else(|| "Missing snapshot evaluation value".to_string())?;
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(res_obj)?);
-    } else {
-        let title = res_obj.get("title").and_then(Value::as_str).unwrap_or("");
-        let url = res_obj.get("url").and_then(Value::as_str).unwrap_or("");
-        let text = res_obj.get("text").and_then(Value::as_str).unwrap_or("");
-        println!("Page: {title} ({url})\n---\n{text}");
+        "stop" => {
+            let stopped = stop_cdp_daemon(port);
+            println!(
+                "{}",
+                json!({"status": if stopped { "stopped" } else { "running" }})
+            );
+        }
+        "status" => {
+            let running = is_cdp_port_running(port);
+            println!(
+                "{}",
+                json!({
+                    "status": if running { "running" } else { "stopped" },
+                    "cdp_url": if running { Some(format!("http://127.0.0.1:{port}")) } else { None }
+                })
+            );
+        }
+        _ => return Err(format!("unknown daemon action: {action}").into()),
     }
     Ok(())
 }
 
-fn run_click(session_name: &str, args: ClickArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+fn ensure_daemon(port: u16) -> Result<()> {
+    ensure_cdp_daemon_on_port(port)
+}
 
-    let sel = resolve_target_selector(&args.target);
-
-    // One-shot clicking is how a verification lies: the element is not there
-    // yet, or a spinner covers it, and the click returns ok without doing
-    // anything. Wait for a state a pointer could actually hit.
-    let waited = Instant::now();
-    let state = client.wait_ready(&sel, args.timeout)?;
-    let ready = state.get("ready").and_then(Value::as_bool) == Some(true);
-    if !ready {
-        let observed = state.get("state").and_then(Value::as_str).unwrap_or("unknown");
-        let by = state.get("by").and_then(Value::as_str).unwrap_or("");
-        let detail = if by.is_empty() {
-            observed.to_string()
+async fn block_lightweight_assets(page: &Page) -> Result<()> {
+    page.route("**/*", |route| async move {
+        let url = route.request().url().to_ascii_lowercase();
+        let blocked = [".woff", ".ttf", "analytics", "googletagmanager"]
+            .iter()
+            .any(|part| url.contains(part));
+        if blocked {
+            route.abort(None).await
         } else {
-            format!("{observed} by {by}")
-        };
-        return Err(format!(
-            "{} was never clickable within {}ms ({detail})",
-            args.target, args.timeout
-        )
-        .into());
-    }
-    let waited_ms = waited.elapsed().as_millis();
-
-    let script = format!(
-        r#"(() => {{
-            const el = document.querySelector({sel_json});
-            if (!el) throw new Error("Element not found: " + {sel_json});
-            el.scrollIntoView({{ behavior: "instant", block: "center", inline: "center" }});
-            el.focus();
-            el.click();
-            return {{
-                ok: true,
-                tag: el.tagName.toLowerCase(),
-                text: (el.innerText || el.value || el.getAttribute("aria-label") || "").trim()
-            }};
-        }})()"#,
-        sel_json = json!(sel)
-    );
-
-    let res_val = client.evaluate(&script)?;
-    let mut res = res_val.get("value").cloned().unwrap_or(Value::Null);
-
-    // The click returning ok proves nothing about the page. If an effect was
-    // asked for, poll for it and only then say ok.
-    let mut effects = Vec::new();
-    if let Some(ref text) = args.expect_text {
-        let expr = format!(
-            "document.body ? document.body.innerText.includes({}) : false",
-            json!(text)
-        );
-        let seen = client.poll_js(&expr, args.timeout)?.as_bool() == Some(true);
-        if !seen {
-            return Err(format!("clicked, but text '{text}' never appeared within {}ms", args.timeout).into());
+            route.continue_(None).await
         }
+    })
+    .await?;
+    Ok(())
+}
+
+fn target_locator(page: &Page, target: &str) -> playwright_upstream::protocol::Locator {
+    let target = target.trim();
+    if target.starts_with('e') && target.len() > 1 && target[1..].chars().all(|ch| ch.is_ascii_digit()) {
+        page.get_by_ref(target)
+    } else if let Some(reference) = target.strip_prefix("ref=") {
+        page.get_by_ref(reference)
+    } else if target.starts_with("uat-") {
+        page.locator(format!("[data-uat-ref=\"{target}\"]"))
+    } else {
+        page.locator(target)
+    }
+}
+
+async fn refresh_ai_ref(page: &Page, target: &str) -> Result<()> {
+    let reference = target.strip_prefix("ref=").unwrap_or(target);
+    if reference.starts_with('e')
+        && reference.len() > 1
+        && reference[1..].chars().all(|ch| ch.is_ascii_digit())
+    {
+        let snapshot = page
+            .aria_snapshot(Some(AriaSnapshotOptions::default().mode(AriaSnapshotMode::Ai)))
+            .await?;
+        if !snapshot.contains(&format!("[ref={reference}]")) {
+            return Err(format!("ref '{reference}' is not in the current accessibility snapshot").into());
+        }
+    }
+    Ok(())
+}
+
+async fn navigate(page: &Page, url: &str, timeout_ms: u64) -> Result<()> {
+    let options = GotoOptions::new().timeout(Duration::from_millis(timeout_ms));
+    page.goto(&normalize_url(url), Some(options)).await?;
+    Ok(())
+}
+
+async fn wait_for_effects(
+    page: &Page,
+    expect_text: Option<&str>,
+    expect_url: Option<&str>,
+    timeout_ms: u64,
+) -> Result<Vec<String>> {
+    let mut effects = Vec::new();
+    if let Some(text) = expect_text {
+        let expression = format!(
+            "() => document.body && document.body.innerText.includes({})",
+            serde_json::to_string(text)?
+        );
+        page.wait_for_function(
+            &expression,
+            Some(WaitForFunctionOptions::default().timeout(timeout_ms as f64)),
+        )
+        .await
+        .map_err(|error| format!("clicked, but text '{text}' never appeared within {timeout_ms}ms: {error}"))?;
         effects.push(format!("text:{text}"));
     }
-    if let Some(ref url) = args.expect_url {
-        let expr = format!("location.href.includes({})", json!(url));
-        let seen = client.poll_js(&expr, args.timeout)?.as_bool() == Some(true);
-        if !seen {
-            let current = client
-                .evaluate("location.href")?
-                .get("value")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            return Err(format!("clicked, but URL never contained '{url}' within {}ms (at {current})", args.timeout).into());
-        }
+    if let Some(url) = expect_url {
+        let expression = format!(
+            "() => location.href.includes({})",
+            serde_json::to_string(url)?
+        );
+        page.wait_for_function(
+            &expression,
+            Some(WaitForFunctionOptions::default().timeout(timeout_ms as f64)),
+        )
+        .await
+        .map_err(|error| format!("clicked, but URL never contained '{url}' within {timeout_ms}ms: {error}"))?;
         effects.push(format!("url:{url}"));
     }
+    Ok(effects)
+}
 
-    if let Some(obj) = res.as_object_mut() {
-        obj.insert("waited_ms".to_string(), json!(waited_ms));
-        obj.insert("effects".to_string(), json!(effects));
-    }
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else {
-        let suffix = if effects.is_empty() {
-            String::new()
-        } else {
-            format!(" (verified {})", effects.join(", "))
+async fn print_snapshot(page: &Page, json_output: bool) -> Result<()> {
+    let text = page
+        .aria_snapshot(Some(AriaSnapshotOptions::default().mode(AriaSnapshotMode::Ai)))
+        .await?;
+    let mut elements = Vec::new();
+    for line in text.lines() {
+        let Some((description, reference)) = line.rsplit_once("[ref=") else {
+            continue;
         };
-        println!("Clicked: {} ({sel}) after {waited_ms}ms{suffix}", args.target);
+        let Some(reference) = reference.split(']').next() else {
+            continue;
+        };
+        elements.push(json!({
+            "ref": reference,
+            "description": description.trim().trim_start_matches("- "),
+        }));
     }
-    Ok(())
-}
-
-fn run_fill(session_name: &str, args: FillArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let sel = resolve_target_selector(&args.target);
-    let script = format!(
-        r#"(() => {{
-            const el = document.querySelector({sel_json});
-            if (!el) throw new Error("Element not found: " + {sel_json});
-            el.scrollIntoView({{ behavior: "instant", block: "center", inline: "center" }});
-            el.focus();
-            el.value = {text_json};
-            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-            return {{
-                ok: true,
-                tag: el.tagName.toLowerCase(),
-                value: el.value
-            }};
-        }})()"#,
-        sel_json = json!(sel),
-        text_json = json!(args.text)
-    );
-
-    let res_val = client.evaluate(&script)?;
-    let res = res_val.get("value").cloned().unwrap_or(Value::Null);
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&res)?);
+    let snapshot = json!({
+        "url": page.url(),
+        "title": page.title().await?,
+        "text": text,
+        "elements": elements,
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        println!("Filled: {} with \"{}\"", args.target, args.text);
+        println!("Page: {} ({})\n---\n{}", snapshot["title"].as_str().unwrap_or(""), snapshot["url"].as_str().unwrap_or(""), snapshot["text"].as_str().unwrap_or(""));
     }
     Ok(())
 }
 
-fn run_type(session_name: &str, args: TypeArgs) -> Result<(), Box<dyn std::error::Error>> {
-    run_fill(
-        session_name,
-        FillArgs {
-            target: args.target,
-            text: args.text,
-            timeout: args.timeout,
-            json: args.json,
-        },
+async fn emit_candidates(page: &Page, json_output: bool) -> Result<Vec<Candidate>> {
+    let candidates = extract_candidates(page).await?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&candidates)?);
+    } else {
+        for candidate in &candidates {
+            println!("{}: {}", candidate.r#ref, candidate.description);
+        }
+    }
+    Ok(candidates)
+}
+
+async fn run_open(args: OpenArgs, name: &str, port: u16) -> Result<()> {
+    ensure_daemon(port)?;
+    let endpoint = endpoint(port);
+    let result = async {
+        let client = Client::connect(&endpoint, None, None, true, args.timeout).await?;
+        if !args.no_block_media {
+            block_lightweight_assets(&client.page).await?;
+        }
+        let url = args.url.as_deref().unwrap_or("about:blank");
+        if url != "about:blank" {
+            navigate(&client.page, url, args.timeout).await?;
+        }
+        let title = client.page.title().await?;
+        save_client_session(name, &client, &endpoint, port)?;
+        if args.json {
+            println!("{}", json!({"status":"opened","session":name,"url":client.page.url(),"title":title}));
+        } else {
+            println!("Opened browser session [{name}]: {} - {title}", client.page.url());
+            println!("Ready for: snapshot, click, fill, type, press, eval, screenshot, close");
+        }
+        finish(client, Ok(())).await
+    };
+    result.await
+}
+
+async fn run_attach(args: AttachArgs, name: &str, port: u16) -> Result<()> {
+    let cdp_url = args.cdp.unwrap_or_else(|| endpoint(port));
+    let client = Client::connect(&cdp_url, None, None, false, 5000).await?;
+    save_client_session(name, &client, &cdp_url, port)?;
+    if args.json {
+        println!("{}", json!({"status":"attached","session":name,"url":client.page.url()}));
+    } else {
+        println!("Attached to session [{name}]: {}", client.page.url());
+    }
+    finish(client, Ok(())).await
+}
+
+async fn connect_session(name: &str, port: u16, timeout: u64) -> Result<(Client, Session)> {
+    let session = load_session(name, port)?;
+    let client = Client::connect(
+        &session.cdp_url,
+        (!session.url.is_empty()).then_some(session.url.as_str()),
+        session.page_index,
+        false,
+        timeout,
     )
+    .await?;
+    Ok((client, session))
 }
 
-fn run_press(session_name: &str, args: PressArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, 5000)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let (key_code, win_code) = match args.key.to_lowercase().as_str() {
-        "enter" => ("Enter", 13),
-        "tab" => ("Tab", 9),
-        "escape" | "esc" => ("Escape", 27),
-        "backspace" => ("Backspace", 8),
-        "arrowdown" | "down" => ("ArrowDown", 40),
-        "arrowup" | "up" => ("ArrowUp", 38),
-        "arrowleft" | "left" => ("ArrowLeft", 37),
-        "arrowright" | "right" => ("ArrowRight", 39),
-        "space" => ("Space", 32),
-        _ => (args.key.as_str(), 0),
-    };
-
-    let _ = client.call(
-        "Input.dispatchKeyEvent",
-        json!({
-            "type": "rawKeyDown",
-            "key": key_code,
-            "code": key_code,
-            "windowsVirtualKeyCode": win_code,
-            "nativeVirtualKeyCode": win_code,
-        }),
-    )?;
-
-    let _ = client.call(
-        "Input.dispatchKeyEvent",
-        json!({
-            "type": "keyUp",
-            "key": key_code,
-            "code": key_code,
-            "windowsVirtualKeyCode": win_code,
-            "nativeVirtualKeyCode": win_code,
-        }),
-    )?;
-
-    if args.json {
-        println!("{}", json!({"status": "pressed", "key": args.key}));
-    } else {
-        println!("Pressed: {}", args.key);
+async fn run_goto(args: GotoArgs, name: &str, port: u16) -> Result<()> {
+    let (client, mut session) = connect_session(name, port, args.timeout).await?;
+    let result = async {
+        navigate(&client.page, &args.url, args.timeout).await?;
+        session.url = client.page.url();
+        session.page_index = Some(client.page_index);
+        save_session(name, &session)?;
+        let title = client.page.title().await?;
+        if args.json {
+            println!("{}", json!({"status":"navigated","session":name,"url":session.url,"title":title}));
+        } else {
+            println!("Navigated [{name}]: {} - {title}", session.url);
+        }
+        Ok(())
     }
-    Ok(())
+    .await;
+    finish(client, result).await
 }
 
-fn run_eval(session_name: &str, args: EvalArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, 5000)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let res_val = client.evaluate(&args.expr)?;
-    let res = res_val.get("value").cloned().unwrap_or(Value::Null);
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else if let Some(s) = res.as_str() {
-        println!("{s}");
-    } else {
-        println!("{res}");
-    }
-    Ok(())
+async fn run_snapshot(args: JsonArgs, name: &str, port: u16) -> Result<()> {
+    let (client, _) = connect_session(name, port, 5000).await?;
+    let result = print_snapshot(&client.page, args.json).await;
+    finish(client, result).await
 }
 
-fn run_screenshot(
-    session_name: &str,
-    args: ScreenshotArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let session = load_session(session_name)?;
-    let mut client = CdpClient::from_session(&session, 5000)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let path = args
-        .path
-        .unwrap_or_else(|| PathBuf::from(format!("/tmp/fast_cdp_{session_name}.png")));
-    client
-        .capture_screenshot(&path)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    if args.json {
-        println!(
-            "{}",
-            json!({"status": "saved", "path": path.display().to_string()})
-        );
-    } else {
-        println!("Screenshot saved: {}", path.display());
+async fn run_click(args: ClickArgs, name: &str, port: u16) -> Result<()> {
+    let (client, _) = connect_session(name, port, args.timeout).await?;
+    let started = Instant::now();
+    let result = async {
+        refresh_ai_ref(&client.page, &args.target).await?;
+        let locator = target_locator(&client.page, &args.target);
+        let options = ClickOptions::builder().timeout(args.timeout as f64).build();
+        if let Err(error) = locator.click(Some(options)).await {
+            let detail = error.to_string();
+            let disabled = locator.is_disabled().await.unwrap_or(false);
+            let hit = locator
+                .evaluate::<Value, ()>(
+                    "el => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { covered: !!top && top !== el && !el.contains(top), by: top?.tagName?.toLowerCase() || '' }; }",
+                    None,
+                )
+                .await
+                .unwrap_or(Value::Null);
+            let state = if disabled {
+                "element is disabled".to_string()
+            } else if hit["covered"].as_bool() == Some(true) {
+                format!("covered by {}", hit["by"].as_str().unwrap_or("another element"))
+            } else {
+                detail
+            };
+            return Err(format!(
+                "{} was never clickable within {}ms ({state})",
+                args.target, args.timeout
+            )
+            .into());
+        }
+        let effects = wait_for_effects(
+            &client.page,
+            args.expect_text.as_deref(),
+            args.expect_url.as_deref(),
+            args.timeout,
+        )
+        .await?;
+        let waited_ms = started.elapsed().as_millis();
+        if args.json {
+            println!("{}", json!({"ok":true,"waited_ms":waited_ms,"effects":effects,"url":client.page.url()}));
+        } else {
+            println!("Clicked: {} after {waited_ms}ms", args.target);
+        }
+        Ok(())
     }
-    Ok(())
+    .await;
+    finish(client, result).await
 }
 
-fn run_close(session_name: &str, args: CloseArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Ok(session) = load_session(session_name) {
-        let _ = ureq::get(&format!(
-            "http://127.0.0.1:{}/json/close/{}",
-            session.cdp_port, session.target_id
-        ))
-        .timeout(Duration::from_millis(500))
-        .call();
-        remove_session(session_name);
+async fn run_fill(args: FillArgs, name: &str, port: u16) -> Result<()> {
+    let (client, _) = connect_session(name, port, args.timeout).await?;
+    let result = async {
+        refresh_ai_ref(&client.page, &args.target).await?;
+        let locator = target_locator(&client.page, &args.target);
+        let options = FillOptions::builder().timeout(args.timeout as f64).build();
+        locator.fill(&args.text, Some(options)).await?;
+        if args.json {
+            println!("{}", json!({"ok":true,"target":args.target,"text":args.text}));
+        } else {
+            println!("Filled: {} with \"{}\"", args.target, args.text);
+        }
+        Ok(())
     }
-
-    if args.json {
-        println!("{}", json!({"status": "closed", "session": session_name}));
-    } else {
-        println!("Closed session [{session_name}]");
-    }
-    Ok(())
+    .await;
+    finish(client, result).await
 }
 
-fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let start = Instant::now();
-    ensure_cdp_daemon_on_port(CDP_PORT)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let mut client = CdpClient::new(!args.no_block_media, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let mut passed_checks = Vec::new();
-    let mut errors = Vec::new();
-    let mut eval_result = None;
-    let mut page_title = String::new();
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("data:")
-        && !args.url.starts_with("file:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    if let Err(e) = client.navigate(&target_url, args.timeout) {
-        errors.push(e);
-    } else {
-        if let Ok(title_val) = client.evaluate("document.title") {
-            if let Some(t) = title_val.get("value").and_then(Value::as_str) {
-                page_title = t.to_string();
-            }
-        }
-
-        if let Some(ref sel) = args.click_selector {
-            let script = format!(
-                r#"(() => {{
-                    const el = document.querySelector({});
-                    if (!el) throw new Error("Click selector not found: " + {});
-                    el.scrollIntoView({{block: "center", inline: "center"}});
-                    el.click();
-                    return true;
-                }})()"#,
-                json!(sel),
-                json!(sel)
-            );
-            match client.evaluate(&script) {
-                Ok(_) => passed_checks.push(format!("click:{sel}")),
-                Err(e) => errors.push(e),
-            }
-        }
-
-        if let (Some(target), Some(text)) = (&args.type_target, &args.type_text) {
-            let script = format!(
-                r#"(() => {{
-                    const el = document.querySelector({});
-                    if (!el) throw new Error("Type target not found: " + {});
-                    el.focus();
-                    el.value = {};
-                    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                    return true;
-                }})()"#,
-                json!(target),
-                json!(target),
-                json!(text)
-            );
-            match client.evaluate(&script) {
-                Ok(_) => passed_checks.push(format!("type:{target}")),
-                Err(e) => errors.push(e),
-            }
-        }
-
-        if let Some(ref sel) = args.assert_selector {
-            let script = format!(
-                r#"(() => {{
-                    return document.querySelector({}) !== null;
-                }})()"#,
-                json!(sel)
-            );
-            match client.evaluate(&script) {
-                Ok(val) if val.get("value").and_then(Value::as_bool) == Some(true) => {
-                    passed_checks.push(format!("selector:{sel}"));
-                }
-                Ok(_) => errors.push(format!("Selector '{sel}' did not exist in DOM")),
-                Err(e) => errors.push(e),
-            }
-        }
-
-        if let Some(ref text) = args.assert_text {
-            let script = format!(
-                r#"(() => {{
-                    return (document.body ? document.body.innerText : "").includes({});
-                }})()"#,
-                json!(text)
-            );
-            match client.evaluate(&script) {
-                Ok(val) if val.get("value").and_then(Value::as_bool) == Some(true) => {
-                    passed_checks.push(format!("text:{text}"));
-                }
-                Ok(_) => errors.push(format!("Text '{text}' not found in body text")),
-                Err(e) => errors.push(e),
-            }
-        }
-
-        if let Some(ref expr) = args.eval_script {
-            match client.evaluate(expr) {
-                Ok(val) => {
-                    eval_result = val.get("value").cloned();
-                    passed_checks.push(format!("eval:{expr}"));
-                }
-                Err(e) => errors.push(e),
-            }
-        }
-
-        if let Some(ref path) = args.screenshot_path {
-            match client.capture_screenshot(path) {
-                Ok(_) => passed_checks.push(format!("screenshot:{}", path.display())),
-                Err(e) => errors.push(e),
-            }
-        }
-    }
-
-    let duration_ms = (start.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
-    let res = VerifyResult {
-        ok: errors.is_empty(),
-        url: target_url,
-        title: page_title,
-        duration_ms,
-        passed_checks,
-        errors,
-        eval_result,
-    };
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else {
-        println!(
-            "[{}] {} ({:.1}ms)",
-            if res.ok { "PASS" } else { "FAIL" },
-            res.url,
-            res.duration_ms
-        );
-        for check in &res.passed_checks {
-            println!("  ✓ {check}");
-        }
-        for err in &res.errors {
-            eprintln!("  ✗ {err}");
-        }
-    }
-
-    if !res.ok {
-        std::process::exit(1);
-    }
-    Ok(())
-}
-
-fn run_snap(args: SnapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    ensure_cdp_daemon_on_port(CDP_PORT)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut client = CdpClient::new(true, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("data:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    client
-        .navigate(&target_url, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let text_val = client.evaluate("document.body ? document.body.innerText : ''")?;
-    let text = text_val
-        .get("value")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-
-    let title_val = client.evaluate("document.title")?;
-    let title = title_val
-        .get("value")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-
-    if args.json {
-        let out = json!({
-            "url": target_url,
-            "title": title,
-            "text": text,
-        });
-        println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!("Title: {title}\nURL: {target_url}\n---\n{text}");
-    }
-    Ok(())
-}
-
-fn run_nav(args: NavArgs) -> Result<(), Box<dyn std::error::Error>> {
-    ensure_cdp_daemon_on_port(CDP_PORT)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut client = CdpClient::new(false, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("data:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    client
-        .navigate(&target_url, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let title_val = client.evaluate("document.title")?;
-    let title = title_val
-        .get("value")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-
-    if let Some(ref path) = args.screenshot_path {
+async fn run_press(args: PressArgs, name: &str, port: u16) -> Result<()> {
+    let (client, _) = connect_session(name, port, 5000).await?;
+    let result = async {
         client
-            .capture_screenshot(path)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .page
+            .keyboard()
+            .press(&args.key, Some(KeyboardOptions::default()))
+            .await?;
+        if args.json {
+            println!("{}", json!({"status":"pressed","key":args.key}));
+        } else {
+            println!("Pressed: {}", args.key);
+        }
+        Ok(())
     }
-
-    if args.json {
-        let out = json!({
-            "url": target_url,
-            "title": title,
-            "screenshot": args.screenshot_path.map(|p| p.display().to_string())
-        });
-        println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!("Navigated to {target_url} - {title}");
-    }
-    Ok(())
+    .await;
+    finish(client, result).await
 }
 
-const UAT_EXTRACT_JS: &str = r#"
-    (() => {
-        const elements = [];
-        const candidates = document.querySelectorAll('button, a, input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])');
-        let idx = 0;
-        for (const el of candidates) {
-            const rect = el.getBoundingClientRect();
-            const style = window.getComputedStyle(el);
-            if (rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none') {
-                idx++;
-                const tag = el.tagName.toLowerCase();
-                const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.id || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-                const role = el.getAttribute('role') || tag;
-                const ref = `uat-${idx}`;
-                el.setAttribute('data-uat-ref', ref);
-                elements.push({
-                    ref: ref,
-                    description: `${role} '${text}'`
-                });
+async fn run_eval(args: EvalArgs, name: &str, port: u16) -> Result<()> {
+    let (client, _) = connect_session(name, port, 5000).await?;
+    let result = async {
+        let value = client.page.evaluate::<(), Value>(&args.expr, None).await?;
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        } else if let Some(text) = value.as_str() {
+            println!("{text}");
+        } else {
+            println!("{value}");
+        }
+        Ok(())
+    }
+    .await;
+    finish(client, result).await
+}
+
+async fn run_screenshot(args: ScreenshotArgs, name: &str, port: u16) -> Result<()> {
+    let (client, _) = connect_session(name, port, 5000).await?;
+    let result = async {
+        let path = args.path.unwrap_or_else(|| std::env::temp_dir().join(format!("fast_cdp_{name}.png")));
+        client.page.screenshot_to_file(&path, None).await?;
+        if args.json {
+            println!("{}", json!({"status":"saved","path":path.display().to_string()}));
+        } else {
+            println!("Screenshot saved: {}", path.display());
+        }
+        Ok(())
+    }
+    .await;
+    finish(client, result).await
+}
+
+async fn run_close(args: JsonArgs, name: &str, port: u16) -> Result<()> {
+    let result = async {
+        if let Ok((client, _)) = connect_session(name, port, 1500).await {
+            let closed = client.page.close().await;
+            let _ = client.playwright.shutdown().await;
+            closed?;
+        }
+        if let Ok(path) = session_path(name) {
+            let _ = fs::remove_file(path);
+        }
+        if args.json {
+            println!("{}", json!({"status":"closed","session":name}));
+        } else {
+            println!("Closed session [{name}]");
+        }
+        Ok(())
+    };
+    result.await
+}
+
+async fn one_shot_page(port: u16, url: &str, timeout: u64, block: bool) -> Result<Client> {
+    ensure_daemon(port)?;
+    let mut client = Client::connect(&endpoint(port), None, None, true, timeout).await?;
+    client.ephemeral = true;
+    if block {
+        block_lightweight_assets(&client.page).await?;
+    }
+    navigate(&client.page, url, timeout).await?;
+    Ok(client)
+}
+
+async fn run_snap(args: UrlArgs, port: u16) -> Result<()> {
+    let client = one_shot_page(port, &args.url, args.timeout, true).await?;
+    let result = async {
+        let text: String = client.page.locator("body").inner_text().await.unwrap_or_default();
+        let title = client.page.title().await?;
+        let output = json!({"url":client.page.url(),"title":title,"text":text});
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("Title: {title}\nURL: {}\n---\n{text}", client.page.url());
+        }
+        Ok(())
+    }
+    .await;
+    finish(client, result).await
+}
+
+async fn run_nav(args: NavArgs, port: u16) -> Result<()> {
+    ensure_daemon(port)?;
+    let mut client = Client::connect(&endpoint(port), None, None, true, args.timeout).await?;
+    client.ephemeral = true;
+    let result = async {
+        navigate(&client.page, &args.url, args.timeout).await?;
+        let title = client.page.title().await?;
+        if let Some(path) = &args.screenshot_path {
+            client.page.screenshot_to_file(path, None).await?;
+        }
+        if args.json {
+            println!("{}", json!({"url":client.page.url(),"title":title,"screenshot":args.screenshot_path.as_ref().map(|path|path.display().to_string())}));
+        } else {
+            println!("Navigated to {} - {title}", client.page.url());
+        }
+        Ok(())
+    }
+    .await;
+    finish(client, result).await
+}
+
+async fn run_candidates(args: CandidatesArgs, port: u16) -> Result<()> {
+    let client = one_shot_page(port, &args.url, args.timeout, !args.no_block_media).await?;
+    let result = emit_candidates(&client.page, args.json).await.map(|_| ());
+    finish(client, result).await
+}
+
+async fn run_verify(args: VerifyArgs, port: u16) -> Result<()> {
+    let started = Instant::now();
+    let client = one_shot_page(port, &args.url, args.timeout, !args.no_block_media).await?;
+    let result = async {
+        let mut passed_checks = Vec::new();
+        let mut errors = Vec::new();
+        let mut eval_result = None;
+        if let Some(selector) = args.assert_selector.as_deref() {
+            match client.page.locator(selector).is_visible().await {
+                Ok(true) => passed_checks.push(format!("selector:{selector}")),
+                Ok(false) => errors.push(format!("selector '{selector}' not visible")),
+                Err(error) => errors.push(error.to_string()),
             }
         }
-        return elements;
-    })()
-"#;
-
-fn run_uat(args: UatArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let start = Instant::now();
-    ensure_cdp_daemon_on_port(CDP_PORT)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut client = CdpClient::new(!args.no_block_media, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("data:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    client
-        .navigate(&target_url, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let extract_script = UAT_EXTRACT_JS;
-
-    let candidates_val = client.evaluate(extract_script)?;
-    let candidates_arr = candidates_val
-        .get("value")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Failed to extract candidate elements".to_string())
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    if candidates_arr.is_empty() {
-        return Err(format!("No interactive elements found on page: {target_url}").into());
-    }
-
-    let mut options = HashMap::new();
-    for c in candidates_arr.iter().take(20) {
-        if let (Some(r), Some(d)) = (
-            c.get("ref").and_then(Value::as_str),
-            c.get("description").and_then(Value::as_str),
-        ) {
-            options.insert(r.to_string(), d.to_string());
-        }
-    }
-
-    let title_val = client.evaluate("document.title")?;
-    let page_title = title_val
-        .get("value")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-
-    let options_prompt = options
-        .iter()
-        .map(|(r, d)| format!("- {r}: {d}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let state = format!(
-        "Page Title: {page_title}\nURL: {target_url}\nGoal: {}\nInteractive Elements:\n{options_prompt}",
-        args.goal
-    );
-    let question = format!(
-        "Which interactive element should be clicked or triggered to achieve: '{}'?",
-        args.goal
-    );
-
-    let (selected_ref, prob, conf, model_label) = if let Some(chosen) = args.ref_id.clone() {
-        let known = candidates_arr
-            .iter()
-            .any(|c| c.get("ref").and_then(Value::as_str) == Some(chosen.as_str()));
-        if !known {
-            let available = options.keys().cloned().collect::<Vec<_>>().join(", ");
-            return Err(format!("ref '{chosen}' is not on this page. Available: {available}").into());
-        }
-        (chosen, 1.0_f64, 1.0_f64, "external".to_string())
-    } else if args.model == "jpt" {
-        let (r, p, c) = query_jpt_decision(&state, &question, &options)?;
-        (r, p, c, args.model.clone())
-    } else {
-        let (r, p, c) = query_imajev_decision(&state, &question, &options)?;
-        (r, p, c, args.model.clone())
-    };
-
-    let selected_desc = options
-        .get(&selected_ref)
-        .cloned()
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    let mut actions = Vec::new();
-    actions.push(UatAction {
-        action: "click".to_string(),
-        ref_id: selected_ref.clone(),
-        description: selected_desc,
-        probability: prob,
-        confidence: conf,
-        model: model_label,
-    });
-
-    let click_script = format!(
-        r#"(() => {{
-            const el = document.querySelector('[data-uat-ref="{}"]');
-            if (!el) throw new Error("Element not found: " + "{}");
-            el.click();
-            return true;
-        }})()"#,
-        selected_ref, selected_ref
-    );
-    client
-        .evaluate(&click_script)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    std::thread::sleep(Duration::from_millis(100));
-
-    let mut errors = Vec::new();
-
-    // Poll the effect: a route change or a re-render is rarely done the instant
-    // the click returns, and failing on the first read made this flaky.
-    if let Some(ref expect_text) = args.expect_text {
-        let expr = format!(
-            "document.body ? document.body.innerText.includes({}) : false",
-            json!(expect_text)
-        );
-        if client.poll_js(&expr, args.timeout)?.as_bool() != Some(true) {
-            errors.push(format!(
-                "Expected text '{expect_text}' did not appear within {}ms",
-                args.timeout
-            ));
-        }
-    }
-
-    if let Some(ref expect_url) = args.expect_url {
-        let expr = format!("location.href.includes({})", json!(expect_url));
-        if client.poll_js(&expr, args.timeout)?.as_bool() != Some(true) {
-            let current_url = client
-                .evaluate("location.href")?
-                .get("value")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            errors.push(format!(
-                "Expected URL to contain '{expect_url}' within {}ms, got '{current_url}'",
-                args.timeout
-            ));
-        }
-    }
-
-    if let Some(ref path) = args.screenshot_path {
-        let _ = client.capture_screenshot(path);
-    }
-
-    let verification = if errors.is_empty() {
-        "verified_by_assertions".to_string()
-    } else {
-        "failed".to_string()
-    };
-
-    let duration_ms = (start.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
-    let res = UatResult {
-        ok: errors.is_empty(),
-        url: target_url,
-        goal: args.goal,
-        duration_ms,
-        actions,
-        verification,
-        errors,
-    };
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&res)?);
-    } else {
-        println!(
-            "[{}] UAT: {} ({:.1}ms)",
-            if res.ok { "PASS" } else { "FAIL" },
-            res.goal,
-            res.duration_ms
-        );
-        for a in &res.actions {
-            println!(
-                "  Action: click {} ({}) [conf: {:.2}]",
-                a.ref_id, a.description, a.confidence
+        if let Some(text) = args.assert_text.as_deref() {
+            let expression = format!(
+                "() => document.body && document.body.innerText.includes({})",
+                serde_json::to_string(text)?
             );
+            match client.page.wait_for_function(&expression, Some(WaitForFunctionOptions::default().timeout(args.timeout as f64))).await {
+                Ok(_) => passed_checks.push(format!("text:{text}")),
+                Err(error) => errors.push(error.to_string()),
+            }
         }
-        for err in &res.errors {
-            eprintln!("  ✗ {err}");
+        if let Some(expression) = args.eval_script.as_deref() {
+            match client.page.evaluate::<(), Value>(expression, None).await {
+                Ok(value) => {
+                    eval_result = Some(value);
+                    passed_checks.push(format!("eval:{expression}"));
+                }
+                Err(error) => errors.push(error.to_string()),
+            }
         }
+        if let Some(selector) = args.click_selector.as_deref() {
+            if let Err(error) = client.page.locator(selector).click(None).await {
+                errors.push(format!("click on '{selector}' failed: {error}"));
+            } else {
+                passed_checks.push(format!("click:{selector}"));
+            }
+        }
+        if let (Some(target), Some(text)) = (args.type_target.as_deref(), args.type_text.as_deref()) {
+            if let Err(error) = client.page.locator(target).fill(text, None).await {
+                errors.push(format!("typing into '{target}' failed: {error}"));
+            } else {
+                passed_checks.push(format!("type:{target}"));
+            }
+        }
+        if let Some(path) = args.screenshot_path.as_ref() {
+            if let Err(error) = client.page.screenshot_to_file(path, None).await {
+                errors.push(format!("screenshot failed: {error}"));
+            } else {
+                passed_checks.push(format!("screenshot:{}", path.display()));
+            }
+        }
+        let duration_ms = (started.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
+        let ok = errors.is_empty();
+        if args.json {
+            println!("{}", json!({
+                "ok": ok,
+                "url": client.page.url(),
+                "duration_ms": duration_ms,
+                "passed_checks": passed_checks,
+                "eval_result": eval_result,
+                "errors": errors
+            }));
+        } else {
+            println!("[{}] {} ({duration_ms:.1}ms)", if ok { "PASS" } else { "FAIL" }, client.page.url());
+            for check in &passed_checks { println!("  ✓ {check}"); }
+            for error in &errors { eprintln!("  ✗ {error}"); }
+        }
+        if !ok {
+            return Err("verification failed".into());
+        }
+        Ok(())
     }
-
-    if !res.ok {
-        std::process::exit(1);
-    }
-    Ok(())
+    .await;
+    finish(client, result).await
 }
 
-fn query_jpt_decision(
-    state: &str,
-    question: &str,
-    options: &HashMap<String, String>,
-) -> Result<(String, f64, f64), Box<dyn std::error::Error>> {
-    let payload = json!({
-        "state": state,
-        "question": question,
-        "options": options,
-        "mode": "choice"
-    });
-
-    let resp = ureq::post("http://127.0.0.1:8090/v1/decide")
-        .timeout(Duration::from_millis(2500))
-        .send_json(payload)?;
-
-    let val: Value = resp.into_json()?;
-    let answer = val
-        .get("answer")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let conf = val.get("confidence").and_then(Value::as_f64).unwrap_or(0.9);
-    let prob = val
-        .get("probabilities")
-        .and_then(|p| p.get(&answer))
-        .and_then(Value::as_f64)
-        .unwrap_or(0.9);
-
-    Ok((answer, prob, conf))
+async fn run_uat(args: UatArgs, port: u16) -> Result<()> {
+    let started = Instant::now();
+    let client = one_shot_page(port, &args.url, args.timeout, !args.no_block_media).await?;
+    let result = async {
+        let candidates = extract_candidates(&client.page).await?;
+        if candidates.is_empty() {
+            return Err(format!("No interactive elements found on page: {}", client.page.url()).into());
+        }
+        let options = candidates.iter().take(20).map(|candidate| {
+            (candidate.r#ref.clone(), candidate.description.clone())
+        }).collect::<HashMap<_, _>>();
+        let reference = match args.ref_id.clone() {
+            Some(reference) => {
+                if !options.contains_key(&reference) {
+                    return Err(format!("ref '{reference}' is not on this page. Available: {}", options.keys().cloned().collect::<Vec<_>>().join(", ")).into());
+                }
+                reference
+            }
+            None => {
+                return Err("UAT requires --ref <ref_id>. For autonomous model-driven intent routing, use frontend-uat.".into());
+            }
+        };
+        let description = options.get(&reference).cloned().unwrap_or_default();
+        let action = UatAction { action: "click".into(), ref_id: reference.clone(), description, probability: 1.0, confidence: 1.0, model: "external".to_string() };
+        let mut errors = Vec::new();
+        let click = target_locator(&client.page, &reference)
+            .click(Some(ClickOptions::builder().timeout(args.timeout as f64).build()))
+            .await;
+        let effects = match click {
+            Ok(()) => match wait_for_effects(&client.page, args.expect_text.as_deref(), args.expect_url.as_deref(), args.timeout).await {
+                Ok(effects) => effects,
+                Err(error) => {
+                    errors.push(error.to_string());
+                    Vec::new()
+                }
+            },
+            Err(error) => {
+                errors.push(error.to_string());
+                Vec::new()
+            }
+        };
+        let verification = if args.expect_text.is_some() || args.expect_url.is_some() { "verified_by_assertions" } else { "action_executed" };
+        if let Some(path) = args.screenshot_path.as_ref() {
+            if let Err(error) = client.page.screenshot_to_file(path, None).await {
+                errors.push(error.to_string());
+            }
+        }
+        let duration_ms = (started.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
+        let output = UatResult { ok: errors.is_empty(), url: client.page.url(), goal: args.goal.clone(), duration_ms, actions: vec![action], verification: verification.into(), errors };
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("[{}] UAT: {} ({duration_ms:.1}ms)", if output.ok { "PASS" } else { "FAIL" }, output.goal);
+            println!("  Action: click {} ({}) [conf: {:.2}]", output.actions[0].ref_id, output.actions[0].description, output.actions[0].confidence);
+            if !effects.is_empty() { println!("  Verified: {}", effects.join(", ")); }
+            for error in &output.errors { eprintln!("  ✗ {error}"); }
+        }
+        if output.ok { Ok(()) } else { Err("UAT failed".into()) }
+    }
+    .await;
+    finish(client, result).await
 }
 
-fn query_imajev_decision(
-    state: &str,
-    question: &str,
-    options: &HashMap<String, String>,
-) -> Result<(String, f64, f64), Box<dyn std::error::Error>> {
-    let prompt = format!(
-        "State:\n{state}\n\nQuestion: {question}\n\nPick the best option key among:\n{}",
-        options
-            .iter()
-            .map(|(k, v)| format!("- {k}: {v}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-
-    let payload = json!({
-        "model": "imajev-4b",
-        "messages": [
-            {"role": "system", "content": "You are a web automation decision engine. Reply only with the exact option key (e.g. uat-1)."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.0,
-        "max_tokens": 16
-    });
-
-    let resp = ureq::post("http://127.0.0.1:8083/v1/chat/completions")
-        .timeout(Duration::from_millis(2500))
-        .send_json(payload)?;
-
-    let val: Value = resp.into_json()?;
-    let content = val
-        .get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c0| c0.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-
-    for key in options.keys() {
-        if content.contains(key) {
-            return Ok((key.clone(), 0.95, 0.95));
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run(Cli::parse()).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("playwright-rs: {error}");
+            ExitCode::FAILURE
         }
     }
-
-    if let Some(first_key) = options.keys().next() {
-        return Ok((first_key.clone(), 0.5, 0.5));
-    }
-
-    Err("No option found".into())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-    let session = cli.session.as_str();
+async fn run(cli: Cli) -> Result<()> {
+    let name = cli.session.as_str();
     let port = cli.port;
-
     match cli.command {
-        Commands::Daemon(d) => match d.action.as_str() {
-            "start" => {
-                ensure_cdp_daemon_on_port(port)?;
-                println!(
-                    "{}",
-                    json!({"status": "running", "cdp_url": format!("http://127.0.0.1:{port}")})
-                );
-            }
-            "stop" => {
-                let stopped = stop_cdp_daemon();
-                println!(
-                    "{}",
-                    json!({"status": if stopped { "stopped" } else { "not_running" }})
-                );
-            }
-            "status" => {
-                let running = is_cdp_port_running(port);
-                println!(
-                    "{}",
-                    json!({
-                        "status": if running { "running" } else { "stopped" },
-                        "cdp_url": format!("http://127.0.0.1:{port}")
-                    })
-                );
-            }
-            _ => unreachable!(),
-        },
-        Commands::Verify(v) => run_verify(v)?,
-        Commands::Uat(u) => run_uat(u)?,
-        Commands::Candidates(c) => run_candidates(c)?,
-        Commands::Snap(s) => run_snap(s)?,
-        Commands::Nav(n) => run_nav(n)?,
-
-        Commands::Open(o) => run_open(session, port, o)?,
-        Commands::Attach(a) => run_attach(session, port, a)?,
-        Commands::Goto(g) => run_goto(session, g)?,
-        Commands::Snapshot(s) => run_snapshot(session, s)?,
-        Commands::Click(c) => run_click(session, c)?,
-        Commands::Fill(f) => run_fill(session, f)?,
-        Commands::Type(t) => run_type(session, t)?,
-        Commands::Press(p) => run_press(session, p)?,
-        Commands::Eval(e) => run_eval(session, e)?,
-        Commands::Screenshot(s) => run_screenshot(session, s)?,
-        Commands::Close(c) => run_close(session, c)?,
+        Commands::Daemon(args) => run_daemon(&args.action, port),
+        Commands::Open(args) => run_open(args, name, port).await,
+        Commands::Attach(args) => run_attach(args, name, port).await,
+        Commands::Goto(args) => run_goto(args, name, port).await,
+        Commands::Snapshot(args) => run_snapshot(args, name, port).await,
+        Commands::Click(args) => run_click(args, name, port).await,
+        Commands::Fill(args) | Commands::Type(args) => run_fill(args, name, port).await,
+        Commands::Press(args) => run_press(args, name, port).await,
+        Commands::Eval(args) => run_eval(args, name, port).await,
+        Commands::Screenshot(args) => run_screenshot(args, name, port).await,
+        Commands::Close(args) => run_close(args, name, port).await,
+        Commands::Verify(args) => run_verify(args, port).await,
+        Commands::Uat(args) => run_uat(args, port).await,
+        Commands::Candidates(args) => run_candidates(args, port).await,
+        Commands::Snap(args) => run_snap(args, port).await,
+        Commands::Nav(args) => run_nav(args, port).await,
     }
-    Ok(())
-}
-
-fn run_candidates(args: CandidatesArgs) -> Result<(), Box<dyn std::error::Error>> {
-    ensure_cdp_daemon_on_port(CDP_PORT)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut client = CdpClient::new(!args.no_block_media, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let target_url = if !args.url.starts_with("http://")
-        && !args.url.starts_with("https://")
-        && !args.url.starts_with("data:")
-    {
-        format!("https://{}", args.url)
-    } else {
-        args.url.clone()
-    };
-
-    client
-        .navigate(&target_url, args.timeout)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    let value = client.evaluate(UAT_EXTRACT_JS)?;
-    let candidates = value
-        .get("value")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| "Failed to extract candidate elements".to_string())
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&Value::Array(candidates))?);
-    } else {
-        for c in &candidates {
-            println!(
-                "{}: {}",
-                c.get("ref").and_then(Value::as_str).unwrap_or(""),
-                c.get("description").and_then(Value::as_str).unwrap_or("")
-            );
-        }
-    }
-    Ok(())
 }
