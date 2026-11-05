@@ -26,10 +26,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 # Where skills live. First hit wins; mirrors of the same collection live in
 # the later entries and must never be indexed twice.
 CANDIDATE_SKILL_DIRS = [
     Path("/run/media/rodri/AI/skills"),
+    REPO_ROOT / "surface",
+    Path.home() / "my-agent-skills" / "surface",
     Path.home() / "my-agent-skills",
     Path.home() / ".gemini" / "config" / "skills",
     Path.home() / ".config" / "opencode" / "skills",
