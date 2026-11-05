@@ -1,24 +1,24 @@
 ---
 name: playwright
 description: >
-  Agent-facing browser control through Padamson's playwright-rust API: CDP attach, Playwright
-  locators, AI-mode accessibility refs, screenshots, and JavaScript evaluation. Use frontend-uat
-  for the JEV-driven user-journey workflow; use the upstream Rust skill when authoring Rust tests.
-compatibility: "Needs a Chromium CDP endpoint: the headless shell on :9222 for unattended work, or a headed Chromium on :9224 when a person must see and drive the page. The CLI wraps playwright-rs 0.20.1 and its bundled Playwright driver."
-allowed-tools: "Bash(playwright-rs:*) Bash(fast-cdp:*) Bash(python3:*) Bash(npx:*) Read Write"
+  Agent-facing browser control through official Playwright: CDP attach, locator actionability,
+  AI-mode accessibility refs, interactive codegen, screenshots, and JavaScript evaluation. Use
+  frontend-uat for the JEV-driven user-journey workflow.
+compatibility: "Needs a Chromium CDP endpoint: the headless shell on :9222 for unattended work, or a headed Chromium on :9224 when a person must see and drive the page. Backed by official Playwright 1.64+ with zero-compile Node.js CLI."
+allowed-tools: "Bash(playwright-rs:*) Bash(fast-cdp:*) Bash(playwright:*) Bash(python3:*) Bash(npx:*) Read Write"
 ---
 
 # Playwright Browser (`playwright`)
 
-> Browser control through the upstream `playwright-rs` Rust API, with a compact local CLI for agent use.
+> Browser control powered by official Microsoft Playwright, with a lightweight CLI for agent use.
 
 ---
 
 ## Browser backend
 
-The CLI is built on [`playwright-rs`](https://github.com/padamson/playwright-rust) 0.20.1. It attaches to Chromium over CDP and uses Playwright's locator actionability, AI-mode ARIA snapshots, and `get_by_ref` support. The crate launches its bundled Playwright driver; this is not the old raw-WebSocket CDP implementation.
+The CLI is powered directly by official Microsoft [`playwright`](https://playwright.dev) (v1.64+) over CDP. It provides instant execution with zero compilation overhead, native `locator` actionability, AI-mode ARIA snapshots, and `getByRef` element targeting.
 
-The CLI keeps all agent-facing commands with `fast-cdp` as a direct symlink alias. Daemon lifecycle is self-contained directly within the native binary, and the legacy raw-CDP codebase has been retired.
+The CLI retains the backward-compatible entry points `playwright-rs` and `fast-cdp` as aliases, while giving agents direct access to the entire official Playwright toolkit (`playwright codegen`, `playwright test`, etc.).
 
 ---
 
