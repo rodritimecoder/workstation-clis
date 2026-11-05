@@ -108,6 +108,8 @@ def resolve_skills_dir() -> Path:
                     return p
         except OSError:
             continue
+    if REPO_ROOT.is_dir():
+        return REPO_ROOT
     return CANDIDATE_SKILL_DIRS[0]
 
 
@@ -209,18 +211,34 @@ def parse_doc_globs(content: str) -> list[str]:
 def _iter_skill_dirs(root: Path, include_sidelined: bool):
     if not root.is_dir():
         return
+    seen: set[str] = set()
     for item in sorted(root.iterdir()):
-        if not item.is_dir() or item.name in SIDELINED_DIRS or item.name.startswith("."):
+        if not item.is_dir() or item.name.startswith(".") or item.name in SKIP_DIRS or item.name in {"surface"}:
             continue
         if (item / "SKILL.md").is_file():
-            yield item, "active"
+            if item.name in SIDELINED_DIRS:
+                if include_sidelined and item.name in ("glitch-cat", "archived"):
+                    seen.add(item.name)
+                    yield item, item.name
+            else:
+                seen.add(item.name)
+                yield item, "active"
+            continue
+        if item.name not in {"docs", "launchers", "site-packages", ".venv", "tests"}:
+            for sub in sorted(item.iterdir()):
+                if sub.is_dir() and (sub / "SKILL.md").is_file() and sub.name not in seen:
+                    seen.add(sub.name)
+                    sub_status = item.name if item.name in ("glitch-cat", "archived") else "active"
+                    if sub_status == "active" or include_sidelined:
+                        yield sub, sub_status
     if include_sidelined:
         for sub in ("glitch-cat", "archived"):
             subdir = root / sub
             if not subdir.is_dir():
                 continue
             for item in sorted(subdir.iterdir()):
-                if item.is_dir() and (item / "SKILL.md").is_file():
+                if item.is_dir() and (item / "SKILL.md").is_file() and item.name not in seen:
+                    seen.add(item.name)
                     yield item, sub
 
 

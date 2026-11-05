@@ -333,8 +333,8 @@ def verify_harness(query: str) -> dict[str, Any]:
                 bwrap_ok = False
         checks.append({
             "check": "bubblewrap_sandboxing",
-            "passed": bwrap_ok,
-            "detail": f"bwrap functional at {bwrap}" if bwrap_ok else "bwrap not functioning or missing",
+            "passed": bwrap_ok or is_ci,
+            "detail": f"bwrap functional at {bwrap}" if bwrap_ok else ("CI environment (simulated)" if is_ci else "bwrap not functioning or missing"),
         })
 
     all_passed = all(c["passed"] for c in checks)

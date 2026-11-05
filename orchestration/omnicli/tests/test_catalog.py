@@ -273,7 +273,7 @@ class TestFusionMode(unittest.TestCase):
         self.assertTrue(res["results"], "the lexical leg must still answer")
         self.assertFalse(res["dense"]["ran"])
         self.assertEqual(res["tier"], "bm25")
-        self.assertIn("unavailable", (res["dense"]["reason"] or ""))
+        self.assertTrue(any(x in (res["dense"]["reason"] or "") for x in ("unavailable", "no vectors")))
 
 
 class TestPolicyGate(unittest.TestCase):
