@@ -242,9 +242,8 @@ def verify_harness(query: str) -> dict[str, Any]:
     # Check 4: Filesystem configuration paths presence
     resolved_paths = [Path(os.path.expanduser(p)) for p in spec["config_paths"]]
     existing_paths = [str(p) for p in resolved_paths if p.exists()]
-    is_ci = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
-    passed_install = len(existing_paths) > 0 or is_ci
-    detail_str = f"Found: {', '.join(existing_paths)}" if existing_paths else ("CI environment (simulated)" if is_ci else "No config dirs found")
+    passed_install = len(existing_paths) > 0
+    detail_str = f"Found: {', '.join(existing_paths)}" if existing_paths else "No config dirs found"
     checks.append({
         "check": "workstation_installation",
         "passed": passed_install,
@@ -258,8 +257,8 @@ def verify_harness(query: str) -> dict[str, Any]:
         has_bindings = bindings_py.is_file() and bindings_py.stat().st_size > 1000
         checks.append({
             "check": "code_mode_sdk_bindings",
-            "passed": has_bindings or is_ci,
-            "detail": f"Bindings valid at {bindings_py}" if has_bindings else ("CI environment (simulated)" if is_ci else "Bindings not found or empty"),
+            "passed": has_bindings,
+            "detail": f"Bindings valid at {bindings_py}" if has_bindings else "Bindings not found or empty",
         })
 
     elif h_id == "agy":
@@ -297,8 +296,8 @@ def verify_harness(query: str) -> dict[str, Any]:
                 pass
         checks.append({
             "check": "opencode_configuration",
-            "passed": is_valid_json or is_ci,
-            "detail": f"opencode.json parsed successfully at {cfg_file}" if is_valid_json else ("CI environment (simulated)" if is_ci else "Missing or invalid opencode.json"),
+            "passed": is_valid_json,
+            "detail": f"opencode.json parsed successfully at {cfg_file}" if is_valid_json else "Missing or invalid opencode.json",
         })
 
     elif h_id == "pi":
@@ -333,8 +332,8 @@ def verify_harness(query: str) -> dict[str, Any]:
                 bwrap_ok = False
         checks.append({
             "check": "bubblewrap_sandboxing",
-            "passed": bwrap_ok or is_ci,
-            "detail": f"bwrap functional at {bwrap}" if bwrap_ok else ("CI environment (simulated)" if is_ci else "bwrap not functioning or missing"),
+            "passed": bwrap_ok,
+            "detail": f"bwrap functional at {bwrap}" if bwrap_ok else "bwrap not functioning or missing",
         })
 
     all_passed = all(c["passed"] for c in checks)
