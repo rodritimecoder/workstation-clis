@@ -40,7 +40,10 @@ def _out(args, res: dict, compact: str) -> None:
     """Emit the result: file + pointer, JSON, or one line."""
     if getattr(args, "out", None):
         Path(args.out).write_text(json.dumps(res, indent=2), encoding="utf-8")
-        print(f"{compact.rstrip()} -> {args.out}")
+        if getattr(args, "json", False):
+            print(json.dumps(res, indent=2))
+        else:
+            print(f"{compact.rstrip()} -> {args.out}")
     elif getattr(args, "json", False):
         print(json.dumps(res, indent=2))
     else:
@@ -182,7 +185,17 @@ def main():
         online = backend == "systemone" and reachable
         status = "ONLINE" if online else "OFFLINE or wrong model"
         model = engine.model_name or "unknown model"
-        print(f"{status} {model} {engine.systemone_url.rsplit('/v1/', 1)[0]}")
+        endpoint = engine.systemone_url.rsplit('/v1/', 1)[0]
+        if args.json:
+            print(json.dumps({
+                "status": status,
+                "online": online,
+                "model": model,
+                "endpoint": endpoint,
+                "backend": backend,
+            }, indent=2))
+        else:
+            print(f"{status} {model} {endpoint}")
         return 0 if online else 3
 
     if args.command == "bool":
@@ -241,7 +254,10 @@ def main():
 
         if args.out:
             Path(args.out).write_text(json.dumps(res, indent=2), encoding="utf-8")
-            print(f"batch: {len(res)} answers -> {args.out}")
+            if args.json:
+                print(json.dumps(res, indent=2))
+            else:
+                print(f"batch: {len(res)} answers -> {args.out}")
         elif args.json:
             print(json.dumps(res, indent=2))
         else:

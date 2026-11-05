@@ -224,18 +224,38 @@ def main():
                 print(f"CrispEmbed (:8084): {st['crispembed'].upper()}")
                 print(f"OXR-1.0 (:8084)   : {st['oxr'].upper()}")
 
-        elif args.action == "start":
+        elif args.action in ("start", "restart"):
+            if args.action == "restart":
+                ports = []
+                if target in ("lighton", "all"):
+                    ports.append(args.lighton_port)
+                if target in ("crispembed", "oxr", "all"):
+                    ports.append(args.crisp_port)
+                for p in ports:
+                    subprocess.run(["fuser", "-k", f"{p}/tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1.0)
+
+            results = {}
             if target in ("lighton", "all"):
                 ok = engine.ensure_lighton()
-                print(f"LightOnOCR (:8085): {'STARTED' if ok else 'FAILED'}")
+                results["lighton"] = "started" if ok else "failed"
+                if not args.json:
+                    print(f"LightOnOCR (:8085): {'STARTED' if ok else 'FAILED'}")
             if target in ("oxr", "all"):
                 ok = engine.ensure_oxr()
-                print(f"OXR-1.0 (:8084): {'STARTED' if ok else 'FAILED'}")
+                results["oxr"] = "started" if ok else "failed"
+                if not args.json:
+                    print(f"OXR-1.0 (:8084): {'STARTED' if ok else 'FAILED'}")
             if target in ("crispembed", "all"):
                 if not engine.is_crisp_online():
                     subprocess.Popen([str(CRISP_LAUNCHER)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                     time.sleep(1.0)
-                print(f"CrispEmbed (:8084): {'STARTED' if engine.is_crisp_online() else 'FAILED'}")
+                ok = engine.is_crisp_online()
+                results["crispembed"] = "started" if ok else "failed"
+                if not args.json:
+                    print(f"CrispEmbed (:8084): {'STARTED' if ok else 'FAILED'}")
+            if args.json:
+                print(json.dumps({"action": args.action, "target": target, "results": results}, indent=2))
 
         elif args.action == "stop":
             ports = []
@@ -245,7 +265,10 @@ def main():
                 ports.append(args.crisp_port)
             for p in ports:
                 subprocess.run(["fuser", "-k", f"{p}/tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(f"Stopped server daemons on ports: {ports}")
+            if args.json:
+                print(json.dumps({"action": "stop", "target": target, "ports": ports, "status": "stopped"}, indent=2))
+            else:
+                print(f"Stopped server daemons on ports: {ports}")
 
 
 if __name__ == "__main__":

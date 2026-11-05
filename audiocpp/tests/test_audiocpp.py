@@ -123,6 +123,17 @@ class TestAudiocppDeterministic(unittest.TestCase):
             Path(remote_wav).unlink()
         print(f"  ✓ remote tailscale https roundtrip (TTS + ASR: '{asr_data['text']}') · verified")
 
+    def test_08_voices_json(self):
+        cmd = ["python3", AUDIOCPP_PY, "voices", "--json"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Voices failed: {res.stderr}")
+        data = json.loads(res.stdout)
+        self.assertEqual(data.get("status"), "ok")
+        self.assertIn("kokoro_voices", data)
+        self.assertIn("reference_voices", data)
+        self.assertGreater(len(data["kokoro_voices"]), 0)
+        print(f"  ✓ voices json contract ({len(data['kokoro_voices'])} kokoro + {len(data['reference_voices'])} reference) · verified")
+
 
 if __name__ == "__main__":
     print("\n🧪 Running audiocpp Deterministic Test Suite:")

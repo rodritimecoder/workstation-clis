@@ -141,6 +141,103 @@ MODEL_REGISTRY = {
 }
 
 
+KOKORO_VOICES = [
+    {"id": "af_bella", "name": "Bella", "gender": "female", "accent": "us", "description": "American Female (Default)"},
+    {"id": "af_sarah", "name": "Sarah", "gender": "female", "accent": "us", "description": "American Female"},
+    {"id": "af_nicole", "name": "Nicole", "gender": "female", "accent": "us", "description": "American Female"},
+    {"id": "af_sky", "name": "Sky", "gender": "female", "accent": "us", "description": "American Female"},
+    {"id": "am_adam", "name": "Adam", "gender": "male", "accent": "us", "description": "American Male"},
+    {"id": "am_michael", "name": "Michael", "gender": "male", "accent": "us", "description": "American Male"},
+    {"id": "bf_emma", "name": "Emma", "gender": "female", "accent": "uk", "description": "British Female"},
+    {"id": "bf_isabella", "name": "Isabella", "gender": "female", "accent": "uk", "description": "British Female"},
+    {"id": "bm_george", "name": "George", "gender": "male", "accent": "uk", "description": "British Male"},
+    {"id": "bm_lewis", "name": "Lewis", "gender": "male", "accent": "uk", "description": "British Male"},
+]
+
+
+def list_reference_voices() -> List[Dict[str, Any]]:
+    refs = []
+    if VOICE_DIR.is_dir():
+        for f in sorted(VOICE_DIR.glob("*.wav")):
+            refs.append({
+                "id": f.stem,
+                "filename": f.name,
+                "path": str(f.resolve()),
+                "size_bytes": f.stat().st_size,
+            })
+    return refs
+
+
+def resolve_voice_argument(voice_name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a voice name into (voice_id, voice_ref)."""
+    if not voice_name:
+        return None, None
+    p = Path(voice_name)
+    if p.is_file():
+        return None, str(p.resolve())
+    if VOICE_DIR.is_dir():
+        cand = VOICE_DIR / voice_name
+        if cand.is_file():
+            return None, str(cand.resolve())
+        cand_wav = VOICE_DIR / f"{voice_name}.wav"
+        if cand_wav.is_file():
+            return None, str(cand_wav.resolve())
+    return voice_name, None
+
+
+def play_audio_file(audio_path: Path, quiet: bool = False) -> bool:
+    """Play audio through PipeWire (pw-play) or ALSA (aplay)."""
+    import shutil
+    player = None
+    for p in ["/usr/bin/pw-play", "pw-play", "/usr/bin/aplay", "aplay"]:
+        if shutil.which(p):
+            player = p
+            break
+    if not player:
+        sys.stderr.write("⚠️ [audiocpp] No audio player (pw-play/aplay) found on host.\n")
+        return False
+    try:
+        if not quiet:
+            sys.stderr.write(f"🔊 [audiocpp] Playing {audio_path.name} via {player}...\n")
+        subprocess.run([player, str(audio_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        return True
+    except Exception as e:
+        sys.stderr.write(f"⚠️ [audiocpp] Audio playback failed: {e}\n")
+        return False
+
+
+def cmd_voices(json_mode: bool = False, quiet: bool = False) -> Dict[str, Any]:
+    refs = list_reference_voices()
+    payload = {
+        "status": "ok",
+        "kokoro_voices": KOKORO_VOICES,
+        "reference_voices": refs,
+        "voice_dir": str(VOICE_DIR),
+        "total_voices": len(KOKORO_VOICES) + len(refs),
+    }
+    if json_mode:
+        print(json.dumps(payload, indent=2))
+        return payload
+
+    print("-" * 75)
+    print("🗣️  KOKORO BUILTIN VOICES (for --model kokoro)")
+    print("-" * 75)
+    for v in KOKORO_VOICES:
+        print(f"  {v['id']:<15} {v['description']:<35} [{v['accent'].upper()}]")
+
+    print("\n" + "-" * 75)
+    print(f"🎙️  REFERENCE AUDIO PROFILES in {VOICE_DIR} (for cloning / reference)")
+    print("-" * 75)
+    if refs:
+        for r in refs:
+            print(f"  {r['id']:<15} {r['filename']:<30} ({r['size_bytes'] / 1024:.1f} KB)")
+    else:
+        print("  (No .wav reference voice files found)")
+    print("-" * 75)
+    return payload
+
+
+
 def parse_metrics_output(stdout: str) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {}
     for line in stdout.splitlines():
@@ -276,6 +373,7 @@ def cmd_speak_http(
     metrics: bool = False,
     json_mode: bool = False,
     quiet: bool = False,
+    play: bool = False,
 ) -> Dict[str, Any]:
     meta = MODEL_REGISTRY.get(model_key, {})
     v_id = voice_id or meta.get("default_voice")
@@ -315,6 +413,7 @@ def cmd_speak_http(
         pass
 
     rtf = round((wall_ms / 1000.0) / dur_s, 4) if dur_s > 0 else 0.0
+    played = play_audio_file(out_p, quiet=quiet) if play else False
 
     if json_mode:
         res = {
@@ -326,6 +425,7 @@ def cmd_speak_http(
             "duration_s": dur_s,
             "wall_ms": wall_ms,
             "rtf": rtf,
+            "played": played,
             "remote": True,
             "host": f"{scheme}://{host}:{port}"
         }
@@ -337,14 +437,15 @@ def cmd_speak_http(
         sys.stderr.write(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)\n")
 
     if not quiet:
-        print(f"[audiocpp] Generated {dur_s}s audio -> {out_p}")
+        sys.stderr.write(f"[audiocpp] Generated {dur_s}s audio -> {out_p}\n")
 
     return {
         "text": text,
         "audio_out": str(out_p),
         "wall_ms": wall_ms,
         "audio_duration_ms": int(dur_s * 1000),
-        "rtf": rtf
+        "rtf": rtf,
+        "played": played,
     }
 
 
@@ -482,6 +583,7 @@ def cmd_speak(
     metrics: bool = False,
     json_mode: bool = False,
     quiet: bool = False,
+    play: bool = False,
 ) -> Dict[str, Any]:
     meta = MODEL_REGISTRY.get(model_key)
     if not meta or meta["task"] != "tts":
@@ -524,6 +626,7 @@ def cmd_speak(
     dur_s = round(parsed.get("audio_duration_ms", 0) / 1000.0, 3)
     wall_ms = round(parsed.get("wall_ms", 0.0), 1)
     rtf = round(parsed.get("rtf", 0.0), 4)
+    played = play_audio_file(out_p, quiet=quiet) if play else False
 
     if json_mode:
         payload = {
@@ -535,6 +638,7 @@ def cmd_speak(
             "duration_s": dur_s,
             "wall_ms": wall_ms,
             "rtf": rtf,
+            "played": played,
         }
         print(json.dumps(payload, indent=2))
         return payload
@@ -544,8 +648,9 @@ def cmd_speak(
         sys.stderr.write(f"📊 [Metrics] Wall: {wall_ms:.1f}ms | RTF: {rtf:.4f} ({x_rt:.1f}x real-time)\n")
 
     if not quiet and not json_mode:
-        print(f"[audiocpp] Generated {dur_s}s audio -> {out_p}")
+        sys.stderr.write(f"[audiocpp] Generated {dur_s}s audio -> {out_p}\n")
 
+    parsed["played"] = played
     return parsed
 
 
@@ -736,7 +841,7 @@ def main():
     # 1. asr / transcribe
     p_asr = sub.add_parser("asr", aliases=["transcribe", "stt"], parents=[parent_parser], help="Speech-to-Text: audio in -> text or JSON out")
     p_asr.add_argument("audio", help="Path to input audio file (.wav/.mp3)")
-    p_asr.add_argument("--model", "-m", default="crisperwhisper", help="ASR model slug (crisperwhisper [default], nemotron, nemotron-f16)")
+    p_asr.add_argument("--model", "-m", choices=["crisperwhisper", "nemotron", "nemotron-f16"], default="crisperwhisper", help="ASR model slug (default: crisperwhisper)")
     p_asr.add_argument("--language", "-l", default="en", help="Language code (default: en)")
     p_asr.add_argument("--mode", choices=["verbatim", "intended"], default="verbatim", help="Transcription mode (verbatim [default] or intended)")
     p_asr.add_argument("--words-out", help="Save word timestamps to JSON file")
@@ -745,9 +850,10 @@ def main():
     # 2. tts / speak
     p_tts = sub.add_parser("tts", aliases=["speak"], parents=[parent_parser], help="Text-to-Speech: text in -> .wav audio file out")
     p_tts.add_argument("text", help="Text to speak")
-    p_tts.add_argument("--model", "-m", default="supertonic", help="TTS model slug (supertonic [default], kokoro, kitten, fish, audio8, higgs, omnivoice, index)")
-    p_tts.add_argument("--voice-id", "--voice", dest="voice_id", help="Voice ID (for Kokoro e.g. af_bella)")
+    p_tts.add_argument("--model", "-m", choices=["supertonic", "kokoro", "kitten", "fish", "audio8", "higgs", "omnivoice", "index"], default="supertonic", help="TTS model slug (default: supertonic)")
+    p_tts.add_argument("--voice-id", "--voice", dest="voice_id", help="Voice ID (e.g. af_bella, af_sky) or reference profile name (e.g. egirl, supertonic_F1)")
     p_tts.add_argument("--voice-ref", help="Voice reference audio for cloning (for Fish, Audio8, Index)")
+    p_tts.add_argument("--play", action="store_true", help="Play synthesized audio directly through system speakers")
     p_tts.add_argument("--out", "-o", default="output.wav", help="Output audio file path (default: output.wav)")
 
     # 3. align
@@ -760,10 +866,13 @@ def main():
     # 4. models
     sub.add_parser("models", parents=[parent_parser], help="List installed GGUF models")
 
-    # 5. doctor
+    # 5. voices
+    sub.add_parser("voices", parents=[parent_parser], help="List available TTS voices and reference profiles")
+
+    # 6. doctor
     sub.add_parser("doctor", parents=[parent_parser], help="Inspect binary, Vulkan hardware, and models")
 
-    # 6. benchmark
+    # 7. benchmark
     sub.add_parser("benchmark", parents=[parent_parser], help="Run comprehensive Vulkan RTF benchmark")
 
     args = parser.parse_args()
@@ -807,28 +916,34 @@ def main():
                 quiet=args.quiet,
             )
     elif args.command in ("tts", "speak"):
+        v_id, v_ref = resolve_voice_argument(getattr(args, "voice_id", None))
+        final_voice_id = v_id or args.voice_id
+        final_voice_ref = args.voice_ref or v_ref
+
         if is_remote:
             cmd_speak_http(
                 host, port, scheme, ssl_ctx,
                 args.text,
                 model_key=args.model,
-                voice_id=args.voice_id,
-                voice_ref=args.voice_ref,
+                voice_id=final_voice_id,
+                voice_ref=final_voice_ref,
                 out_file=args.out,
                 metrics=args.metrics,
                 json_mode=args.json,
                 quiet=args.quiet,
+                play=args.play,
             )
         else:
             cmd_speak(
                 args.text,
                 model_key=args.model,
-                voice_id=args.voice_id,
-                voice_ref=args.voice_ref,
+                voice_id=final_voice_id,
+                voice_ref=final_voice_ref,
                 out_file=args.out,
                 metrics=args.metrics,
                 json_mode=args.json,
                 quiet=args.quiet,
+                play=args.play,
             )
     elif args.command == "align":
         cmd_align(
@@ -845,6 +960,8 @@ def main():
             cmd_models_http(host, port, scheme, ssl_ctx, json_mode=args.json)
         else:
             cmd_models(json_mode=args.json)
+    elif args.command == "voices":
+        cmd_voices(json_mode=args.json, quiet=args.quiet)
     elif args.command == "doctor":
         if is_remote:
             cmd_doctor_http(host, port, scheme, ssl_ctx, json_mode=args.json)
