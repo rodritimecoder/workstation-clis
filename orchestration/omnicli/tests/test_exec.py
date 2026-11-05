@@ -20,6 +20,12 @@ OMNICLI = str(ROOT / "omnicli.py")
 
 
 class TestBindings(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        con = builder.connect()
+        builder.ensure_built(con, progress=False)
+        con.close()
+
     def test_generated_module_exposes_the_plan_api(self):
         con = builder.connect()
         source = bindings.module_source(con)
