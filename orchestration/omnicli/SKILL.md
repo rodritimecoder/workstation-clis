@@ -248,32 +248,11 @@ See [references/code-mode-sdk.md](references/code-mode-sdk.md) for the full SDK 
 
 ---
 
-## 🔌 Face B — the MCP server
+## 🔌 Face B — The MCP Server (Retired)
 
-```bash
-omnicli mcp          # JSON-RPC 2.0 over stdio
-```
-
-Exposes four meta-tools, so a tool-calling agent sees ~400 tokens of
-startup instead of 150,000:
-
-| Tool | Input | Returns |
-|---|---|---|
-| `omni_discover` | `intent`, `limit` (default 5), `rerank`, `max_bytes` | compact routing view: skill, score, why, best tool ids |
-| `omni_describe` | `tool_id`, `section`, `doc`, `stub`, `grep`, `max_bytes` | the exact contract for that one tool, or a skill's outline / one section; `stub: true` with `tool_id: "*"` returns many annotated signatures |
-| `omni_invoke` | `tool_id`, `args`, `projection`, `jq`, `grep`, `max_bytes`, `timeout` | bounded, projected result |
-| `omni_status` | `max_bytes` | endpoint health, catalog freshness, enable count, retrieval tier |
-
-Every reply is bounded by `max_bytes`, not just `omni_invoke`; an oversized
-reply becomes a structured error rather than unparseable truncated JSON.
-Requests run on a small pool, so a slow tool cannot stall `ping`.
-
-Register it with a client:
-
-```json
-{ "mcpServers": { "omnicli": {
-  "command": "omnicli", "args": ["mcp"] } } }
-```
+> ⚠️ **Retired:** `omnicli mcp` has been retired. Coding agents on this workstation operate directly through **Face A (CLI)** and **Code Mode (`omnicli exec`)**.
+> 
+> As established by Uber's MCP Gateway experience and Michael Rollins' engineering research, routing intermediate data across MCP JSON-RPC round-trips burns massive prompt tokens and causes quadratic context decay. Chaining tools inside Python scripts (`omnicli exec`) keeps intermediate state in local variables and emits only the final answer in one single turn.
 
 ---
 

@@ -8,37 +8,11 @@ This guide specifies how `omnicli` integrates natively with **T3 Code** as a fir
 
 ## ⚡ Integration Faces in T3 Code
 
-T3 Code agents interact with `omnicli` through two primary faces:
+T3 Code is a shell-native Agent Client Protocol (ACP) IDE. Rather than paying the JSON-RPC context tax of traditional MCP servers, `omnicli` integrates with T3 Code through two primary high-performance paths:
 
-### Face A: MCP Server (JSON-RPC 2.0 over stdio)
+### Face A: Direct Terminal / Bash Invocation (`run_command`)
 
-`omnicli mcp` runs a standard MCP server exposing four high-leverage meta-tools:
-
-| Tool | Purpose | Advantage in T3 Code |
-| :--- | :--- | :--- |
-| `omni_discover` | Natural-language intent search over BM25 catalog | Returns compact JSON (~300 bytes) instead of 150k tokens of prompts |
-| `omni_describe` | Retrieve usage contract for exactly ONE tool | Progressive disclosure; loads schema on demand |
-| `omni_invoke` | Run any tool with strict byte caps & JSON projections | Bounded output prevents context window exhaustion |
-| `omni_status` | Health probe for ports (:8080-:8087) and catalog | Instant status check without terminal commands |
-
-#### MCP Registration Configuration
-
-To register `omnicli` as an MCP server in T3 Code:
-
-```json
-{
-  "mcpServers": {
-    "omnicli": {
-      "command": "omnicli",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Face B: Direct Terminal / Bash Invocation
-
-When executing terminal commands in T3 Code (`run_command`), use `omnicli` to guard against context flooding:
+When executing commands in T3 Code, use `omnicli` to guard against context flooding:
 
 ```bash
 # 1. Search for a tool by natural intent
@@ -52,6 +26,14 @@ omnicli invoke zoom-recorder/scripts/zoom_download \
   --omni-max-bytes 8000 \
   --omni-project "status,transcript_path" \
   -- --url "https://zoom.us/rec/..."
+```
+
+### Face B: Code Mode Python SDK (`omnicli exec`)
+
+For multi-step workflows (≥ 2 tool calls), write one Python plan script that executes in a single turn. Intermediate data lives in Python memory rather than polluting the conversation history:
+
+```bash
+omnicli exec plan.py --sandbox write
 ```
 
 ---

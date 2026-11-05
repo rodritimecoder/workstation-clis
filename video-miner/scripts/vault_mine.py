@@ -20,6 +20,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
 def _drive_root() -> Path:
     """The AI volume root: $AI_ROOT, else the nearest ancestor holding models/.
 
@@ -800,6 +805,10 @@ def main() -> int:
     p_kem = sub.add_parser("kem", help="Mine a Kem Glitch reel directly into the vault (automatic metadata, dHash dedup, ledger, FTS)")
     p_kem.add_argument("url", help="Instagram or YouTube URL of the reel")
     p_kem.add_argument("--vault-dir", default=str(DEFAULT_VAULT_DIR), help="Path to vault root")
+    p_kem.add_argument("--ocr", choices=["auto", "never", "always"], default="auto", help="OCR mode: auto (if :8085 live), never, or always")
+    p_kem.add_argument("--model", "-m", default="crisperwhisper", help="ASR model slug (crisperwhisper [default], nemotron)")
+    p_kem.add_argument("--prefer-asr", action="store_true",
+                       help="transcribe locally even when a subtitle track exists")
 
     args = parser.parse_args()
     v_dir = Path(args.vault_dir)
@@ -813,7 +822,17 @@ def main() -> int:
             vault_dir=v_dir,
             run_ocr=args.ocr,
             asr_model=args.model,
-        prefer_asr=args.prefer_asr,
+            prefer_asr=args.prefer_asr,
+        )
+        return 0
+    elif args.cmd == "kem":
+        dest = fast_mine_video(
+            args.url,
+            creator="kem_glitch",
+            vault_dir=v_dir,
+            run_ocr=args.ocr,
+            asr_model=args.model,
+            prefer_asr=args.prefer_asr,
         )
         return 0
     elif args.cmd == "import":

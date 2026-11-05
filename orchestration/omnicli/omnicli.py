@@ -945,10 +945,11 @@ def cmd_eval(verbose: bool = False, as_json: bool = False, rerank: str = "never"
 # --------------------------------------------------------------------------
 
 def cmd_mcp(as_json: bool = False):
-    server = SKILL_DIR / "scripts" / "mcp_server.py"
-    if not server.is_file():
-        sys.exit("❌ Error: scripts/mcp_server.py not found next to omnicli.")
-    sys.exit(subprocess.run([sys.executable, str(server)]).returncode)
+    sys.exit(
+        "⚠️  Notice: `omnicli mcp` has been retired. The workstation operates on "
+        "Code Mode and direct CLI execution (`omnicli search`, `describe`, `invoke`, `exec`). "
+        "This eliminates JSON-RPC overhead and preserves agent context."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1429,7 +1430,7 @@ def main():
     p.add_argument("--timeout", type=float, default=300.0)
     p.add_argument("--json", action="store_true")
 
-    sub.add_parser("mcp", help="Run the MCP stdio server (4 meta-tools)")
+    sub.add_parser("mcp", help="(retired) JSON-RPC MCP server; use Code Mode or CLI instead")
 
     p = sub.add_parser("status", aliases=["health"],
                        help="Health of every local service, the catalog, and the retrieval tier")

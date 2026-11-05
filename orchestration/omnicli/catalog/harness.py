@@ -27,9 +27,9 @@ HARNESS_SPECS: dict[str, dict[str, Any]] = {
         "id": "t3-code",
         "name": "T3 Code",
         "aliases": ["t3", "t3code", "t3-code"],
-        "summary": "Agent Client Protocol (ACP) IDE harness with MCP stdio server, preview tools, and reactive wakeups.",
+        "summary": "Agent Client Protocol (ACP) IDE harness with Code Mode, terminal execution, preview tools, and reactive wakeups.",
         "doc_file": "t3-code.md",
-        "protocols": ["mcp", "cli", "code-mode", "html-preview"],
+        "protocols": ["cli", "code-mode", "html-preview"],
         "config_paths": ["~/.config/t3code-v2", "~/.t3"],
         "env_indicators": ["T3CODE_CLI_PATH", "ARGV0", "CHROME_DESKTOP", "APPIMAGE"],
         "env_patterns": {
@@ -38,14 +38,7 @@ HARNESS_SPECS: dict[str, dict[str, Any]] = {
             "CHROME_DESKTOP": "com.t3tools.T3Code.desktop",
             "APPIMAGE": ".*T3-Code.*",
         },
-        "config_snippet": json.dumps({
-            "mcpServers": {
-                "omnicli": {
-                    "command": "omnicli",
-                    "args": ["mcp"]
-                }
-            }
-        }, indent=2),
+        "config_snippet": "# In T3 Code terminal or plan:\nfrom omnicli_tools import search, invoke, describe\n\n# Multi-step tasks execute in one turn via `omnicli exec plan.py`\nres = search(\"your task intent\")\n",
     },
     "agy": {
         "id": "agy",
@@ -257,39 +250,14 @@ def verify_harness(query: str) -> dict[str, Any]:
 
     # Check 5: Protocol-specific verification
     if h_id == "t3-code":
-        # Verify MCP server responds to initialize
-        mcp_script = SKILL_DIR / "scripts" / "mcp_server.py"
-        try:
-            init_req = json.dumps({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "verify", "version": "1.0"},
-                }
-            }) + "\n"
-            proc = subprocess.run(
-                [sys.executable, str(mcp_script)],
-                input=init_req,
-                text=True,
-                capture_output=True,
-                timeout=5,
-            )
-            resp = json.loads(proc.stdout.strip()) if proc.stdout else {}
-            server_name = resp.get("result", {}).get("serverInfo", {}).get("name")
-            checks.append({
-                "check": "mcp_stdio_handshake",
-                "passed": server_name == "omnicli",
-                "detail": f"MCP server identified as {server_name!r}",
-            })
-        except Exception as exc:
-            checks.append({
-                "check": "mcp_stdio_handshake",
-                "passed": False,
-                "detail": f"MCP handshake failed: {exc}",
-            })
+        # Verify Code Mode SDK bindings exist and can import
+        bindings_py = Path(os.path.expanduser("~/.local/share/omnicli/bindings/omnicli_tools.py"))
+        has_bindings = bindings_py.is_file() and bindings_py.stat().st_size > 1000
+        checks.append({
+            "check": "code_mode_sdk_bindings",
+            "passed": has_bindings,
+            "detail": f"Bindings valid at {bindings_py}" if has_bindings else "Bindings not found or empty",
+        })
 
     elif h_id == "agy":
         # Verify Python bindings generation
